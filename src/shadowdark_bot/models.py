@@ -1,0 +1,135 @@
+from datetime import datetime
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Item(Base):
+    __tablename__ = "items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    gear_slots: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0, server_default="0"
+    )
+    value_cp: Mapped[int | None] = mapped_column(Integer)
+    is_magical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+class Location(Base):
+    __tablename__ = "locations"
+    __table_args__ = (
+        CheckConstraint("kind IN ('inventory', 'treasury')", name="ck_locations_kind"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    max_gear_slots: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0, server_default="0"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+class InventoryEntry(Base):
+    __tablename__ = "inventory_entries"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_inventory_quantity_positive"),
+        UniqueConstraint("location_id", "item_id", name="uq_inventory_location_item"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    location_id: Mapped[int] = mapped_column(ForeignKey("locations.id"), nullable=False)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    added_by: Mapped[str | None] = mapped_column(String)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+    location: Mapped[Location] = relationship()
+    item: Mapped[Item] = relationship()
+
+
+class TreasuryEntry(Base):
+    __tablename__ = "treasury_entries"
+    __table_args__ = (
+        CheckConstraint("status IN ('available', 'borrowed')", name="ck_treasury_status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    location_id: Mapped[int] = mapped_column(ForeignKey("locations.id"), nullable=False)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), nullable=False)
+    tag: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="available")
+    added_by: Mapped[str | None] = mapped_column(String)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+    location: Mapped[Location] = relationship()
+    item: Mapped[Item] = relationship()
+
+
+class Borrow(Base):
+    __tablename__ = "borrows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    treasury_entry_id: Mapped[int] = mapped_column(
+        ForeignKey("treasury_entries.id"), nullable=False
+    )
+    borrower_id: Mapped[str] = mapped_column(String, nullable=False)
+    borrowed_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    returned_at: Mapped[datetime | None] = mapped_column(DateTime)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    target_kind: Mapped[str | None] = mapped_column(String)
+    target_id: Mapped[int | None] = mapped_column(Integer)
+    payload_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+class Coffer(Base):
+    """Singleton row tracking the guild's shared coffer balance in copper pieces."""
+
+    __tablename__ = "coffers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    balance_cp: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
