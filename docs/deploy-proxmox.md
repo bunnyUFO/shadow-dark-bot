@@ -11,100 +11,181 @@ Target: a Debian 12 unprivileged LXC running Docker Compose, with the SQLite dat
 | Disk | 4 GB | OS + image + tiny DB |
 | Network | DHCP or static | static recommended for stable backups/SSH |
 
-## 1. Create the LXC
+---
 
-In the Proxmox web UI:
+## Quick install (recommended)
 
-1. **Create CT** → uncheck *Privileged container* (keep it unprivileged for security).
-2. Template: `debian-12-standard`.
-3. Set hostname (e.g., `shadowdark-bot`), root password (or SSH key).
-4. Disk: 4 GB on your preferred storage.
-5. CPU: 1 core. Memory: 512 MB.
-6. Network: assign your bridge (usually `vmbr0`) and configure DHCP or a static IP.
-7. Confirm and start.
-
-### Enable Docker in an unprivileged LXC
-
-Edit the LXC config on the Proxmox host (e.g., `/etc/pve/lxc/<ctid>.conf`) and add:
-```
-features: nesting=1,keyctl=1
-```
-Restart the container after the edit.
-
-## 2. Install Docker + git inside the LXC
-
-`pct enter <ctid>` from the Proxmox host (or SSH in), then:
-```bash
-apt update && apt upgrade -y
-apt install -y docker.io docker-compose-plugin git sqlite3
-systemctl enable --now docker
-```
-
-## 3. Clone and configure
+One command, run on the **Proxmox host** as `root`. Creates the LXC, installs Docker inside, clones the repo, writes `.env`, and starts the bot.
 
 ```bash
-mkdir -p /opt && cd /opt
-git clone <your-repo-url> shadow-dark-bot
-cd shadow-dark-bot
-cp .env.example .env
-# edit .env to set DISCORD_TOKEN (the only required value)
+bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/main/scripts/install-proxmox.sh)
 ```
 
-## 4. Start
+You'll be prompted for the Discord bot token (silent input — the token doesn't appear in your terminal or in `ps`).
+
+### What it does
+
+1. Picks the next free container ID starting from 200 (override with `CTID=…`).
+2. Downloads the Debian 12 LXC template if not already present.
+3. Creates an unprivileged LXC with `nesting=1,keyctl=1` enabled (required for Docker).
+4. Starts the container and waits for network.
+5. Inside the container: installs `docker.io`, `docker-compose-plugin`, `git`, `sqlite3`.
+6. `git clone`s the bot repo to `/opt/shadow-dark-bot`.
+7. Writes `.env` with your token (via a temp file + `pct push --perms 0600` — never exposed in process listings).
+8. `docker compose up -d --build` to start the bot.
+9. Prints the container ID, IP, root password, and useful follow-up commands.
+
+The LXC is set to start on Proxmox boot (`--onboot 1`), and the bot container is set to `restart: unless-stopped`, so once the script finishes there's nothing to babysit.
+
+### Overrides
+
+Any of the script's defaults can be set via env vars before the `bash <(curl …)`:
 
 ```bash
-docker compose up -d
-docker compose logs -f bot
+CTID=205 \
+MEMORY=1024 \
+IP_CONFIG="192.168.1.50/24,gw=192.168.1.1" \
+ROOTFS_STORAGE=local \
+bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/main/scripts/install-proxmox.sh)
 ```
-You should see `Logged in as …` and `Synced N command(s) to guild <name> (<id>)`. Ctrl+C exits the log stream; the container keeps running.
 
-## 5. Update workflow
+| Var | Default | |
+|---|---|---|
+| `CTID` | next free from 200 | LXC container ID |
+| `HOSTNAME_VAR` | `shadowdark-bot` | LXC hostname |
+| `MEMORY` | `512` | MB |
+| `CORES` | `1` | CPU cores |
+| `DISK_GB` | `4` | rootfs size in GB |
+| `BRIDGE` | `vmbr0` | network bridge |
+| `IP_CONFIG` | `dhcp` | or e.g. `192.168.1.50/24,gw=192.168.1.1` |
+| `TEMPLATE_STORAGE` | `local` | where Proxmox templates live |
+| `ROOTFS_STORAGE` | `local-lvm` | where the LXC disk lives |
+| `REPO_URL` | the public repo URL | useful if you fork |
+| `DISCORD_TOKEN` | prompted | set this to skip the prompt |
+
+## Updating
+
+Pull the latest code and rebuild the container. Migrations apply on startup automatically.
 
 ```bash
-cd /opt/shadow-dark-bot
-git pull
-docker compose up -d --build
+bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/main/scripts/update-bot.sh)
 ```
-Alembic migrations run at container start, so schema changes apply automatically.
 
-## 6. Backups
+If you used a non-default CTID:
 
-The SQLite file lives at `/opt/shadow-dark-bot/data/shadowdark.db` on the LXC. Use SQLite's online backup (safe while the bot is running):
+```bash
+CTID=205 bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/main/scripts/update-bot.sh)
+```
+
+## Backups
+
+The SQLite file lives at `/opt/shadow-dark-bot/data/shadowdark.db` **inside the LXC**. Use SQLite's online backup (safe while the bot is running). Easiest path: schedule a cron on the LXC itself.
+
+`pct enter <ctid>`, then:
 
 ```bash
 mkdir -p /backups
 sqlite3 /opt/shadow-dark-bot/data/shadowdark.db ".backup '/backups/shadowdark-$(date +%F).db'"
 ```
 
-Add to `/etc/cron.d/shadowdark-backup`:
+Add to `/etc/cron.d/shadowdark-backup` (inside the LXC):
+
 ```
 0 4 * * * root sqlite3 /opt/shadow-dark-bot/data/shadowdark.db ".backup '/backups/shadowdark-$(date +\%F).db'" && find /backups -name 'shadowdark-*.db' -mtime +30 -delete
 ```
-This runs nightly at 04:00 and prunes backups older than 30 days. Consider rsyncing `/backups` to another host or Proxmox storage pool.
 
-## 7. Restore
+Runs nightly at 04:00 and prunes backups older than 30 days. To push backups off the LXC, add an `rsync` to a NAS or another host after the backup command.
+
+## Restore
+
+`pct enter <ctid>`, then:
 
 ```bash
+cd /opt/shadow-dark-bot
 docker compose down
 cp /backups/shadowdark-<date>.db /opt/shadow-dark-bot/data/shadowdark.db
 docker compose up -d
 ```
 
-## 8. Logs and troubleshooting
+## Logs and troubleshooting
+
+From the Proxmox host:
+
+```bash
+pct exec <ctid> -- bash -c "cd /opt/shadow-dark-bot && docker compose logs -f bot"
+```
 
 | Symptom | Check |
 |---|---|
-| `docker compose up` exits immediately | `docker compose logs bot` — usually a bad token or DB permission |
-| Bot online but commands missing | Bot was invited without `applications.commands` scope (re-invite with the URL from `docs/setup-discord.md`), or it joined a second guild and is syncing to the wrong one (check the startup log line for the guild name/id) |
-| Permission denied writing DB | Mount issue: `ls -l /opt/shadow-dark-bot/data` — container runs as non-root user; chown the data dir |
-| LXC won't run Docker | Confirm `features: nesting=1,keyctl=1` in the LXC config and restart the container |
+| `docker compose up` exits immediately | `docker compose logs bot` — usually a bad token or DB permission issue |
+| Bot online but commands missing | Bot was invited without `applications.commands` scope (re-invite per `docs/setup-discord.md`), or joined a second guild and is syncing to the wrong one (check the startup log line for the guild name/id) |
+| Permission denied writing DB | `ls -l /opt/shadow-dark-bot/data` — container runs as non-root user; chown the data dir to uid 1000 |
+| LXC won't run Docker | Confirm `features: nesting=1,keyctl=1` in `/etc/pve/lxc/<ctid>.conf`. The install script sets this automatically. |
+| `network didn't come up` during install | Re-run the script — first network init can be slow on some hosts |
 
-## 9. Stopping cleanly
+## Stopping cleanly
+
+From the Proxmox host:
 
 ```bash
-docker compose down
+pct exec <ctid> -- bash -c "cd /opt/shadow-dark-bot && docker compose down"
 ```
-This stops the container without removing data. To wipe everything (don't, unless you mean it):
+
+This stops the bot but keeps the LXC running. To stop the LXC itself:
+
 ```bash
-docker compose down -v   # ⚠️ removes volumes
+pct stop <ctid>
 ```
+
+To wipe everything (don't, unless you mean it):
+
+```bash
+pct stop <ctid>
+pct destroy <ctid>
+```
+
+---
+
+## Manual install (fallback if you'd rather click through the UI)
+
+If you'd prefer not to run the script, the same setup by hand:
+
+### 1. Create the LXC
+
+In the Proxmox web UI:
+
+1. **Create CT** → uncheck *Privileged container*.
+2. Template: `debian-12-standard`.
+3. Hostname (e.g., `shadowdark-bot`), root password.
+4. Disk: 4 GB. CPU: 1 core. Memory: 512 MB. Bridge `vmbr0`, DHCP or static.
+
+Then edit `/etc/pve/lxc/<ctid>.conf` on the Proxmox host and add:
+
+```
+features: nesting=1,keyctl=1
+```
+
+Restart the container.
+
+### 2. Install deps inside the LXC
+
+`pct enter <ctid>`, then:
+
+```bash
+apt update && apt upgrade -y
+apt install -y docker.io docker-compose-plugin git sqlite3
+systemctl enable --now docker
+```
+
+### 3. Clone, configure, start
+
+```bash
+git clone https://github.com/bunnyUFO/shadow-dark-bot.git /opt/shadow-dark-bot
+cd /opt/shadow-dark-bot
+cp .env.example .env
+# edit .env to set DISCORD_TOKEN
+docker compose up -d --build
+docker compose logs -f bot
+```
+
+You should see `Logged in as …` and `Synced N command(s) to guild <name> (<id>)`.
