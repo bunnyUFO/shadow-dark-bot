@@ -29,11 +29,12 @@ You'll be prompted for the Discord bot token (silent input — the token doesn't
 2. Downloads the Debian 12 LXC template if not already present.
 3. Creates an unprivileged LXC with `nesting=1,keyctl=1` enabled (required for Docker).
 4. Starts the container and waits for network.
-5. Inside the container: installs `docker.io`, `docker-compose-plugin`, `git`, `sqlite3`.
+5. Inside the container: installs `git`, `sqlite3`, `curl`, then runs Docker's official install script (`curl -fsSL https://get.docker.com | sh`) to get `docker-ce` + the compose plugin. Same approach as tteck's Proxmox helpers.
 6. `git clone`s the bot repo to `/opt/shadow-dark-bot`.
 7. Writes `.env` with your token (via a temp file + `pct push --perms 0600` — never exposed in process listings).
-8. `docker compose up -d --build` to start the bot.
-9. Prints the container ID, IP, root password, and useful follow-up commands.
+8. Pre-chowns `/opt/shadow-dark-bot/data` to uid 1000 so the bot's bind-mounted data directory is writable. (The container also self-heals this at startup via its entrypoint, so this is belt-and-suspenders.)
+9. `docker compose up -d --build` to build the image and start the bot.
+10. Prints the container ID, IP, root password, and useful follow-up commands.
 
 The LXC is set to start on Proxmox boot (`--onboot 1`), and the bot container is set to `restart: unless-stopped`, so once the script finishes there's nothing to babysit.
 
@@ -117,11 +118,14 @@ pct exec <ctid> -- bash -c "cd /opt/shadow-dark-bot && docker compose logs -f bo
 
 | Symptom | Check |
 |---|---|
-| `docker compose up` exits immediately | `docker compose logs bot` — usually a bad token or DB permission issue |
+| `docker compose up` exits immediately | `docker compose logs bot` — usually a bad token or a code-level error during startup |
 | Bot online but commands missing | Bot was invited without `applications.commands` scope (re-invite per `docs/setup-discord.md`), or joined a second guild and is syncing to the wrong one (check the startup log line for the guild name/id) |
-| Permission denied writing DB | `ls -l /opt/shadow-dark-bot/data` — container runs as non-root user; chown the data dir to uid 1000 |
+| `unable to open database file` | If you somehow bypassed the entrypoint: `pct exec <ctid> -- chown -R 1000:1000 /opt/shadow-dark-bot/data && pct exec <ctid> -- bash -c "cd /opt/shadow-dark-bot && docker compose restart bot"` |
+| `script_location key not found` | The Dockerfile got built non-editable; pull latest (`pip install -e .` in the Dockerfile is required so `Path(__file__).parents[2]` resolves to `/app` for finding `alembic.ini`) |
+| `bad interpreter` on `docker-entrypoint.sh` | `.gitattributes` issue — file got CRLF line endings via Windows. Add `*.sh text eol=lf`, `git add --renormalize .`, recommit |
 | LXC won't run Docker | Confirm `features: nesting=1,keyctl=1` in `/etc/pve/lxc/<ctid>.conf`. The install script sets this automatically. |
 | `network didn't come up` during install | Re-run the script — first network init can be slow on some hosts |
+| GitHub CDN cache | After pushing a script fix, `raw.githubusercontent.com` may serve the old version for ~5 min. Wait or curl with a cache-buster `?v=<random>` |
 
 ## Stopping cleanly
 
@@ -173,9 +177,12 @@ Restart the container.
 
 ```bash
 apt update && apt upgrade -y
-apt install -y docker.io docker-compose-plugin git sqlite3
+apt install -y curl git sqlite3 ca-certificates gnupg
+curl -fsSL https://get.docker.com | sh
 systemctl enable --now docker
 ```
+
+> **Why not `apt install docker-compose-plugin`?** That package isn't in Debian 12's default repos — it lives in Docker's own apt repo. `get.docker.com` adds the repo and installs `docker-ce` + the compose plugin in one shot.
 
 ### 3. Clone, configure, start
 
@@ -189,3 +196,5 @@ docker compose logs -f bot
 ```
 
 You should see `Logged in as …` and `Synced N command(s) to guild <name> (<id>)`.
+
+The container's entrypoint chowns `/app/data` to its `bot` user at startup, so the bind-mounted host directory works regardless of who owns it on the LXC side.

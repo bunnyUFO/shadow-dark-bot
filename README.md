@@ -25,7 +25,12 @@ shadow-dark-bot/
 ├── .gitignore                    ← files git should never track (.env, .venv, data/, …)
 │
 ├── Dockerfile                    ← recipe for building a container image of the bot
+├── docker-entrypoint.sh          ← runs at container start: chowns /app/data, then drops to bot user via gosu
 ├── docker-compose.yml            ← runs the container with volumes + env vars wired up
+│
+├── scripts/                      ← one-shot helpers for Proxmox deploy
+│   ├── install-proxmox.sh        ← host-side LXC installer (curl-pipe-bash from README)
+│   └── update-bot.sh             ← host-side `git pull && docker compose up -d --build` wrapper
 │
 ├── alembic.ini                   ← config for Alembic, the database-migrations tool
 ├── migrations/                   ← every schema change ever, in version-controlled order
@@ -34,7 +39,8 @@ shadow-dark-bot/
 │   └── versions/
 │       ├── 0001_initial.py             ← creates the six tables
 │       ├── 0002_value_in_copper.py     ← value_gp (float) → value_cp (integer copper)
-│       └── 0003_inventory_capacity.py  ← gear_slots NOT NULL; adds max_gear_slots
+│       ├── 0003_inventory_capacity.py  ← gear_slots NOT NULL; adds max_gear_slots
+│       └── 0004_coffers.py             ← adds the singleton coffers table
 │
 ├── data/                         ← runtime data — gitignored
 │   └── shadowdark.db             ← the SQLite database file (auto-created on first run)
@@ -63,7 +69,7 @@ shadow-dark-bot/
         ├── architecture.md       ← high-level: which file does what, why these libraries
         ├── data-model.md         ← the database schema, table by table, with invariants
         ├── permissions.md        ← who can run what (currently: everyone; roles are future work)
-        └── roadmap.md            ← what's planned next (coffers, treasury, etc.)
+        └── roadmap.md            ← what's planned next (audit log, role-based perms, channel routing, etc.)
 ```
 
 ### Where to look when you want to…
@@ -76,8 +82,9 @@ shadow-dark-bot/
 | **Change a setting** | `.env` (your local copy; never commit secrets) |
 | **Update install dependencies** | `pyproject.toml`, then re-run `pip install -e .` |
 | **Read what a command does** | `docs/commands.md` |
-| **Run the bot locally** | See "Quick start" below |
-| **Deploy to Proxmox** | `docs/deploy-proxmox.md` |
+| **Run the bot locally** | See "Quick start (local dev)" below |
+| **Deploy to Proxmox** | See "Deploy on Proxmox" below + `docs/deploy-proxmox.md` for full details |
+| **Update a deployed bot** | `bash <(curl -fsSL …/scripts/update-bot.sh)` on the Proxmox host |
 
 ### Background concepts (if you're newer to Python/Discord)
 
@@ -104,6 +111,24 @@ shadow-dark-bot/
    python -m shadowdark_bot.main
    ```
 4. In Discord, run `/ping` — you should get back `pong`.
+
+## Deploy on Proxmox (one-line install)
+
+On your Proxmox host as `root`:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/main/scripts/install-proxmox.sh)
+```
+
+Creates an unprivileged Debian 12 LXC, installs Docker inside, clones this repo, writes `.env` with the bot token (prompted securely), and starts the bot. Default specs: 1 vCPU / 512 MB RAM / 4 GB disk / DHCP on `vmbr0`; everything overridable via env vars. Container auto-starts on Proxmox boot.
+
+Update later with:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/main/scripts/update-bot.sh)
+```
+
+Full walkthrough (overrides, backups, restore, troubleshooting): [docs/deploy-proxmox.md](docs/deploy-proxmox.md).
 
 ## Docs
 
