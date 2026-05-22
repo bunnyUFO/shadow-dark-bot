@@ -44,7 +44,8 @@ shadow-dark-bot/
 │       ├── 0003_inventory_capacity.py  ← gear_slots NOT NULL; adds max_gear_slots
 │       ├── 0004_coffers.py             ← adds the singleton coffers table
 │       ├── 0005_bundle_size.py         ← adds items.bundle_size (default 1) for stack-per-slot items
-│       └── 0006_item_type.py           ← replaces is_magical bool with item_type enum (8 values: common/weapon/armor/scroll/potion/loot/crafted/magical)
+│       ├── 0006_item_type.py           ← replaces is_magical bool with item_type enum (8 values: common/weapon/armor/scroll/potion/loot/crafted/magical)
+│       └── 0007_widen_item_type.py     ← recreates the check constraint so older deployments learn the new type values
 │
 ├── data/                         ← runtime data — gitignored
 │   └── shadowdark.db             ← the SQLite database file (auto-created on first run)

@@ -128,6 +128,7 @@ Alembic. All migrations apply automatically at bot startup (before connecting to
 | `0004_coffers` | Adds the `coffers` singleton table (balance in integer copper) |
 | `0005_bundle_size` | Adds `items.bundle_size` INTEGER NOT NULL DEFAULT 1 with `CHECK (bundle_size >= 1)`. Inventory capacity math becomes bundle-aware (ceiling per stack). |
 | `0006_item_type` | Replaces `items.is_magical BOOLEAN` with `items.item_type TEXT` ∈ {`common`, `magical`, `crafted`, `scroll`, `potion`, `weapon`, `armor`, `loot`}. Backfill: `is_magical=1 → 'magical'`, else `'common'`. |
+| `0007_widen_item_type` | Drops and recreates the `ck_items_item_type` constraint to ensure it lists all 8 values. Needed for databases where 0006 was deployed with an earlier, narrower value list; no-op-equivalent on fresh installs. |
 
 Future slices (e.g., role-based permissions, audit-log writes) will add new revisions. Each one uses `op.batch_alter_table` so SQLite can recreate tables transparently when needed.
 
