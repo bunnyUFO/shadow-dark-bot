@@ -1,5 +1,3 @@
-from logging.config import fileConfig
-
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
@@ -7,11 +5,14 @@ from alembic import context
 from shadowdark_bot.config import settings
 from shadowdark_bot.models import Base
 
+# Note: we intentionally do NOT call logging.config.fileConfig() here.
+# main.py configures logging via basicConfig, and fileConfig would (a) silence
+# all existing loggers (disable_existing_loggers defaults to True) and
+# (b) lower the root logger to WARN per alembic.ini's defaults. That hides
+# every shadowdark_bot log line emitted after migrations finish. Alembic's
+# own loggers still emit at INFO via propagation to the root handler.
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
-
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 
