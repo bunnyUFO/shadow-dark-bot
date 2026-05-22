@@ -1,4 +1,5 @@
 import logging
+import math
 
 import discord
 from discord import app_commands
@@ -13,6 +14,12 @@ from shadowdark_bot.embeds import (
     fmt_slots,
 )
 from shadowdark_bot.models import InventoryEntry, Item, Location
+
+
+def stack_slots(quantity: int, gear_slots: float, bundle_size: int) -> float:
+    """Slot cost for `quantity` of an item: ceil(quantity / bundle_size) * gear_slots.
+    A partial bundle still consumes a full bundle's worth of slots."""
+    return math.ceil(quantity / max(bundle_size, 1)) * gear_slots
 
 log = logging.getLogger("shadowdark_bot.inventory")
 
@@ -232,25 +239,36 @@ class GuildInventory(commands.Cog):
                 )
                 return
 
-            used = _used_slots(session, loc.id)
-            proposed = quantity * cat_item.gear_slots
-            if used + proposed > loc.max_gear_slots:
-                await interaction.response.send_message(
-                    f"{failure}\n**{clean_location}** has "
-                    f"{fmt_slots(used)}/{fmt_slots(loc.max_gear_slots)} slots used; "
-                    f"adding {quantity}× **{clean_item}** ({fmt_slots(proposed)} slots) "
-                    f"would total {fmt_slots(used + proposed)}. "
-                    "Raise the capacity with `/inventory location-edit` or add less.",
-                    ephemeral=True,
-                )
-                return
-
             stack = session.scalar(
                 select(InventoryEntry).where(
                     InventoryEntry.location_id == loc.id,
                     InventoryEntry.item_id == cat_item.id,
                 )
             )
+            current_qty = stack.quantity if stack else 0
+            new_qty = current_qty + quantity
+            current_stack_slots = stack_slots(
+                current_qty, cat_item.gear_slots, cat_item.bundle_size
+            )
+            new_stack_slots = stack_slots(
+                new_qty, cat_item.gear_slots, cat_item.bundle_size
+            )
+            proposed_delta = new_stack_slots - current_stack_slots
+
+            used = _used_slots(session, loc.id)
+            new_used = used + proposed_delta
+            if new_used > loc.max_gear_slots:
+                await interaction.response.send_message(
+                    f"{failure}\n**{clean_location}** has "
+                    f"{fmt_slots(used)}/{fmt_slots(loc.max_gear_slots)} slots used; "
+                    f"adding {quantity}× **{clean_item}** "
+                    f"({fmt_slots(proposed_delta)} more slots) "
+                    f"would total {fmt_slots(new_used)}. "
+                    "Raise the capacity with `/inventory location-edit` or add less.",
+                    ephemeral=True,
+                )
+                return
+
             if stack is None:
                 stack = InventoryEntry(
                     location_id=loc.id,
@@ -261,12 +279,11 @@ class GuildInventory(commands.Cog):
                 )
                 session.add(stack)
             else:
-                stack.quantity += quantity
+                stack.quantity = new_qty
                 if notes:
                     stack.notes = notes.strip() or None
             session.flush()
 
-            new_used = used + proposed
             await interaction.response.send_message(
                 f"Added {quantity}× **{clean_item}** to **{clean_location}**. "
                 f"Stack: {stack.quantity}. "
@@ -477,14 +494,14 @@ class GuildInventory(commands.Cog):
 
 
 def _used_slots(session: Session, location_id: int) -> float:
-    """SUM(entry.quantity * item.gear_slots) for all stacks at a location."""
-    total = session.scalar(
-        select(func.coalesce(func.sum(InventoryEntry.quantity * Item.gear_slots), 0.0))
-        .select_from(InventoryEntry)
+    """Sum of stack_slots() across all stacks at a location.
+    Computed in Python so bundle ceiling rule applies per-stack."""
+    rows = session.execute(
+        select(InventoryEntry.quantity, Item.gear_slots, Item.bundle_size)
         .join(Item, Item.id == InventoryEntry.item_id)
         .where(InventoryEntry.location_id == location_id)
-    )
-    return float(total or 0.0)
+    ).all()
+    return float(sum(stack_slots(q, g, b) for q, g, b in rows))
 
 
 async def setup(bot: commands.Bot) -> None:

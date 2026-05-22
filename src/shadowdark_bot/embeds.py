@@ -14,7 +14,12 @@ def build_item_embed(item: Item) -> discord.Embed:
     if item.description:
         lines.append(item.description)
         lines.append("")
-    lines.append(f"**Gear slots:** {fmt_slots(item.gear_slots)}")
+    if item.bundle_size > 1:
+        lines.append(
+            f"**Gear slots:** {fmt_slots(item.gear_slots)} per {item.bundle_size}"
+        )
+    else:
+        lines.append(f"**Gear slots:** {fmt_slots(item.gear_slots)}")
     lines.append(f"**Type:** {'Magical' if item.is_magical else 'Common'}")
     value = format_cp(item.value_cp)
     if value is not None:

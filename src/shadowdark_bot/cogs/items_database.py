@@ -29,6 +29,7 @@ class ItemsDatabase(commands.Cog):
         magical="Magical items live in the treasury (borrow-only). Non-magical go in inventory.",
         description="Optional description",
         gear_slots="Number of gear slots (Shadow Dark)",
+        bundle_size="How many fit in one gear slot (e.g., 20 for arrows). Defaults to 1.",
         gp="Value in gold pieces (1 gp = 10 sp = 100 cp)",
         sp="Value in silver pieces",
         cp="Value in copper pieces",
@@ -40,6 +41,7 @@ class ItemsDatabase(commands.Cog):
         magical: bool,
         description: str | None = None,
         gear_slots: float | None = None,
+        bundle_size: int | None = None,
         gp: int | None = None,
         sp: int | None = None,
         cp: int | None = None,
@@ -47,6 +49,11 @@ class ItemsDatabase(commands.Cog):
         clean_name = name.strip()
         if not clean_name:
             await interaction.response.send_message("Name cannot be empty.", ephemeral=True)
+            return
+        if bundle_size is not None and bundle_size < 1:
+            await interaction.response.send_message(
+                "Bundle size must be ≥ 1.", ephemeral=True
+            )
             return
 
         value_cp = parse_to_cp(gp, sp, cp)
@@ -63,6 +70,7 @@ class ItemsDatabase(commands.Cog):
                 name=clean_name,
                 description=(description.strip() if description else None) or None,
                 gear_slots=gear_slots if gear_slots is not None else 0.0,
+                bundle_size=bundle_size if bundle_size is not None else 1,
                 value_cp=value_cp,
                 is_magical=magical,
                 created_by=str(interaction.user.id),
@@ -92,6 +100,7 @@ class ItemsDatabase(commands.Cog):
         name="Item name to edit",
         description="Replace description",
         gear_slots="Replace gear slots",
+        bundle_size="Replace bundle size (how many fit in one gear slot)",
         gp="Set value's gold pieces (any of gp/sp/cp replaces the whole value)",
         sp="Set value's silver pieces",
         cp="Set value's copper pieces",
@@ -103,6 +112,7 @@ class ItemsDatabase(commands.Cog):
         name: str,
         description: str | None = None,
         gear_slots: float | None = None,
+        bundle_size: int | None = None,
         gp: int | None = None,
         sp: int | None = None,
         cp: int | None = None,
@@ -146,12 +156,21 @@ class ItemsDatabase(commands.Cog):
                         )
                         return
 
+            if bundle_size is not None and bundle_size < 1:
+                await interaction.response.send_message(
+                    "Bundle size must be ≥ 1.", ephemeral=True
+                )
+                return
+
             changed = False
             if description is not None:
                 item.description = description.strip() or None
                 changed = True
             if gear_slots is not None:
                 item.gear_slots = gear_slots
+                changed = True
+            if bundle_size is not None:
+                item.bundle_size = bundle_size
                 changed = True
             new_value_cp = parse_to_cp(gp, sp, cp)
             if new_value_cp is not None:

@@ -21,12 +21,18 @@ class Base(DeclarativeBase):
 
 class Item(Base):
     __tablename__ = "items"
+    __table_args__ = (
+        CheckConstraint("bundle_size >= 1", name="ck_items_bundle_size_positive"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text)
     gear_slots: Mapped[float] = mapped_column(
         Float, nullable=False, default=0, server_default="0"
+    )
+    bundle_size: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
     )
     value_cp: Mapped[int | None] = mapped_column(Integer)
     is_magical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
