@@ -13,7 +13,7 @@ from shadowdark_bot.embeds import (
     build_location_summary_embed,
     fmt_slots,
 )
-from shadowdark_bot.models import InventoryEntry, Item, Location
+from shadowdark_bot.models import ITEM_TYPE_MAGICAL, InventoryEntry, Item, Location
 
 
 def stack_slots(quantity: int, gear_slots: float, bundle_size: int) -> float:
@@ -231,7 +231,7 @@ class GuildInventory(commands.Cog):
                     ephemeral=True,
                 )
                 return
-            if cat_item.is_magical:
+            if cat_item.item_type == ITEM_TYPE_MAGICAL:
                 await interaction.response.send_message(
                     f"{failure}\n**{clean_item}** is magical — magical items go in the "
                     "treasury, not inventory.",
@@ -457,7 +457,10 @@ class GuildInventory(commands.Cog):
         with session_scope() as session:
             stmt = (
                 select(Item.name)
-                .where(Item.is_magical.is_(False), Item.name.ilike(f"%{current}%"))
+                .where(
+                    Item.item_type != ITEM_TYPE_MAGICAL,
+                    Item.name.ilike(f"%{current}%"),
+                )
                 .order_by(Item.name)
                 .limit(25)
             )

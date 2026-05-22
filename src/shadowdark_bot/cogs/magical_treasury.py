@@ -14,7 +14,7 @@ from shadowdark_bot.embeds import (
     build_who_has_embed,
     format_duration,
 )
-from shadowdark_bot.models import Borrow, Item, Location, TreasuryEntry
+from shadowdark_bot.models import ITEM_TYPE_MAGICAL, Borrow, Item, Location, TreasuryEntry
 
 log = logging.getLogger("shadowdark_bot.treasury")
 
@@ -58,7 +58,7 @@ class MagicalTreasury(commands.Cog):
                     ephemeral=True,
                 )
                 return
-            if not cat_item.is_magical:
+            if cat_item.item_type != ITEM_TYPE_MAGICAL:
                 await interaction.response.send_message(
                     f"{failure}\n**{clean_item}** is not magical — non-magical items go in inventory.",
                     ephemeral=True,
@@ -370,7 +370,10 @@ class MagicalTreasury(commands.Cog):
         with session_scope() as session:
             stmt = (
                 select(Item.name)
-                .where(Item.is_magical.is_(True), Item.name.ilike(f"%{current}%"))
+                .where(
+                    Item.item_type == ITEM_TYPE_MAGICAL,
+                    Item.name.ilike(f"%{current}%"),
+                )
                 .order_by(Item.name)
                 .limit(25)
             )

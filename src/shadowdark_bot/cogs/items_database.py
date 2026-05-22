@@ -8,11 +8,29 @@ from sqlalchemy import func, select
 from shadowdark_bot.currency import parse_to_cp
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import build_item_embed
-from shadowdark_bot.models import InventoryEntry, Item, TreasuryEntry
+from shadowdark_bot.models import (
+    ITEM_TYPE_COMMON,
+    ITEM_TYPE_CRAFTED,
+    ITEM_TYPE_MAGICAL,
+    ITEM_TYPE_POTION,
+    ITEM_TYPE_SCROLL,
+    ITEM_TYPES,
+    InventoryEntry,
+    Item,
+    TreasuryEntry,
+)
 
 log = logging.getLogger("shadowdark_bot.items")
 
 MAX_ITEMS_PER_GROUP = 25
+
+TYPE_CHOICES = [
+    app_commands.Choice(name="common", value=ITEM_TYPE_COMMON),
+    app_commands.Choice(name="magical", value=ITEM_TYPE_MAGICAL),
+    app_commands.Choice(name="crafted", value=ITEM_TYPE_CRAFTED),
+    app_commands.Choice(name="scroll", value=ITEM_TYPE_SCROLL),
+    app_commands.Choice(name="potion", value=ITEM_TYPE_POTION),
+]
 
 
 class ItemsDatabase(commands.Cog):
@@ -26,7 +44,7 @@ class ItemsDatabase(commands.Cog):
     @items.command(name="add", description="Add a new item to the catalog")
     @app_commands.describe(
         name="Item name (must be unique)",
-        magical="Magical items live in the treasury (borrow-only). Non-magical go in inventory.",
+        type="Item type. Magical items live in the treasury; all others go in inventory.",
         description="Optional description",
         gear_slots="Number of gear slots (Shadow Dark)",
         bundle_size="How many fit in one gear slot (e.g., 20 for arrows). Defaults to 1.",
@@ -34,11 +52,12 @@ class ItemsDatabase(commands.Cog):
         sp="Value in silver pieces",
         cp="Value in copper pieces",
     )
+    @app_commands.choices(type=TYPE_CHOICES)
     async def add(
         self,
         interaction: discord.Interaction,
         name: str,
-        magical: bool,
+        type: app_commands.Choice[str],
         description: str | None = None,
         gear_slots: float | None = None,
         bundle_size: int | None = None,
@@ -72,7 +91,7 @@ class ItemsDatabase(commands.Cog):
                 gear_slots=gear_slots if gear_slots is not None else 0.0,
                 bundle_size=bundle_size if bundle_size is not None else 1,
                 value_cp=value_cp,
-                is_magical=magical,
+                item_type=type.value,
                 created_by=str(interaction.user.id),
             )
             session.add(item)
@@ -105,8 +124,9 @@ class ItemsDatabase(commands.Cog):
         gp="Set value's gold pieces (any of gp/sp/cp replaces the whole value)",
         sp="Set value's silver pieces",
         cp="Set value's copper pieces",
-        magical="Change magical/common status",
+        type="Change item type",
     )
+    @app_commands.choices(type=TYPE_CHOICES)
     async def edit(
         self,
         interaction: discord.Interaction,
@@ -118,7 +138,7 @@ class ItemsDatabase(commands.Cog):
         gp: int | None = None,
         sp: int | None = None,
         cp: int | None = None,
-        magical: bool | None = None,
+        type: app_commands.Choice[str] | None = None,
     ) -> None:
         clean_name = name.strip()
         with session_scope() as session:
@@ -129,9 +149,13 @@ class ItemsDatabase(commands.Cog):
                 )
                 return
 
-            # If toggling magical status, refuse if there are incompatible references.
-            if magical is not None and magical != item.is_magical:
-                if magical:
+            new_type = type.value if type is not None else None
+            # If switching between magical and non-magical, refuse if there
+            # are incompatible references.
+            if new_type is not None and new_type != item.item_type:
+                going_magical = new_type == ITEM_TYPE_MAGICAL
+                leaving_magical = item.item_type == ITEM_TYPE_MAGICAL
+                if going_magical:
                     blocking = session.scalar(
                         select(func.count())
                         .select_from(InventoryEntry)
@@ -144,7 +168,7 @@ class ItemsDatabase(commands.Cog):
                             ephemeral=True,
                         )
                         return
-                else:
+                elif leaving_magical:
                     blocking = session.scalar(
                         select(func.count())
                         .select_from(TreasuryEntry)
@@ -152,8 +176,8 @@ class ItemsDatabase(commands.Cog):
                     ) or 0
                     if blocking:
                         await interaction.response.send_message(
-                            f"Cannot mark **{clean_name}** as common — it still has "
-                            f"{blocking} treasury instance(s). Remove them first.",
+                            f"Cannot change **{clean_name}** from magical — it still "
+                            f"has {blocking} treasury instance(s). Remove them first.",
                             ephemeral=True,
                         )
                         return
@@ -197,8 +221,8 @@ class ItemsDatabase(commands.Cog):
             if new_value_cp is not None:
                 item.value_cp = new_value_cp
                 changed = True
-            if magical is not None and item.is_magical != magical:
-                item.is_magical = magical
+            if new_type is not None and item.item_type != new_type:
+                item.item_type = new_type
                 changed = True
 
             if not changed:
@@ -254,48 +278,47 @@ class ItemsDatabase(commands.Cog):
             )
 
     @items.command(name="list", description="List items in the catalog")
-    @app_commands.describe(
-        magical="Filter: true=magical only, false=common only, omit=both",
-    )
+    @app_commands.describe(type="Filter to one type (omit to show all)")
+    @app_commands.choices(type=TYPE_CHOICES)
     async def list_items(
         self,
         interaction: discord.Interaction,
-        magical: bool | None = None,
+        type: app_commands.Choice[str] | None = None,
     ) -> None:
+        type_val = type.value if type else None
         with session_scope() as session:
             stmt = select(Item).order_by(Item.name)
-            if magical is not None:
-                stmt = stmt.where(Item.is_magical.is_(magical))
+            if type_val is not None:
+                stmt = stmt.where(Item.item_type == type_val)
             all_items = list(session.scalars(stmt).all())
 
             if not all_items:
                 msg = (
                     "No items found with that filter."
-                    if magical is not None
+                    if type_val is not None
                     else "The catalog is empty. Add one with `/items add`."
                 )
                 await interaction.response.send_message(msg, ephemeral=True)
                 return
 
-            common = [it for it in all_items if not it.is_magical]
-            magical_items = [it for it in all_items if it.is_magical]
-
             embed = discord.Embed(
                 title=f"Item Catalog ({len(all_items)})",
                 color=discord.Color.dark_gray(),
             )
-            if common:
-                embed.add_field(
-                    name=f"Common ({len(common)})",
-                    value=_format_list_block(common),
-                    inline=False,
-                )
-            if magical_items:
-                embed.add_field(
-                    name=f"Magical ({len(magical_items)})",
-                    value=_format_list_block(magical_items),
-                    inline=False,
-                )
+            for type_key, label in (
+                (ITEM_TYPE_COMMON, "Common"),
+                (ITEM_TYPE_MAGICAL, "Magical"),
+                (ITEM_TYPE_CRAFTED, "Crafted"),
+                (ITEM_TYPE_SCROLL, "Scrolls"),
+                (ITEM_TYPE_POTION, "Potions"),
+            ):
+                group = [it for it in all_items if it.item_type == type_key]
+                if group:
+                    embed.add_field(
+                        name=f"{label} ({len(group)})",
+                        value=_format_list_block(group),
+                        inline=False,
+                    )
             await interaction.response.send_message(embed=embed)
 
     async def _item_name_autocomplete(

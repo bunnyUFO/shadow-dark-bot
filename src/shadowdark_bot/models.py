@@ -1,7 +1,6 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -15,6 +14,20 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
+ITEM_TYPE_COMMON = "common"
+ITEM_TYPE_MAGICAL = "magical"
+ITEM_TYPE_CRAFTED = "crafted"
+ITEM_TYPE_SCROLL = "scroll"
+ITEM_TYPE_POTION = "potion"
+ITEM_TYPES: tuple[str, ...] = (
+    ITEM_TYPE_COMMON,
+    ITEM_TYPE_MAGICAL,
+    ITEM_TYPE_CRAFTED,
+    ITEM_TYPE_SCROLL,
+    ITEM_TYPE_POTION,
+)
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -23,6 +36,10 @@ class Item(Base):
     __tablename__ = "items"
     __table_args__ = (
         CheckConstraint("bundle_size >= 1", name="ck_items_bundle_size_positive"),
+        CheckConstraint(
+            "item_type IN ('common', 'magical', 'crafted', 'scroll', 'potion')",
+            name="ck_items_item_type",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -35,7 +52,9 @@ class Item(Base):
         Integer, nullable=False, default=1, server_default="1"
     )
     value_cp: Mapped[int | None] = mapped_column(Integer)
-    is_magical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    item_type: Mapped[str] = mapped_column(
+        String, nullable=False, default=ITEM_TYPE_COMMON, server_default=ITEM_TYPE_COMMON
+    )
     created_by: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()

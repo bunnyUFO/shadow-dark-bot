@@ -3,11 +3,33 @@ from datetime import datetime, timezone
 import discord
 
 from shadowdark_bot.currency import format_cp
-from shadowdark_bot.models import Borrow, InventoryEntry, Item, Location, TreasuryEntry
+from shadowdark_bot.models import (
+    ITEM_TYPE_COMMON,
+    ITEM_TYPE_CRAFTED,
+    ITEM_TYPE_MAGICAL,
+    ITEM_TYPE_POTION,
+    ITEM_TYPE_SCROLL,
+    Borrow,
+    InventoryEntry,
+    Item,
+    Location,
+    TreasuryEntry,
+)
+
+
+_ITEM_TYPE_DISPLAY: dict[str, tuple[str, discord.Color]] = {
+    ITEM_TYPE_COMMON: ("Common", discord.Color.blue()),
+    ITEM_TYPE_MAGICAL: ("Magical", discord.Color.purple()),
+    ITEM_TYPE_CRAFTED: ("Crafted", discord.Color.green()),
+    ITEM_TYPE_SCROLL: ("Scroll", discord.Color.orange()),
+    ITEM_TYPE_POTION: ("Potion", discord.Color.teal()),
+}
 
 
 def build_item_embed(item: Item) -> discord.Embed:
-    color = discord.Color.purple() if item.is_magical else discord.Color.blue()
+    label, color = _ITEM_TYPE_DISPLAY.get(
+        item.item_type, ("Common", discord.Color.blue())
+    )
     embed = discord.Embed(title=item.name, color=color)
 
     lines: list[str] = []
@@ -20,7 +42,7 @@ def build_item_embed(item: Item) -> discord.Embed:
         )
     else:
         lines.append(f"**Gear slots:** {fmt_slots(item.gear_slots)}")
-    lines.append(f"**Type:** {'Magical' if item.is_magical else 'Common'}")
+    lines.append(f"**Type:** {label}")
     value = format_cp(item.value_cp)
     if value is not None:
         lines.append(f"**Value:** {value}")
