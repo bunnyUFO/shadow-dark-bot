@@ -29,7 +29,8 @@ def upgrade() -> None:
         )
         batch_op.create_check_constraint(
             "ck_items_item_type",
-            "item_type IN ('common', 'magical', 'crafted', 'scroll', 'potion')",
+            "item_type IN ('common', 'magical', 'crafted', 'scroll', 'potion', "
+            "'weapon', 'armor', 'loot')",
         )
 
     op.execute("UPDATE items SET item_type = 'magical' WHERE is_magical = 1")

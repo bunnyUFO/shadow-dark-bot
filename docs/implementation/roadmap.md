@@ -11,7 +11,7 @@
 | **M4 — Coffers** | `/coffers show`, `add`, `subtract`, `buy <item>` — singleton balance in integer copper, normalized display |
 | **M5 — Proxmox deploy** | `scripts/install-proxmox.sh` (one-line install), `scripts/update-bot.sh`, self-healing Docker entrypoint, full deploy walkthrough in `deploy-proxmox.md` |
 | **M6 — Multi-guild command sync** | Removed the single-guild lock; commands now sync to every guild the bot is in on connect and on join. Data is still shared across guilds (see Multi-tenant data, below) |
-| **M7 — Item polish** | `bundle_size` for stack-per-slot items (arrows = 20/slot) with bundle-aware capacity math; rename via `/items edit new_name`; `item_type` enum (`common`/`magical`/`crafted`/`scroll`/`potion`) replacing the `is_magical` bool, with type-aware color coding and routing |
+| **M7 — Item polish** | `bundle_size` for stack-per-slot items (arrows = 20/slot) with bundle-aware capacity math; rename via `/items edit new_name`; `item_type` enum with eight values (`common`/`weapon`/`armor`/`scroll`/`potion`/`loot`/`crafted`/`magical`) replacing the `is_magical` bool, with type-aware color coding and routing |
 
 Below are the next slices in rough order of priority. Each should be its own focused change set — don't bundle.
 

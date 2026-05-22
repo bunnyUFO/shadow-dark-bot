@@ -19,12 +19,18 @@ ITEM_TYPE_MAGICAL = "magical"
 ITEM_TYPE_CRAFTED = "crafted"
 ITEM_TYPE_SCROLL = "scroll"
 ITEM_TYPE_POTION = "potion"
+ITEM_TYPE_WEAPON = "weapon"
+ITEM_TYPE_ARMOR = "armor"
+ITEM_TYPE_LOOT = "loot"
 ITEM_TYPES: tuple[str, ...] = (
     ITEM_TYPE_COMMON,
     ITEM_TYPE_MAGICAL,
     ITEM_TYPE_CRAFTED,
     ITEM_TYPE_SCROLL,
     ITEM_TYPE_POTION,
+    ITEM_TYPE_WEAPON,
+    ITEM_TYPE_ARMOR,
+    ITEM_TYPE_LOOT,
 )
 
 
@@ -37,7 +43,8 @@ class Item(Base):
     __table_args__ = (
         CheckConstraint("bundle_size >= 1", name="ck_items_bundle_size_positive"),
         CheckConstraint(
-            "item_type IN ('common', 'magical', 'crafted', 'scroll', 'potion')",
+            "item_type IN ('common', 'magical', 'crafted', 'scroll', 'potion', "
+            "'weapon', 'armor', 'loot')",
             name="ck_items_item_type",
         ),
     )

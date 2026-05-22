@@ -4,11 +4,14 @@ import discord
 
 from shadowdark_bot.currency import format_cp
 from shadowdark_bot.models import (
+    ITEM_TYPE_ARMOR,
     ITEM_TYPE_COMMON,
     ITEM_TYPE_CRAFTED,
+    ITEM_TYPE_LOOT,
     ITEM_TYPE_MAGICAL,
     ITEM_TYPE_POTION,
     ITEM_TYPE_SCROLL,
+    ITEM_TYPE_WEAPON,
     Borrow,
     InventoryEntry,
     Item,
@@ -23,6 +26,9 @@ _ITEM_TYPE_DISPLAY: dict[str, tuple[str, discord.Color]] = {
     ITEM_TYPE_CRAFTED: ("Crafted", discord.Color.green()),
     ITEM_TYPE_SCROLL: ("Scroll", discord.Color.orange()),
     ITEM_TYPE_POTION: ("Potion", discord.Color.teal()),
+    ITEM_TYPE_WEAPON: ("Weapon", discord.Color.red()),
+    ITEM_TYPE_ARMOR: ("Armor", discord.Color.light_grey()),
+    ITEM_TYPE_LOOT: ("Loot", discord.Color.yellow()),
 }
 
 
@@ -103,7 +109,7 @@ def build_location_detail_embed(
 
 # ---------- Treasury ----------
 
-TREASURY_COLOR = discord.Color.gold()
+TREASURY_COLOR = discord.Color.purple()
 
 
 def build_treasury_list_embed(

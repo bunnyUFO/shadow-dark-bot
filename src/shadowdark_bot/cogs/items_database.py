@@ -9,11 +9,14 @@ from shadowdark_bot.currency import parse_to_cp
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import build_item_embed
 from shadowdark_bot.models import (
+    ITEM_TYPE_ARMOR,
     ITEM_TYPE_COMMON,
     ITEM_TYPE_CRAFTED,
+    ITEM_TYPE_LOOT,
     ITEM_TYPE_MAGICAL,
     ITEM_TYPE_POTION,
     ITEM_TYPE_SCROLL,
+    ITEM_TYPE_WEAPON,
     ITEM_TYPES,
     InventoryEntry,
     Item,
@@ -26,10 +29,13 @@ MAX_ITEMS_PER_GROUP = 25
 
 TYPE_CHOICES = [
     app_commands.Choice(name="common", value=ITEM_TYPE_COMMON),
-    app_commands.Choice(name="magical", value=ITEM_TYPE_MAGICAL),
-    app_commands.Choice(name="crafted", value=ITEM_TYPE_CRAFTED),
+    app_commands.Choice(name="weapon", value=ITEM_TYPE_WEAPON),
+    app_commands.Choice(name="armor", value=ITEM_TYPE_ARMOR),
     app_commands.Choice(name="scroll", value=ITEM_TYPE_SCROLL),
     app_commands.Choice(name="potion", value=ITEM_TYPE_POTION),
+    app_commands.Choice(name="loot", value=ITEM_TYPE_LOOT),
+    app_commands.Choice(name="crafted", value=ITEM_TYPE_CRAFTED),
+    app_commands.Choice(name="magical", value=ITEM_TYPE_MAGICAL),
 ]
 
 
@@ -307,10 +313,13 @@ class ItemsDatabase(commands.Cog):
             )
             for type_key, label in (
                 (ITEM_TYPE_COMMON, "Common"),
-                (ITEM_TYPE_MAGICAL, "Magical"),
-                (ITEM_TYPE_CRAFTED, "Crafted"),
+                (ITEM_TYPE_WEAPON, "Weapons"),
+                (ITEM_TYPE_ARMOR, "Armor"),
                 (ITEM_TYPE_SCROLL, "Scrolls"),
                 (ITEM_TYPE_POTION, "Potions"),
+                (ITEM_TYPE_LOOT, "Loot"),
+                (ITEM_TYPE_CRAFTED, "Crafted"),
+                (ITEM_TYPE_MAGICAL, "Magical"),
             ):
                 group = [it for it in all_items if it.item_type == type_key]
                 if group:

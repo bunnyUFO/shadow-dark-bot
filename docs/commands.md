@@ -10,17 +10,17 @@ For now, **all commands are open to all guild members**. There's no role-gating 
 
 The catalog is the single source of truth for what an item *is*. Inventory and treasury entries reference catalog rows. Item value is entered in gold/silver/copper pieces and stored internally as copper (1 gp = 10 sp = 100 cp).
 
-Every item has a **type**: one of `common`, `magical`, `crafted`, `scroll`, or `potion`. Only `magical` items live in the treasury; the other four all stack in inventory locations. Crafted/scroll/potion are informational categories — useful for filtering and grouping, but behave like common.
+Every item has a **type**: one of `common`, `weapon`, `armor`, `scroll`, `potion`, `loot`, `crafted`, or `magical`. Only `magical` items live in the treasury; all seven other types stack in inventory locations. The non-magical types are informational categories — useful for filtering and grouping in `/items list`, but behave identically in inventory.
 
 Items also have a **bundle size**: how many fit in one gear slot. Defaults to 1. Arrows might be `gear_slots:1, bundle_size:20`, meaning 1–20 arrows take 1 slot, 21–40 take 2, etc. (ceiling rule per the SD rulebook).
 
 | Command | What it does | Example |
 |---|---|---|
-| `/items add name type description? gear_slots? bundle_size? gp? sp? cp?` | Create a new catalog entry. `type` picker selects one of the five item types. Errors on duplicate name. | `/items add name:"Arrows" type:common gear_slots:1 bundle_size:20 sp:1` |
+| `/items add name type description? gear_slots? bundle_size? gp? sp? cp?` | Create a new catalog entry. `type` picker selects one of the eight item types. Errors on duplicate name. | `/items add name:"Arrows" type:common gear_slots:1 bundle_size:20 sp:1` |
 | `/items info name` | Embed with description, gear slots (with bundle if > 1), type, and value. Color-coded by type. | `/items info name:"Wand of Sparks"` |
 | `/items edit name [new_name?] [fields…]` | Update any field, including renaming via `new_name`. Providing any of `gp`/`sp`/`cp` replaces the whole value. Switching `type` to/from `magical` is blocked if the item is currently referenced by inventory or treasury entries. | `/items edit name:"Arrows" new_name:"Arrows, cold iron" bundle_size:20` |
 | `/items remove name` | Remove a catalog entry. Blocked if any inventory or treasury entry still references it. | `/items remove name:"Rope, 50ft"` |
-| `/items list type?` | List the catalog, grouped by type (Common / Magical / Crafted / Scrolls / Potions). Use `type:<value>` to filter to one group. | `/items list type:magical` |
+| `/items list type?` | List the catalog, grouped by type (Common / Weapons / Armor / Scrolls / Potions / Loot / Crafted / Magical). Use `type:<value>` to filter to one group. | `/items list type:weapon` |
 
 **Tip:** `name` parameters autocomplete from the catalog as you type. The `type` and `new_name` parameters are both optional on edit — change just the one field you want.
 
@@ -123,7 +123,7 @@ Even though commands are open, the bot enforces invariants that prevent broken s
 - Shrinking a location's capacity below currently-used slots errors.
 - Deleting a catalog entry that's still referenced by any inventory or treasury row errors.
 - Deleting a non-empty location errors.
-- Changing a catalog item's `type` into or out of `magical` is blocked while it's referenced by inventory or treasury entries. Switching between any of the non-magical types (common/crafted/scroll/potion) is always allowed.
+- Changing a catalog item's `type` into or out of `magical` is blocked while it's referenced by inventory or treasury entries. Switching between any of the non-magical types (common/weapon/armor/scroll/potion/loot/crafted) is always allowed.
 - Renaming an item via `/items edit new_name:…` is rejected if another item already has that name.
 
 Failed operations reply ephemerally (visible only to you) — no silent failures, no stack traces.
