@@ -98,6 +98,7 @@ class ItemsDatabase(commands.Cog):
     @items.command(name="edit", description="Update fields on an existing catalog item")
     @app_commands.describe(
         name="Item name to edit",
+        new_name="Rename the item (must be unique)",
         description="Replace description",
         gear_slots="Replace gear slots",
         bundle_size="Replace bundle size (how many fit in one gear slot)",
@@ -110,6 +111,7 @@ class ItemsDatabase(commands.Cog):
         self,
         interaction: discord.Interaction,
         name: str,
+        new_name: str | None = None,
         description: str | None = None,
         gear_slots: float | None = None,
         bundle_size: int | None = None,
@@ -163,6 +165,25 @@ class ItemsDatabase(commands.Cog):
                 return
 
             changed = False
+            if new_name is not None:
+                clean_new_name = new_name.strip()
+                if not clean_new_name:
+                    await interaction.response.send_message(
+                        "New name cannot be empty.", ephemeral=True
+                    )
+                    return
+                if clean_new_name != item.name:
+                    collision = session.scalar(
+                        select(Item).where(Item.name == clean_new_name)
+                    )
+                    if collision is not None:
+                        await interaction.response.send_message(
+                            f"An item named **{clean_new_name}** already exists.",
+                            ephemeral=True,
+                        )
+                        return
+                    item.name = clean_new_name
+                    changed = True
             if description is not None:
                 item.description = description.strip() or None
                 changed = True
