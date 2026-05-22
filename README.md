@@ -4,12 +4,14 @@ A Discord bot for Shadow Dark TTRPG guilds. Tracks the guild's item catalog, sha
 
 ## Status
 
-Feature-complete for the first slice. Three command groups working end-to-end:
+Feature-complete for the first slice. Four command groups working end-to-end:
 
-- **`/items`** — the catalog of every item the guild has discovered (add, info, edit, remove, list). Values in gp/sp/cp, gear slots, magical flag.
-- **`/inventory`** — shared non-magical stashes. Multiple named locations with per-location gear-slot capacity. Add, take, list, location CRUD.
+- **`/items`** — the catalog of every item the guild has discovered (add, info, edit, remove, list). Values in gp/sp/cp, gear slots, **bundle size** (e.g., 20 arrows per slot), and an **item type** picker with five options: `common`, `magical`, `crafted`, `scroll`, `potion`. Color-coded embeds by type. Items can be renamed via `/items edit new_name:…`.
+- **`/inventory`** — shared stashes for everything except magical items (so common / crafted / scroll / potion all go here). Multiple named locations with per-location gear-slot capacity. Capacity math is bundle-aware: adding 5 arrows then 15 more uses 1 slot total, not 2. Add, take, list, location CRUD.
 - **`/treasury`** — magical-item borrow/return tracking. Each physical instance has its own row; same catalog item can be checked out by multiple users at once. Borrow on your own behalf or pick a member; everything's logged in the `borrows` ledger.
 - **`/coffers`** — shared guild funds in gp/sp/cp. Add, subtract, and `buy` a catalog item by name (auto-subtracts its value from the balance). Single shared balance, stored internally as integer copper.
+
+The bot can be installed in multiple Discord servers; commands sync to every server it joins. **Data is currently shared across all servers** — see the roadmap for the multi-tenant slice that gives each server its own catalog/inventory/treasury/coffers.
 
 See the [roadmap](docs/implementation/roadmap.md) for what's planned next.
 
@@ -40,7 +42,9 @@ shadow-dark-bot/
 │       ├── 0001_initial.py             ← creates the six tables
 │       ├── 0002_value_in_copper.py     ← value_gp (float) → value_cp (integer copper)
 │       ├── 0003_inventory_capacity.py  ← gear_slots NOT NULL; adds max_gear_slots
-│       └── 0004_coffers.py             ← adds the singleton coffers table
+│       ├── 0004_coffers.py             ← adds the singleton coffers table
+│       ├── 0005_bundle_size.py         ← adds items.bundle_size (default 1) for stack-per-slot items
+│       └── 0006_item_type.py           ← replaces is_magical bool with item_type enum (common/magical/crafted/scroll/potion)
 │
 ├── data/                         ← runtime data — gitignored
 │   └── shadowdark.db             ← the SQLite database file (auto-created on first run)

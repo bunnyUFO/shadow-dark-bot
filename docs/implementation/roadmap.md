@@ -9,6 +9,9 @@
 | **M2 — Inventory** | `/inventory` group with multiple named locations and per-location gear-slot capacity |
 | **M3 — Treasury** | `/treasury` group with one-row-per-instance borrow tracking and member-picker `borrower` parameter |
 | **M4 — Coffers** | `/coffers show`, `add`, `subtract`, `buy <item>` — singleton balance in integer copper, normalized display |
+| **M5 — Proxmox deploy** | `scripts/install-proxmox.sh` (one-line install), `scripts/update-bot.sh`, self-healing Docker entrypoint, full deploy walkthrough in `deploy-proxmox.md` |
+| **M6 — Multi-guild command sync** | Removed the single-guild lock; commands now sync to every guild the bot is in on connect and on join. Data is still shared across guilds (see Multi-tenant data, below) |
+| **M7 — Item polish** | `bundle_size` for stack-per-slot items (arrows = 20/slot) with bundle-aware capacity math; rename via `/items edit new_name`; `item_type` enum (`common`/`magical`/`crafted`/`scroll`/`potion`) replacing the `is_magical` bool, with type-aware color coding and routing |
 
 Below are the next slices in rough order of priority. Each should be its own focused change set — don't bundle.
 
@@ -24,7 +27,7 @@ Below are the next slices in rough order of priority. Each should be its own foc
 | **Downtime activities** | Tracking crafting, training, etc. — separate cog, separate schema. |
 | **Dice rolling** | A `/roll 1d20+3` command. Trivial to add (`d20` library or hand-rolled parser). |
 | **Session log / shared notes** | `/note add`, `/note list` — bot-tracked session notes pinned in a channel. |
-| **Multi-guild** | The current single-guild assumption is enforced in `on_ready` / `on_guild_join`. Lifting it would require adding `guild_id` to every table and scoping queries by `interaction.guild_id`. Larger change; only worth it if the bot ever serves more than your group. |
+| **Multi-tenant data (per-guild isolation)** | Commands already sync to every guild (M6), but the underlying database is single-tenant — all servers see the same catalog/inventory/treasury/coffers. Real isolation needs a `guild_id` column on every domain table, queries scoped by `interaction.guild_id`, and a backfill migration that stamps existing rows with the original guild's ID. Worth doing the moment a second server actually wants its own data. |
 | **Backups to off-LXC storage** | Restic or rclone the `/backups` directory to a NAS or Backblaze B2. |
 | **Web view** | Read-only Flask/FastAPI page showing the catalog and inventory. Lowest priority — Discord is the UX. |
 

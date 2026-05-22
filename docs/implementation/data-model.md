@@ -25,11 +25,12 @@ items ──────────┬─< inventory_entries >── locations
 | Column | Type | Notes |
 |---|---|---|
 | `id` | INTEGER PK | |
-| `name` | TEXT UNIQUE NOT NULL | Used in commands and autocomplete |
+| `name` | TEXT UNIQUE NOT NULL | Used in commands and autocomplete; can be renamed via `/items edit new_name:…` |
 | `description` | TEXT NULL | |
-| `gear_slots` | REAL NOT NULL DEFAULT 0 | Shadow Dark uses fractional slots in some homebrews. Default 0 means weightless. |
+| `gear_slots` | REAL NOT NULL DEFAULT 0 | Slot cost per *bundle*. Shadow Dark uses fractional slots in some homebrews. Default 0 means weightless. |
+| `bundle_size` | INTEGER NOT NULL DEFAULT 1 | `CHECK (bundle_size >= 1)`. How many items fit in one gear-slot allocation. Arrows: 20. Stack slot cost is `ceil(quantity / bundle_size) * gear_slots`. |
 | `value_cp` | INTEGER NULL | Total value in copper pieces (1 gp = 100 cp). NULL = no value tracked. |
-| `is_magical` | BOOLEAN NOT NULL | Determines which inventory it can live in |
+| `item_type` | TEXT NOT NULL DEFAULT `'common'` | `CHECK (item_type IN ('common', 'magical', 'crafted', 'scroll', 'potion'))`. Only `magical` items go in treasury; the other four all live in inventory. |
 | `created_by` | TEXT | Discord user ID of creator |
 | `created_at` | TIMESTAMP | |
 
@@ -60,7 +61,7 @@ items ──────────┬─< inventory_entries >── locations
 |---|---|---|
 | `id` | INTEGER PK | The `entry_id` users pass to `/treasury borrow` |
 | `location_id` | INTEGER FK locations | Must be a `kind='treasury'` location |
-| `item_id` | INTEGER FK items | Item must be `is_magical=true` |
+| `item_id` | INTEGER FK items | Item must have `item_type='magical'` |
 | `tag` | TEXT NULL | Optional, distinguishes duplicates ("chipped", "lefthand") |
 | `status` | TEXT NOT NULL | `'available'` or `'borrowed'` |
 | `added_by` | TEXT | |
@@ -97,14 +98,16 @@ items ──────────┬─< inventory_entries >── locations
 
 ## Invariants (enforced in domain code, not just SQL)
 
-1. **Magical sorting**: `inventory_entries.item_id` must reference an `items.is_magical = false`. `treasury_entries.item_id` must reference `is_magical = true`. Attempting the wrong combination produces an ephemeral error.
+1. **Magical sorting**: `inventory_entries.item_id` must reference an item with `item_type != 'magical'`. `treasury_entries.item_id` must reference `item_type = 'magical'`. Attempting the wrong combination produces an ephemeral error. (`crafted`, `scroll`, and `potion` all route to inventory just like `common`.)
 2. **One open borrow per instance**: a `treasury_entries` row with `status='borrowed'` has exactly one `borrows` row where `returned_at IS NULL`. `/treasury borrow` against a borrowed entry errors. `/treasury return` requires that open row.
 3. **Quantity floor**: `/inventory take` cannot take more than the current stack; doing so errors. Decrementing to zero deletes the row.
 4. **Location kind matches**: an `inventory` command refuses a `treasury` location, and vice versa.
 5. **No orphaned catalog deletes**: `/items remove` is blocked if any `inventory_entries` or `treasury_entries` rows reference the item. Removing all references first is required.
 6. **Empty-location delete**: `/inventory location-delete` and `/treasury` equivalents require an empty location.
-7. **Inventory capacity**: on `/inventory add`, `SUM(entry.quantity × item.gear_slots) + (new_quantity × new_item.gear_slots) ≤ location.max_gear_slots`.
+7. **Inventory capacity (bundle-aware)**: each stack's slot cost is `ceil(entry.quantity / item.bundle_size) * item.gear_slots`. On `/inventory add`, the delta between the existing stack's cost and the post-add stack's cost is checked against remaining capacity — so adding more items to a partially-filled bundle may consume 0 extra slots.
 8. **No shrinking below use**: `/inventory location-edit max_gear_slots:N` is blocked if `N` is less than the current sum of used slots at that location.
+9. **No-collision rename**: `/items edit new_name:…` is blocked if another row already has that name.
+10. **Type change with references**: `/items edit type:…` is blocked when switching *into* magical with inventory stacks present, or *out of* magical with treasury instances present. Switching between any non-magical types is always allowed.
 
 ## Why one row per magical instance (instead of quantity)?
 
@@ -123,6 +126,8 @@ Alembic. All migrations apply automatically at bot startup (before connecting to
 | `0002_value_in_copper` | Switches `items.value_gp REAL` → `items.value_cp INTEGER` (integer copper; avoids float drift) |
 | `0003_inventory_capacity` | `items.gear_slots` becomes NOT NULL default 0; adds `locations.max_gear_slots` NOT NULL default 0 |
 | `0004_coffers` | Adds the `coffers` singleton table (balance in integer copper) |
+| `0005_bundle_size` | Adds `items.bundle_size` INTEGER NOT NULL DEFAULT 1 with `CHECK (bundle_size >= 1)`. Inventory capacity math becomes bundle-aware (ceiling per stack). |
+| `0006_item_type` | Replaces `items.is_magical BOOLEAN` with `items.item_type TEXT` ∈ {`common`, `magical`, `crafted`, `scroll`, `potion`}. Backfill: `is_magical=1 → 'magical'`, else `'common'`. |
 
 Future slices (e.g., role-based permissions, audit-log writes) will add new revisions. Each one uses `op.batch_alter_table` so SQLite can recreate tables transparently when needed.
 

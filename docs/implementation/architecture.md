@@ -38,7 +38,7 @@ Cogs are thin: they parse interaction options, open a session, call a domain fun
 - **Postgres** — overkill. Our entire dataset will fit in single-digit MB. SQLite gives us file-level backups and zero ops.
 - **Async SQLAlchemy** — discord.py is async, but our DB calls are short and rare; sync sessions are simpler and the gateway loop won't notice.
 - **TypeScript** — fine alternative, but Python is easier for one-person maintenance of a small bot.
-- **Global slash commands** — they propagate slowly (~1 hour). Guild-scoped commands (synced to the one guild the bot lives in) deploy instantly when the bot starts.
+- **Global slash commands** — they propagate slowly (~1 hour). Instead the bot syncs guild-scoped commands to every guild it's in on connect (and on `on_guild_join` for new joins), which deploys instantly.
 
 ## Runtime topology
 
@@ -83,7 +83,7 @@ Cogs implement both the slash-command surface and the invariants (capacity check
 
 ## Scope assumptions and what this design does NOT do
 
-- **Single guild only.** The bot finds its server via `self.guilds[0]` after connecting; if invited to a second server it logs a warning and ignores it. No `guild_id` columns anywhere — every row implicitly belongs to "the one server."
+- **Commands sync to every guild; data is shared across them.** `main.py` calls `tree.sync(guild=…)` for every guild on connect and on join, so the bot works in multiple servers. But there are no `guild_id` columns anywhere — every row implicitly belongs to "the database." If the bot is in your server and a friend's, both servers see and edit the same catalog/inventory/treasury/coffers. Real multi-tenancy (per-guild data isolation) is tracked in the roadmap as a future slice.
 - **No role-based permissions for now.** Every guild member can run every command. Invariants in cog code prevent inconsistent state. The `borrows` table records every treasury checkout; `audit_log` schema exists for future use. See `permissions.md` for when to add roles.
 - **Discord identity only.** No external user accounts; Discord user IDs are the only identity.
 - **Single treasury location**, auto-created on first use. The schema supports multiple but the cog doesn't expose them — keeps the UX simple.

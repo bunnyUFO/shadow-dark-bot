@@ -5,7 +5,7 @@
 For now, the bot is **fully open** to all guild members. There is no GM role, no admin role, no permission decorator. Anyone in the Discord server can run any command — add, edit, delete, take, borrow, return.
 
 This is a deliberate simplification for the first slice:
-- One Discord server, presumed to be a trusted friend group.
+- A small, trusted friend group. The bot can now be in multiple Discord servers (commands sync to every guild it joins), but all servers share one underlying database — so the "trust" assumption extends to anyone in any server the bot is in. Per-guild data isolation is on the roadmap.
 - Built-in **invariants** (see `data-model.md`) prevent most accidental breakage — you can't delete a referenced catalog item, double-borrow a magical instance, exceed a location's capacity, or leave inventory in an inconsistent state.
 - The **`borrows` table** records every treasury checkout (who, when, what notes) — that's the highest-value audit trail and is fully wired up.
 
@@ -20,7 +20,7 @@ If griefing or accidents become a problem in practice, see the roadmap for the r
 | Over-take from a stack | Invariant check before decrement |
 | Orphaning a referenced catalog row | Blocked at `/items delete` |
 | Deleting a non-empty location | Blocked at `/inventory location-delete` and `/treasury` equivalents |
-| Guild membership | Slash commands are guild-scoped, so non-members of the server can't see them at all |
+| Guild membership | Slash commands are synced per-guild (to every server the bot is in), so non-members of those servers can't see or invoke them |
 
 ## Audit log
 
