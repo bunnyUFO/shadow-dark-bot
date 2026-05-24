@@ -8,7 +8,9 @@ For now, **all commands are open to all guild members**. There's no role-gating 
 
 Read commands and `/items add` reply **ephemerally** — only the invoker sees the response, so browsing inventory or adding a catalog entry doesn't spam the channel. Each ephemeral response includes a `📢 Share with channel` button; clicking it posts a public copy of the current embed prefixed with "Shared by @you", and the share button disables itself to prevent duplicate shares.
 
-Ephemeral commands: `/items info`, `/items list`, `/items add`, `/inventory list`, `/treasury list`, `/treasury who-has`, `/coffers show`.
+Ephemeral commands: `/items info`, `/items list`, `/items add`, `/inventory list`, `/treasury list`, `/treasury info`, `/treasury who-has`, `/coffers show`.
+
+**Exception**: `/treasury info`'s `Borrow for me`, `Borrow for someone…`, and `Return` buttons update the ephemeral in-place AND broadcast a public message announcing the state change — the same way the slash-command versions of `/treasury borrow` and `/treasury return` post publicly. The borrow/return ledger is still a guild-visible activity, even when it originated from an ephemeral view.
 
 All other write commands (`/inventory add`/`take`, location CRUD, `/treasury add`/`remove`/`borrow`/`return`, `/coffers add`/`subtract`/`buy`, `/items edit`/`remove`) post **publicly** so the channel keeps a natural log of guild state changes. `/treasury borrow` also pings the borrower in the public message when borrowing on someone else's behalf.
 
@@ -95,7 +97,8 @@ For guild-owned magical items. They are **never given away** — they're borrowe
 |---|---|---|
 | `/treasury add item tag?` | Register a magical item instance. The catalog entry must have `type:magical`. Use `tag` to distinguish duplicates ("chipped", etc.). Duplicates allowed. | `/treasury add item:"Wand of Sparks" tag:"chipped"` |
 | `/treasury remove entry_id` | Remove an instance. Must be currently available (not borrowed). Use the autocomplete to pick by name; the integer ID is sent automatically. | `/treasury remove entry_id:#7` |
-| `/treasury list status?` | List all treasury items, grouped by Available / Borrowed. Header shows totals (count + gear slots, informational only). `status:available` or `status:borrowed` filters to one group. | `/treasury list status:available` |
+| `/treasury list status?` | List all treasury items, grouped by Available / Borrowed. Header shows totals (count + gear slots, informational only). `status:available` or `status:borrowed` filters to one group. Replies ephemerally with an "Inspect an entry…" dropdown to drill into one. | `/treasury list status:available` |
+| `/treasury info entry_id` | Show details for a single treasury entry — same embed as the list's drill-down. From the detail view you can `Borrow for me`, pick a member from the `Borrow for someone…` dropdown, or `Return` (when borrowed). The catalog item's description, gear slots, value, and current status all appear in one embed. | `/treasury info entry_id:#7` |
 | `/treasury borrow entry_id borrower? notes?` | Check out an instance. `borrower` defaults to you, or pick another member from the dropdown to borrow on their behalf — they'll get pinged. Errors if already borrowed. | `/treasury borrow entry_id:#7 borrower:@Tessa notes:"for downtime crafting"` |
 | `/treasury return entry_id notes?` | Return an item. Anyone can return on the borrower's behalf. | `/treasury return entry_id:#7` |
 | `/treasury who-has item` | For a magical catalog item, show every instance and its current borrower. | `/treasury who-has item:"Wand of Sparks"` |

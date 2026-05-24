@@ -193,6 +193,46 @@ def build_treasury_instance_embed(
     return embed
 
 
+def build_treasury_info_embed(
+    entry: TreasuryEntry,
+    open_borrow: Borrow | None = None,
+) -> discord.Embed:
+    """Static info embed for one treasury entry — used by /treasury info and
+    by the interactive list's drill-down. Mirrors build_item_embed's fields
+    plus current status."""
+    title = f"#{entry.id}  {entry.item.name}"
+    if entry.tag:
+        title += f" ({entry.tag})"
+    embed = discord.Embed(title=title, color=TREASURY_COLOR)
+
+    lines: list[str] = []
+    if entry.item.description:
+        lines.append(entry.item.description)
+        lines.append("")
+    if entry.item.bundle_size > 1:
+        lines.append(
+            f"**Gear slots:** {fmt_slots(entry.item.gear_slots)} per {entry.item.bundle_size}"
+        )
+    else:
+        lines.append(f"**Gear slots:** {fmt_slots(entry.item.gear_slots)}")
+    value = format_cp(entry.item.value_cp)
+    if value is not None:
+        lines.append(f"**Value:** {value}")
+
+    if open_borrow is not None:
+        timesince = format_timesince(open_borrow.borrowed_at)
+        lines.append(
+            f"**Status:** Borrowed by <@{open_borrow.borrower_id}>, {timesince}"
+        )
+        if open_borrow.notes:
+            lines.append(f"_Notes: {open_borrow.notes}_")
+    else:
+        lines.append("**Status:** Available")
+
+    embed.description = "\n".join(lines)
+    return embed
+
+
 def build_who_has_embed(
     item: Item,
     pairs: list[tuple[TreasuryEntry, Borrow | None]],

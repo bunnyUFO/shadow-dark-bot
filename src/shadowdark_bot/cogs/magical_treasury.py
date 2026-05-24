@@ -9,18 +9,20 @@ from sqlalchemy.orm import Session, joinedload
 
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import (
+    build_treasury_info_embed,
     build_treasury_instance_embed,
     build_treasury_list_embed,
     build_who_has_embed,
     format_duration,
 )
 from shadowdark_bot.models import ITEM_TYPE_MAGICAL, Borrow, Item, Location, TreasuryEntry
-from shadowdark_bot.sharing import ShareableView
+from shadowdark_bot.sharing import ShareButton, ShareableView
 
 log = logging.getLogger("shadowdark_bot.treasury")
 
 STATUS_AVAILABLE = "available"
 STATUS_BORROWED = "borrowed"
+VIEW_TIMEOUT_SECONDS = 300
 
 
 class MagicalTreasury(commands.Cog):
@@ -144,52 +146,19 @@ class MagicalTreasury(commands.Cog):
         status: app_commands.Choice[str] | None = None,
     ) -> None:
         status_val = status.value if status else None
-
-        with session_scope() as session:
-            available: list[TreasuryEntry] = []
-            borrowed: list[tuple[TreasuryEntry, Borrow | None]] = []
-
-            if status_val != STATUS_BORROWED:
-                available = list(
-                    session.scalars(
-                        select(TreasuryEntry)
-                        .options(joinedload(TreasuryEntry.item))
-                        .where(TreasuryEntry.status == STATUS_AVAILABLE)
-                        .order_by(TreasuryEntry.id)
-                    ).all()
-                )
-
-            if status_val != STATUS_AVAILABLE:
-                borrowed_entries = list(
-                    session.scalars(
-                        select(TreasuryEntry)
-                        .options(joinedload(TreasuryEntry.item))
-                        .where(TreasuryEntry.status == STATUS_BORROWED)
-                        .order_by(TreasuryEntry.id)
-                    ).all()
-                )
-                for entry in borrowed_entries:
-                    open_borrow = session.scalar(
-                        select(Borrow).where(
-                            Borrow.treasury_entry_id == entry.id,
-                            Borrow.returned_at.is_(None),
-                        )
-                    )
-                    borrowed.append((entry, open_borrow))
-
-            if not available and not borrowed:
-                msg = (
-                    f"No {status_val} treasury items."
-                    if status_val
-                    else "The treasury is empty. Add one with `/treasury add`."
-                )
-                await interaction.response.send_message(msg, ephemeral=True)
-                return
-
-            embed = build_treasury_list_embed(available, borrowed, status_val)
-            await interaction.response.send_message(
-                embed=embed, view=ShareableView(), ephemeral=True
+        payload = _build_treasury_list_payload(status_val)
+        if payload is None:
+            msg = (
+                f"No {status_val} treasury items."
+                if status_val
+                else "The treasury is empty. Add one with `/treasury add`."
             )
+            await interaction.response.send_message(msg, ephemeral=True)
+            return
+        embed, view = payload
+        await interaction.response.send_message(
+            embed=embed, view=view, ephemeral=True
+        )
 
     @treasury.command(
         name="who-has",
@@ -234,6 +203,24 @@ class MagicalTreasury(commands.Cog):
             await interaction.response.send_message(
                 embed=embed, view=ShareableView(), ephemeral=True
             )
+
+    @treasury.command(name="info", description="Show details for a treasury entry")
+    @app_commands.describe(entry_id="The treasury entry to inspect")
+    async def info(
+        self,
+        interaction: discord.Interaction,
+        entry_id: int,
+    ) -> None:
+        payload = _build_entry_detail_payload(entry_id, from_list=False)
+        if payload is None:
+            await interaction.response.send_message(
+                f"No treasury entry with id {entry_id}.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.send_message(
+            embed=embed, view=view, ephemeral=True
+        )
 
     # ---------- borrow / return ----------
 
@@ -389,19 +376,19 @@ class MagicalTreasury(commands.Cog):
         self,
         interaction: discord.Interaction,
         current: str,
-        status_filter: str,
+        status_filter: str | None,
         show_borrower: bool = False,
         invoker_first: bool = False,
     ) -> list[app_commands.Choice[int]]:
         with session_scope() as session:
-            entries = list(
-                session.scalars(
-                    select(TreasuryEntry)
-                    .options(joinedload(TreasuryEntry.item))
-                    .where(TreasuryEntry.status == status_filter)
-                    .order_by(TreasuryEntry.id)
-                ).all()
+            stmt = (
+                select(TreasuryEntry)
+                .options(joinedload(TreasuryEntry.item))
+                .order_by(TreasuryEntry.id)
             )
+            if status_filter is not None:
+                stmt = stmt.where(TreasuryEntry.status == status_filter)
+            entries = list(session.scalars(stmt).all())
 
             scored: list[tuple[int, app_commands.Choice[int]]] = []
             for entry in entries:
@@ -466,6 +453,316 @@ class MagicalTreasury(commands.Cog):
         return await self._entry_autocomplete(
             interaction, current, status_filter=STATUS_AVAILABLE
         )
+
+    @info.autocomplete("entry_id")
+    async def _ac_info_entry(self, interaction, current):
+        return await self._entry_autocomplete(
+            interaction, current, status_filter=None, show_borrower=True
+        )
+
+
+def _build_treasury_list_payload(
+    status_filter: str | None,
+) -> tuple[discord.Embed, "TreasuryListView"] | None:
+    """Build (embed, view) for the treasury list. Returns None if no entries
+    match the filter."""
+    with session_scope() as session:
+        available: list[TreasuryEntry] = []
+        borrowed: list[tuple[TreasuryEntry, Borrow | None]] = []
+
+        if status_filter != STATUS_BORROWED:
+            available = list(
+                session.scalars(
+                    select(TreasuryEntry)
+                    .options(joinedload(TreasuryEntry.item))
+                    .where(TreasuryEntry.status == STATUS_AVAILABLE)
+                    .order_by(TreasuryEntry.id)
+                ).all()
+            )
+
+        if status_filter != STATUS_AVAILABLE:
+            borrowed_entries = list(
+                session.scalars(
+                    select(TreasuryEntry)
+                    .options(joinedload(TreasuryEntry.item))
+                    .where(TreasuryEntry.status == STATUS_BORROWED)
+                    .order_by(TreasuryEntry.id)
+                ).all()
+            )
+            for entry in borrowed_entries:
+                open_borrow = session.scalar(
+                    select(Borrow).where(
+                        Borrow.treasury_entry_id == entry.id,
+                        Borrow.returned_at.is_(None),
+                    )
+                )
+                borrowed.append((entry, open_borrow))
+
+        if not available and not borrowed:
+            return None
+
+        embed = build_treasury_list_embed(available, borrowed, status_filter)
+
+        options: list[tuple[int, str]] = []
+        for entry in available:
+            label = f"#{entry.id}  {entry.item.name}"
+            if entry.tag:
+                label += f" ({entry.tag})"
+            label += " — Available"
+            options.append((entry.id, label))
+        for entry, _ob in borrowed:
+            label = f"#{entry.id}  {entry.item.name}"
+            if entry.tag:
+                label += f" ({entry.tag})"
+            label += " — Borrowed"
+            options.append((entry.id, label))
+
+    return embed, TreasuryListView(options)
+
+
+def _build_entry_detail_payload(
+    entry_id: int, from_list: bool = True
+) -> tuple[discord.Embed, "TreasuryEntryDetailView"] | None:
+    """Build (embed, view) for a single treasury entry. `from_list` controls
+    whether the view includes the back-to-list button (False when reached
+    via /treasury info directly)."""
+    with session_scope() as session:
+        entry = session.get(TreasuryEntry, entry_id)
+        if entry is None:
+            return None
+        session.refresh(entry, attribute_names=["item"])
+        open_borrow = None
+        if entry.status == STATUS_BORROWED:
+            open_borrow = session.scalar(
+                select(Borrow).where(
+                    Borrow.treasury_entry_id == entry.id,
+                    Borrow.returned_at.is_(None),
+                )
+            )
+        embed = build_treasury_info_embed(entry, open_borrow)
+        status = entry.status
+    return embed, TreasuryEntryDetailView(entry_id, status, from_list)
+
+
+async def _do_borrow(
+    interaction: discord.Interaction,
+    entry_id: int,
+    borrower: discord.Member | discord.User,
+) -> None:
+    """Mark a treasury entry as borrowed, refresh the ephemeral detail view,
+    and broadcast the action publicly."""
+    failure = f"**Failed to borrow #{entry_id}.**"
+    public_embed: discord.Embed | None = None
+    public_content: str | None = None
+    with session_scope() as session:
+        entry = session.get(TreasuryEntry, entry_id)
+        if entry is None:
+            await interaction.response.send_message(
+                f"{failure}\nNo treasury entry with id {entry_id}.", ephemeral=True
+            )
+            return
+        session.refresh(entry, attribute_names=["item"])
+        if entry.status == STATUS_BORROWED:
+            open_borrow = session.scalar(
+                select(Borrow).where(
+                    Borrow.treasury_entry_id == entry.id,
+                    Borrow.returned_at.is_(None),
+                )
+            )
+            current_borrower = (
+                f"<@{open_borrow.borrower_id}>" if open_borrow else "someone"
+            )
+            await interaction.response.send_message(
+                f"{failure}\n#{entry_id} is already borrowed by {current_borrower}.",
+                ephemeral=True,
+            )
+            return
+
+        entry.status = STATUS_BORROWED
+        session.add(
+            Borrow(
+                treasury_entry_id=entry.id,
+                borrower_id=str(borrower.id),
+            )
+        )
+        session.flush()
+        public_embed = build_treasury_instance_embed(
+            entry,
+            actor_mention=interaction.user.mention,
+            action="borrowed",
+            borrower_mention=borrower.mention,
+        )
+        if borrower.id != interaction.user.id:
+            public_content = f"{borrower.mention} now has a magical item."
+
+    detail = _build_entry_detail_payload(entry_id)
+    if detail is not None:
+        new_embed, new_view = detail
+        await interaction.response.edit_message(embed=new_embed, view=new_view)
+    await interaction.followup.send(
+        content=public_content, embed=public_embed, ephemeral=False
+    )
+
+
+async def _do_return(interaction: discord.Interaction, entry_id: int) -> None:
+    """Mark a treasury entry as returned, refresh the ephemeral detail view,
+    and broadcast the action publicly."""
+    failure = f"**Failed to return #{entry_id}.**"
+    public_embed: discord.Embed | None = None
+    with session_scope() as session:
+        entry = session.get(TreasuryEntry, entry_id)
+        if entry is None:
+            await interaction.response.send_message(
+                f"{failure}\nNo treasury entry with id {entry_id}.", ephemeral=True
+            )
+            return
+        if entry.status != STATUS_BORROWED:
+            await interaction.response.send_message(
+                f"{failure}\n#{entry_id} isn't currently borrowed.", ephemeral=True
+            )
+            return
+        open_borrow = session.scalar(
+            select(Borrow).where(
+                Borrow.treasury_entry_id == entry.id,
+                Borrow.returned_at.is_(None),
+            )
+        )
+        if open_borrow is None:
+            await interaction.response.send_message(
+                f"{failure}\n#{entry_id} has no open borrow record.", ephemeral=True
+            )
+            return
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        open_borrow.returned_at = now
+        entry.status = STATUS_AVAILABLE
+        session.refresh(entry, attribute_names=["item"])
+
+        held_for = format_duration(open_borrow.borrowed_at, now)
+        public_embed = build_treasury_instance_embed(
+            entry,
+            actor_mention=interaction.user.mention,
+            action="returned",
+            borrower_mention=f"<@{open_borrow.borrower_id}>",
+            held_for=held_for,
+        )
+
+    detail = _build_entry_detail_payload(entry_id)
+    if detail is not None:
+        new_embed, new_view = detail
+        await interaction.response.edit_message(embed=new_embed, view=new_view)
+    await interaction.followup.send(embed=public_embed, ephemeral=False)
+
+
+class TreasuryEntrySelect(discord.ui.Select):
+    """Dropdown listing treasury entries. Picking one drills into its detail."""
+
+    def __init__(self, entries: list[tuple[int, str]]) -> None:
+        options = [
+            discord.SelectOption(label=label[:100], value=str(entry_id))
+            for entry_id, label in entries[:25]
+        ]
+        super().__init__(
+            placeholder="Inspect an entry…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        entry_id = int(self.values[0])
+        detail = _build_entry_detail_payload(entry_id, from_list=True)
+        if detail is None:
+            await interaction.response.send_message(
+                f"Treasury entry #{entry_id} no longer exists.", ephemeral=True
+            )
+            return
+        embed, view = detail
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class TreasuryListView(discord.ui.View):
+    """Treasury list embed with dropdown + share."""
+
+    def __init__(self, entries: list[tuple[int, str]]) -> None:
+        super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
+        if entries:
+            self.add_item(TreasuryEntrySelect(entries))
+        self.add_item(ShareButton(row=4))
+
+
+class BorrowSelfButton(discord.ui.Button):
+    def __init__(self, entry_id: int) -> None:
+        super().__init__(
+            label="Borrow for me", style=discord.ButtonStyle.success, row=0
+        )
+        self.entry_id = entry_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await _do_borrow(interaction, self.entry_id, interaction.user)
+
+
+class BorrowForUserSelect(discord.ui.UserSelect):
+    def __init__(self, entry_id: int) -> None:
+        super().__init__(
+            placeholder="Borrow for someone…",
+            min_values=1,
+            max_values=1,
+            row=1,
+        )
+        self.entry_id = entry_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        member = self.values[0]
+        await _do_borrow(interaction, self.entry_id, member)
+
+
+class ReturnButton(discord.ui.Button):
+    def __init__(self, entry_id: int) -> None:
+        super().__init__(
+            label="Return", style=discord.ButtonStyle.success, row=0
+        )
+        self.entry_id = entry_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await _do_return(interaction, self.entry_id)
+
+
+class BackToTreasuryListButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(
+            label="← Back to treasury list",
+            style=discord.ButtonStyle.primary,
+            row=2,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        payload = _build_treasury_list_payload(None)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="The treasury is now empty.",
+                embed=None,
+                view=None,
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view, content=None)
+
+
+class TreasuryEntryDetailView(discord.ui.View):
+    """Detail view for one treasury entry: borrow/return controls + back/share."""
+
+    def __init__(self, entry_id: int, status: str, from_list: bool = True) -> None:
+        super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
+        if status == STATUS_AVAILABLE:
+            self.add_item(BorrowSelfButton(entry_id))
+            self.add_item(BorrowForUserSelect(entry_id))
+        else:
+            self.add_item(ReturnButton(entry_id))
+        if from_list:
+            self.add_item(BackToTreasuryListButton())
+        self.add_item(ShareButton(row=4))
 
 
 def _get_or_create_treasury_location(session: Session) -> Location:
