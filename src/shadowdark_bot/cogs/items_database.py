@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from shadowdark_bot.currency import parse_to_cp
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import build_item_embed
+from shadowdark_bot.sharing import ShareableView
 from shadowdark_bot.models import (
     ITEM_TYPE_ARMOR,
     ITEM_TYPE_COMMON,
@@ -104,7 +105,9 @@ class ItemsDatabase(commands.Cog):
             session.flush()
             embed = build_item_embed(item)
             embed.set_footer(text=f"Added by {interaction.user.display_name}")
-            await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(
+                embed=embed, view=ShareableView(), ephemeral=True
+            )
 
     @items.command(name="info", description="Show details for a catalog item")
     @app_commands.describe(name="Item name to look up")
@@ -118,7 +121,9 @@ class ItemsDatabase(commands.Cog):
                 )
                 return
             embed = build_item_embed(item)
-            await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(
+                embed=embed, view=ShareableView(), ephemeral=True
+            )
 
     @items.command(name="edit", description="Update fields on an existing catalog item")
     @app_commands.describe(
@@ -328,7 +333,9 @@ class ItemsDatabase(commands.Cog):
                         value=_format_list_block(group),
                         inline=False,
                     )
-            await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(
+                embed=embed, view=ShareableView(), ephemeral=True
+            )
 
     async def _item_name_autocomplete(
         self,

@@ -15,6 +15,7 @@ from shadowdark_bot.embeds import (
     format_duration,
 )
 from shadowdark_bot.models import ITEM_TYPE_MAGICAL, Borrow, Item, Location, TreasuryEntry
+from shadowdark_bot.sharing import ShareableView
 
 log = logging.getLogger("shadowdark_bot.treasury")
 
@@ -186,7 +187,9 @@ class MagicalTreasury(commands.Cog):
                 return
 
             embed = build_treasury_list_embed(available, borrowed, status_val)
-            await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(
+                embed=embed, view=ShareableView(), ephemeral=True
+            )
 
     @treasury.command(
         name="who-has",
@@ -228,7 +231,9 @@ class MagicalTreasury(commands.Cog):
                     pairs.append((entry, None))
 
             embed = build_who_has_embed(cat_item, pairs)
-            await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(
+                embed=embed, view=ShareableView(), ephemeral=True
+            )
 
     # ---------- borrow / return ----------
 

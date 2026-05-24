@@ -4,6 +4,14 @@ Every command is a Discord **slash command**, available to anyone in the server.
 
 For now, **all commands are open to all guild members**. There's no role-gating — anyone can add, take, borrow, return, or even delete entries. Built-in invariants (see the bottom of this page) prevent the worst classes of mistakes. Role-based permissions and an audit log feed are on the roadmap.
 
+## Visibility (ephemeral by default for reads + catalog adds)
+
+Read commands and `/items add` reply **ephemerally** — only the invoker sees the response, so browsing inventory or adding a catalog entry doesn't spam the channel. Each ephemeral response includes a `📢 Share with channel` button; clicking it posts a public copy of the current embed prefixed with "Shared by @you", and the share button disables itself to prevent duplicate shares.
+
+Ephemeral commands: `/items info`, `/items list`, `/items add`, `/inventory list`, `/treasury list`, `/treasury who-has`, `/coffers show`.
+
+All other write commands (`/inventory add`/`take`, location CRUD, `/treasury add`/`remove`/`borrow`/`return`, `/coffers add`/`subtract`/`buy`, `/items edit`/`remove`) post **publicly** so the channel keeps a natural log of guild state changes. `/treasury borrow` also pings the borrower in the public message when borrowing on someone else's behalf.
+
 ---
 
 ## `/items` — Item Catalog

@@ -15,6 +15,7 @@ from shadowdark_bot.embeds import (
     fmt_slots,
 )
 from shadowdark_bot.models import ITEM_TYPE_MAGICAL, InventoryEntry, Item, Location
+from shadowdark_bot.sharing import ShareButton
 
 
 def stack_slots(quantity: int, gear_slots: float, bundle_size: int) -> float:
@@ -387,7 +388,9 @@ class GuildInventory(commands.Cog):
                 )
                 return
             embed, view = payload
-            await interaction.response.send_message(embed=embed, view=view)
+            await interaction.response.send_message(
+                embed=embed, view=view, ephemeral=True
+            )
             return
 
         clean_location = location.strip()
@@ -398,7 +401,9 @@ class GuildInventory(commands.Cog):
             )
             return
         embed, view = payload
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.response.send_message(
+            embed=embed, view=view, ephemeral=True
+        )
 
     # ---------- Autocompletes ----------
 
@@ -609,11 +614,12 @@ class LocationSelect(discord.ui.Select):
 
 
 class InventoryListView(discord.ui.View):
-    """Summary embed with a single dropdown to drill into a location."""
+    """Summary embed with a dropdown to drill into a location plus a share button."""
 
     def __init__(self, location_names: list[str]) -> None:
         super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
         self.add_item(LocationSelect(location_names))
+        self.add_item(ShareButton(row=4))
 
 
 class LocationItemSelect(discord.ui.Select):
@@ -652,6 +658,7 @@ class LocationDetailView(discord.ui.View):
         super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
         if item_names:
             self.add_item(LocationItemSelect(location_name, item_names))
+        self.add_item(ShareButton(row=4))
 
     @discord.ui.button(
         label="← Back to all locations",
@@ -687,6 +694,7 @@ class ItemDetailView(discord.ui.View):
         )
         back_btn.callback = self._back  # type: ignore[method-assign]
         self.add_item(back_btn)
+        self.add_item(ShareButton(row=4))
 
     async def _back(self, interaction: discord.Interaction) -> None:
         payload = _build_detail_payload(self.location_name)

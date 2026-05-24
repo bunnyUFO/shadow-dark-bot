@@ -10,6 +10,7 @@ from shadowdark_bot.currency import format_cp, parse_to_cp
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import build_coffer_change_embed, build_coffer_show_embed
 from shadowdark_bot.models import Coffer, Item
+from shadowdark_bot.sharing import ShareableView
 
 log = logging.getLogger("shadowdark_bot.coffers")
 
@@ -29,7 +30,9 @@ class GuildCoffers(commands.Cog):
         with session_scope() as session:
             coffer = _get_or_create_coffer(session)
             embed = build_coffer_show_embed(coffer.balance_cp)
-            await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(
+                embed=embed, view=ShareableView(), ephemeral=True
+            )
 
     @coffers.command(name="add", description="Add funds to the coffers")
     @app_commands.describe(
