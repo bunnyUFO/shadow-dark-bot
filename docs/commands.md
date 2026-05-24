@@ -37,7 +37,7 @@ For items donated to the guild that anyone can take freely (rope, rations, torch
 | `/inventory location-delete name` | Remove a location. Must be empty. | `/inventory location-delete name:"Old Camp"` |
 | `/inventory add location item quantity=1 notes?` | Add to a stack at a location. Item must exist in the catalog and be any type **except magical**. Same item at the same location always merges into one stack; the capacity check uses the bundle-aware delta, so adding to a partially-filled bundle may consume 0 extra slots. | `/inventory add location:"Main Stash" item:"Arrows" quantity:15` |
 | `/inventory take location item quantity=1` | Take from a stack. Decrements the quantity; the stack is deleted when it reaches zero. | `/inventory take location:"Main Stash" item:"Rope, 50ft"` |
-| `/inventory list location?` | No `location` arg: list every inventory location with `used/max` slot utilization. With `location`: detailed contents + capacity header. | `/inventory list location:"Main Stash"` |
+| `/inventory list location?` | No `location` arg: lists every inventory location with `used/max` slot utilization. Three-level drill-down via dropdowns and back-buttons in the same message: pick a location → see its contents (with an "Inspect an item…" dropdown) → pick an item → see its catalog info with a footer showing how many are at that location. With `location`: jumps straight to the location's detail view. | `/inventory list location:"Main Stash"` |
 
 **Common flow** — donating loot after a session:
 ```

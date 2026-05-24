@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import (
+    build_item_embed,
     build_location_detail_embed,
     build_location_summary_embed,
     fmt_slots,
@@ -376,62 +377,28 @@ class GuildInventory(commands.Cog):
         interaction: discord.Interaction,
         location: str | None = None,
     ) -> None:
-        with session_scope() as session:
-            if location is None:
-                locations = list(
-                    session.scalars(
-                        select(Location)
-                        .where(Location.kind == "inventory")
-                        .order_by(Location.name)
-                    ).all()
-                )
-                if not locations:
-                    await interaction.response.send_message(
-                        "No inventory locations yet. Create one with "
-                        "`/inventory location-create`.",
-                        ephemeral=True,
-                    )
-                    return
-
-                summaries: list[tuple[Location, float, int]] = []
-                for loc in locations:
-                    used = _used_slots(session, loc.id)
-                    count = (
-                        session.scalar(
-                            select(func.count())
-                            .select_from(InventoryEntry)
-                            .where(InventoryEntry.location_id == loc.id)
-                        )
-                        or 0
-                    )
-                    summaries.append((loc, used, count))
-
-                embed = build_location_summary_embed(summaries)
-                await interaction.response.send_message(embed=embed)
-                return
-
-            clean_location = location.strip()
-            loc = session.scalar(
-                select(Location).where(
-                    Location.name == clean_location, Location.kind == "inventory"
-                )
-            )
-            if loc is None:
+        if location is None:
+            payload = _build_summary_payload()
+            if payload is None:
                 await interaction.response.send_message(
-                    f"No inventory location named **{clean_location}**.", ephemeral=True
+                    "No inventory locations yet. Create one with "
+                    "`/inventory location-create`.",
+                    ephemeral=True,
                 )
                 return
-            stacks = list(
-                session.scalars(
-                    select(InventoryEntry)
-                    .options(joinedload(InventoryEntry.item))
-                    .where(InventoryEntry.location_id == loc.id)
-                    .order_by(InventoryEntry.id)
-                ).all()
+            embed, view = payload
+            await interaction.response.send_message(embed=embed, view=view)
+            return
+
+        clean_location = location.strip()
+        payload = _build_detail_payload(clean_location)
+        if payload is None:
+            await interaction.response.send_message(
+                f"No inventory location named **{clean_location}**.", ephemeral=True
             )
-            used = _used_slots(session, loc.id)
-            embed = build_location_detail_embed(loc, stacks, used)
-            await interaction.response.send_message(embed=embed)
+            return
+        embed, view = payload
+        await interaction.response.send_message(embed=embed, view=view)
 
     # ---------- Autocompletes ----------
 
@@ -488,12 +455,248 @@ class GuildInventory(commands.Cog):
         return await self._location_autocomplete(interaction, current)
 
     @take.autocomplete("item")
-    async def _ac_take_item(self, interaction, current):
-        return await self._nonmagical_item_autocomplete(interaction, current)
+    async def _ac_take_item(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        # Scope to items actually stocked at the chosen location.
+        # If location hasn't been filled yet, return empty — the user must
+        # pick the location first.
+        location_name = getattr(interaction.namespace, "location", None)
+        if not location_name:
+            return []
+        with session_scope() as session:
+            stmt = (
+                select(Item.name)
+                .join(InventoryEntry, InventoryEntry.item_id == Item.id)
+                .join(Location, Location.id == InventoryEntry.location_id)
+                .where(
+                    Location.kind == "inventory",
+                    Location.name == location_name.strip(),
+                    Item.name.ilike(f"%{current}%"),
+                )
+                .order_by(Item.name)
+                .limit(25)
+            )
+            names = list(session.scalars(stmt).all())
+        return [app_commands.Choice(name=n, value=n) for n in names]
 
     @list_inventory.autocomplete("location")
     async def _ac_list_location(self, interaction, current):
         return await self._location_autocomplete(interaction, current)
+
+
+VIEW_TIMEOUT_SECONDS = 300
+
+
+def _build_summary_payload() -> tuple[discord.Embed, "InventoryListView"] | None:
+    """Build the (embed, view) pair for the all-locations summary.
+    Returns None if there are no inventory locations."""
+    with session_scope() as session:
+        locations = list(
+            session.scalars(
+                select(Location)
+                .where(Location.kind == "inventory")
+                .order_by(Location.name)
+            ).all()
+        )
+        if not locations:
+            return None
+
+        summaries: list[tuple[Location, float, int]] = []
+        for loc in locations:
+            used = _used_slots(session, loc.id)
+            count = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(InventoryEntry)
+                    .where(InventoryEntry.location_id == loc.id)
+                )
+                or 0
+            )
+            summaries.append((loc, used, count))
+
+        embed = build_location_summary_embed(summaries)
+        names = [loc.name for loc, _, _ in summaries]
+    return embed, InventoryListView(names)
+
+
+def _build_detail_payload(
+    location_name: str,
+) -> tuple[discord.Embed, "LocationDetailView"] | None:
+    """Build the (embed, view) pair for one location's detail view.
+    Returns None if the location doesn't exist."""
+    with session_scope() as session:
+        loc = session.scalar(
+            select(Location).where(
+                Location.name == location_name,
+                Location.kind == "inventory",
+            )
+        )
+        if loc is None:
+            return None
+        stacks = list(
+            session.scalars(
+                select(InventoryEntry)
+                .options(joinedload(InventoryEntry.item))
+                .where(InventoryEntry.location_id == loc.id)
+                .order_by(InventoryEntry.id)
+            ).all()
+        )
+        used = _used_slots(session, loc.id)
+        embed = build_location_detail_embed(loc, stacks, used)
+        item_names = [stack.item.name for stack in stacks]
+    return embed, LocationDetailView(location_name, item_names)
+
+
+def _build_item_detail_payload(
+    location_name: str, item_name: str
+) -> tuple[discord.Embed, "ItemDetailView"] | None:
+    """Build the (embed, view) pair for an item viewed in the context of a
+    location. The embed footer notes how many of the item are at the location.
+    Returns None if either the location or item is gone."""
+    with session_scope() as session:
+        loc = session.scalar(
+            select(Location).where(
+                Location.name == location_name,
+                Location.kind == "inventory",
+            )
+        )
+        if loc is None:
+            return None
+        item = session.scalar(select(Item).where(Item.name == item_name))
+        if item is None:
+            return None
+        stack = session.scalar(
+            select(InventoryEntry).where(
+                InventoryEntry.location_id == loc.id,
+                InventoryEntry.item_id == item.id,
+            )
+        )
+        embed = build_item_embed(item)
+        if stack is not None:
+            footer = f"{stack.quantity}× at {location_name}"
+            if stack.notes:
+                footer += f" — {stack.notes}"
+            embed.set_footer(text=footer)
+    return embed, ItemDetailView(location_name)
+
+
+class LocationSelect(discord.ui.Select):
+    """Dropdown listing all locations. Picking one swaps the embed to detail."""
+
+    def __init__(self, location_names: list[str]) -> None:
+        options = [
+            discord.SelectOption(label=name[:100], value=name[:100])
+            for name in location_names[:25]
+        ]
+        super().__init__(
+            placeholder="Expand a location…",
+            options=options,
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        location_name = self.values[0]
+        payload = _build_detail_payload(location_name)
+        if payload is None:
+            await interaction.response.send_message(
+                f"**{location_name}** no longer exists.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class InventoryListView(discord.ui.View):
+    """Summary embed with a single dropdown to drill into a location."""
+
+    def __init__(self, location_names: list[str]) -> None:
+        super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
+        self.add_item(LocationSelect(location_names))
+
+
+class LocationItemSelect(discord.ui.Select):
+    """Dropdown listing items present at a location. Pick one to inspect it."""
+
+    def __init__(self, location_name: str, item_names: list[str]) -> None:
+        options = [
+            discord.SelectOption(label=name[:100], value=name[:100])
+            for name in item_names[:25]
+        ]
+        super().__init__(
+            placeholder="Inspect an item…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+        self.location_name = location_name
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        item_name = self.values[0]
+        payload = _build_item_detail_payload(self.location_name, item_name)
+        if payload is None:
+            await interaction.response.send_message(
+                f"**{item_name}** is no longer here.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class LocationDetailView(discord.ui.View):
+    """Detail embed: an item-picker dropdown (if any stocks) and a Back button."""
+
+    def __init__(self, location_name: str, item_names: list[str]) -> None:
+        super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
+        if item_names:
+            self.add_item(LocationItemSelect(location_name, item_names))
+
+    @discord.ui.button(
+        label="← Back to all locations",
+        style=discord.ButtonStyle.primary,
+        row=1,
+    )
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_summary_payload()
+        if payload is None:
+            await interaction.response.edit_message(
+                content="No inventory locations remain.",
+                embed=None,
+                view=None,
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class ItemDetailView(discord.ui.View):
+    """Item-info embed shown in the context of a location. Back goes to that
+    location's detail view, not all-the-way-back to the summary."""
+
+    def __init__(self, location_name: str) -> None:
+        super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
+        self.location_name = location_name
+        # Build the back button manually so its label can include the location name.
+        back_btn = discord.ui.Button(
+            label=f"← Back to {location_name[:60]}",
+            style=discord.ButtonStyle.primary,
+        )
+        back_btn.callback = self._back  # type: ignore[method-assign]
+        self.add_item(back_btn)
+
+    async def _back(self, interaction: discord.Interaction) -> None:
+        payload = _build_detail_payload(self.location_name)
+        if payload is None:
+            await interaction.response.send_message(
+                f"**{self.location_name}** no longer exists.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
 
 
 def _used_slots(session: Session, location_id: int) -> float:
