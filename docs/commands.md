@@ -4,15 +4,18 @@ Every command is a Discord **slash command**, available to anyone in the server.
 
 For now, **all commands are open to all guild members**. There's no role-gating — anyone can add, take, borrow, return, or even delete entries. Built-in invariants (see the bottom of this page) prevent the worst classes of mistakes. Role-based permissions and an audit log feed are on the roadmap.
 
-## Visibility (ephemeral by default for reads + catalog adds)
+## Visibility (ephemeral by default; public only for stash/treasury moves and coffer balance changes)
 
-Read commands and `/items add` reply **ephemerally** — only the invoker sees the response, so browsing inventory or adding a catalog entry doesn't spam the channel. Each ephemeral response includes a `📢 Share with channel` button; clicking it posts a public copy of the current embed prefixed with "Shared by @you", and the share button disables itself to prevent duplicate shares.
+Most commands reply **ephemerally** — only the invoker sees the response. Each ephemeral response includes a `📢 Share with channel` button; clicking it posts a public copy (the current embed and/or message content) prefixed with "Shared by @you", then disables itself to prevent duplicate shares.
 
-Ephemeral commands: `/items info`, `/items list`, `/items add`, `/inventory list`, `/treasury list`, `/treasury info`, `/treasury who-has`, `/coffers show`.
+**Public commands** (the channel sees them, no Share needed):
+- `/inventory add`, `/inventory take`
+- `/treasury add`, `/treasury remove`, `/treasury borrow`, `/treasury return`
+- `/coffers add`, `/coffers subtract`, `/coffers buy`
 
-**Exception**: `/treasury info`'s `Borrow for me`, `Borrow for someone…`, and `Return` buttons update the ephemeral in-place AND broadcast a public message announcing the state change — the same way the slash-command versions of `/treasury borrow` and `/treasury return` post publicly. The borrow/return ledger is still a guild-visible activity, even when it originated from an ephemeral view.
+Everything else is ephemeral: `/ping`, all `/items` commands, `/inventory list`/`location-create`/`location-edit`/`location-delete`, `/treasury list`/`info`/`who-has`, `/coffers show`.
 
-All other write commands (`/inventory add`/`take`, location CRUD, `/treasury add`/`remove`/`borrow`/`return`, `/coffers add`/`subtract`/`buy`, `/items edit`/`remove`) post **publicly** so the channel keeps a natural log of guild state changes. `/treasury borrow` also pings the borrower in the public message when borrowing on someone else's behalf.
+**Exception**: `/treasury info`'s `Borrow for me`, `Borrow for someone…`, and `Return` buttons update the ephemeral in-place AND broadcast a public message announcing the state change — the same way the slash-command versions of `/treasury borrow` and `/treasury return` post publicly. The borrow/return ledger stays guild-visible even when invoked from an ephemeral view.
 
 ---
 

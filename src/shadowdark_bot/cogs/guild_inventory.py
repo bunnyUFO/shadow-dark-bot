@@ -15,7 +15,7 @@ from shadowdark_bot.embeds import (
     fmt_slots,
 )
 from shadowdark_bot.models import ITEM_TYPE_MAGICAL, InventoryEntry, Item, Location
-from shadowdark_bot.sharing import ShareButton
+from shadowdark_bot.sharing import ShareButton, ShareableView
 
 
 def stack_slots(quantity: int, gear_slots: float, bundle_size: int) -> float:
@@ -81,7 +81,9 @@ class GuildInventory(commands.Cog):
             session.flush()
             await interaction.response.send_message(
                 f"Created inventory location **{clean_name}** "
-                f"(capacity: {fmt_slots(location.max_gear_slots)} slots)."
+                f"(capacity: {fmt_slots(location.max_gear_slots)} slots).",
+                view=ShareableView(),
+                ephemeral=True,
             )
 
     @inventory.command(
@@ -146,7 +148,9 @@ class GuildInventory(commands.Cog):
             session.flush()
             await interaction.response.send_message(
                 f"Updated **{clean_name}** "
-                f"(capacity: {fmt_slots(location.max_gear_slots)} slots)."
+                f"(capacity: {fmt_slots(location.max_gear_slots)} slots).",
+                view=ShareableView(),
+                ephemeral=True,
             )
 
     @inventory.command(
@@ -183,7 +187,9 @@ class GuildInventory(commands.Cog):
                 return
             session.delete(location)
             await interaction.response.send_message(
-                f"Deleted inventory location **{clean_name}**.", ephemeral=True
+                f"Deleted inventory location **{clean_name}**.",
+                view=ShareableView(),
+                ephemeral=True,
             )
 
     # ---------- Add / take ----------

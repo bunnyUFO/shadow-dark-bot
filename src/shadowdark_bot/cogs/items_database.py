@@ -245,7 +245,9 @@ class ItemsDatabase(commands.Cog):
             session.flush()
             embed = build_item_embed(item)
             embed.set_footer(text=f"Edited by {interaction.user.display_name}")
-            await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(
+                embed=embed, view=ShareableView(), ephemeral=True
+            )
 
     @items.command(name="remove", description="Remove an item from the catalog")
     @app_commands.describe(name="Item name to remove")
@@ -285,7 +287,9 @@ class ItemsDatabase(commands.Cog):
 
             session.delete(item)
             await interaction.response.send_message(
-                f"Removed **{clean_name}** from the catalog.", ephemeral=True
+                f"Removed **{clean_name}** from the catalog.",
+                view=ShareableView(),
+                ephemeral=True,
             )
 
     @items.command(name="list", description="List items in the catalog")

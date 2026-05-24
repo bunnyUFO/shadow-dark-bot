@@ -20,7 +20,9 @@ class ShareButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction) -> None:
         msg = interaction.message
         embeds = list(msg.embeds) if msg and msg.embeds else None
-        content = f"Shared by {interaction.user.mention}"
+        original_content = msg.content if msg else None
+        prefix = f"Shared by {interaction.user.mention}"
+        content = f"{prefix}: {original_content}" if original_content else prefix
         await interaction.channel.send(content=content, embeds=embeds)
         self.disabled = True
         self.label = "Shared"
