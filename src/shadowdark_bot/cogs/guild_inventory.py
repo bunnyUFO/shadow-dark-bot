@@ -585,10 +585,7 @@ def _build_item_detail_payload(
         )
         embed = build_item_embed(item)
         if stack is not None:
-            footer = f"{stack.quantity}× at {location_name}"
-            if stack.notes:
-                footer += f" — {stack.notes}"
-            embed.set_footer(text=footer)
+            embed.set_footer(text=f"{stack.quantity}× at {location_name}")
     return embed, ItemDetailView(location_name)
 
 

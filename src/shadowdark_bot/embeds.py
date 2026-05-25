@@ -96,10 +96,7 @@ def build_location_detail_embed(
     lines = [capacity_line, ""]
     visible = stacks[:25]
     for stack in visible:
-        line = f"• {stack.quantity}× {stack.item.name}"
-        if stack.notes:
-            line += f" — _{stack.notes}_"
-        lines.append(line)
+        lines.append(f"• {stack.quantity}× {stack.item.name}")
     if len(stacks) > 25:
         lines.append(f"…and {len(stacks) - 25} more")
 
