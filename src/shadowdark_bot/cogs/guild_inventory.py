@@ -209,177 +209,27 @@ class GuildInventory(commands.Cog):
         quantity: int = 1,
         notes: str | None = None,
     ) -> None:
-        clean_location = location.strip()
-        clean_item = item.strip()
-        failure = f"**Failed to add {quantity}× {clean_item} to {clean_location}.**"
+        await _do_add(
+            interaction,
+            location_name=location,
+            item_name=item,
+            quantity=quantity,
+            notes=notes,
+        )
 
-        if quantity < 1:
-            await interaction.response.send_message(
-                f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
-            )
-            return
+    # ---------- Browse ----------
 
-        with session_scope() as session:
-            loc = session.scalar(
-                select(Location).where(
-                    Location.name == clean_location, Location.kind == "inventory"
-                )
-            )
-            if loc is None:
-                await interaction.response.send_message(
-                    f"{failure}\nNo inventory location named **{clean_location}**.",
-                    ephemeral=True,
-                )
-                return
-
-            cat_item = session.scalar(select(Item).where(Item.name == clean_item))
-            if cat_item is None:
-                await interaction.response.send_message(
-                    f"{failure}\nNo catalog entry named **{clean_item}**.",
-                    ephemeral=True,
-                )
-                return
-            if cat_item.item_type == ITEM_TYPE_MAGICAL:
-                await interaction.response.send_message(
-                    f"{failure}\n**{clean_item}** is magical — magical items go in the "
-                    "treasury, not inventory.",
-                    ephemeral=True,
-                )
-                return
-
-            stack = session.scalar(
-                select(InventoryEntry).where(
-                    InventoryEntry.location_id == loc.id,
-                    InventoryEntry.item_id == cat_item.id,
-                )
-            )
-            current_qty = stack.quantity if stack else 0
-            new_qty = current_qty + quantity
-            current_stack_slots = stack_slots(
-                current_qty, cat_item.gear_slots, cat_item.bundle_size
-            )
-            new_stack_slots = stack_slots(
-                new_qty, cat_item.gear_slots, cat_item.bundle_size
-            )
-            proposed_delta = new_stack_slots - current_stack_slots
-
-            used = _used_slots(session, loc.id)
-            new_used = used + proposed_delta
-            if new_used > loc.max_gear_slots:
-                await interaction.response.send_message(
-                    f"{failure}\n**{clean_location}** has "
-                    f"{fmt_slots(used)}/{fmt_slots(loc.max_gear_slots)} slots used; "
-                    f"adding {quantity}× **{clean_item}** "
-                    f"({fmt_slots(proposed_delta)} more slots) "
-                    f"would total {fmt_slots(new_used)}. "
-                    "Raise the capacity with `/inventory location-edit` or add less.",
-                    ephemeral=True,
-                )
-                return
-
-            if stack is None:
-                stack = InventoryEntry(
-                    location_id=loc.id,
-                    item_id=cat_item.id,
-                    quantity=quantity,
-                    notes=(notes.strip() if notes else None) or None,
-                    added_by=str(interaction.user.id),
-                )
-                session.add(stack)
-            else:
-                stack.quantity = new_qty
-                if notes:
-                    stack.notes = notes.strip() or None
-            session.flush()
-
-            await interaction.response.send_message(
-                f"Added {quantity}× **{clean_item}** to **{clean_location}**. "
-                f"Stack: {stack.quantity}. "
-                f"Capacity: {fmt_slots(new_used)}/{fmt_slots(loc.max_gear_slots)} slots."
-            )
-
-    @inventory.command(name="take", description="Take items from an inventory location")
-    @app_commands.describe(
-        location="Where to take from",
-        item="Item to take",
-        quantity="Number to take (defaults to 1)",
+    @inventory.command(
+        name="browse",
+        description=(
+            "Browse inventory: list, inspect, add, and take items. "
+            "Optionally jump to one location."
+        ),
     )
-    async def take(
-        self,
-        interaction: discord.Interaction,
-        location: str,
-        item: str,
-        quantity: int = 1,
-    ) -> None:
-        clean_location = location.strip()
-        clean_item = item.strip()
-        failure = f"**Failed to take {quantity}× {clean_item} from {clean_location}.**"
-
-        if quantity < 1:
-            await interaction.response.send_message(
-                f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
-            )
-            return
-
-        with session_scope() as session:
-            loc = session.scalar(
-                select(Location).where(
-                    Location.name == clean_location, Location.kind == "inventory"
-                )
-            )
-            if loc is None:
-                await interaction.response.send_message(
-                    f"{failure}\nNo inventory location named **{clean_location}**.",
-                    ephemeral=True,
-                )
-                return
-            cat_item = session.scalar(select(Item).where(Item.name == clean_item))
-            if cat_item is None:
-                await interaction.response.send_message(
-                    f"{failure}\nNo catalog entry named **{clean_item}**.",
-                    ephemeral=True,
-                )
-                return
-            stack = session.scalar(
-                select(InventoryEntry).where(
-                    InventoryEntry.location_id == loc.id,
-                    InventoryEntry.item_id == cat_item.id,
-                )
-            )
-            if stack is None:
-                await interaction.response.send_message(
-                    f"{failure}\nNo **{clean_item}** at **{clean_location}**.",
-                    ephemeral=True,
-                )
-                return
-            if quantity > stack.quantity:
-                await interaction.response.send_message(
-                    f"{failure}\nOnly {stack.quantity} **{clean_item}** at "
-                    f"**{clean_location}**; can't take {quantity}.",
-                    ephemeral=True,
-                )
-                return
-
-            stack.quantity -= quantity
-            if stack.quantity == 0:
-                session.delete(stack)
-                await interaction.response.send_message(
-                    f"Took the last {quantity}× **{clean_item}** from **{clean_location}**. "
-                    "Stack removed."
-                )
-            else:
-                await interaction.response.send_message(
-                    f"Took {quantity}× **{clean_item}** from **{clean_location}**. "
-                    f"{stack.quantity} remaining."
-                )
-
-    # ---------- List ----------
-
-    @inventory.command(name="list", description="Show inventory contents")
     @app_commands.describe(
-        location="If given, show details for one location; otherwise list all locations",
+        location="If given, jump straight to one location; otherwise list all locations",
     )
-    async def list_inventory(
+    async def browse(
         self,
         interaction: discord.Interaction,
         location: str | None = None,
@@ -461,38 +311,8 @@ class GuildInventory(commands.Cog):
     async def _ac_add_item(self, interaction, current):
         return await self._nonmagical_item_autocomplete(interaction, current)
 
-    @take.autocomplete("location")
-    async def _ac_take_location(self, interaction, current):
-        return await self._location_autocomplete(interaction, current)
-
-    @take.autocomplete("item")
-    async def _ac_take_item(
-        self, interaction: discord.Interaction, current: str
-    ) -> list[app_commands.Choice[str]]:
-        # Scope to items actually stocked at the chosen location.
-        # If location hasn't been filled yet, return empty — the user must
-        # pick the location first.
-        location_name = getattr(interaction.namespace, "location", None)
-        if not location_name:
-            return []
-        with session_scope() as session:
-            stmt = (
-                select(Item.name)
-                .join(InventoryEntry, InventoryEntry.item_id == Item.id)
-                .join(Location, Location.id == InventoryEntry.location_id)
-                .where(
-                    Location.kind == "inventory",
-                    Location.name == location_name.strip(),
-                    Item.name.ilike(f"%{current}%"),
-                )
-                .order_by(Item.name)
-                .limit(25)
-            )
-            names = list(session.scalars(stmt).all())
-        return [app_commands.Choice(name=n, value=n) for n in names]
-
-    @list_inventory.autocomplete("location")
-    async def _ac_list_location(self, interaction, current):
+    @browse.autocomplete("location")
+    async def _ac_browse_location(self, interaction, current):
         return await self._location_autocomplete(interaction, current)
 
 
@@ -583,10 +403,12 @@ def _build_item_detail_payload(
                 InventoryEntry.item_id == item.id,
             )
         )
+        stack_qty = stack.quantity if stack else 0
+        is_magical = item.item_type == ITEM_TYPE_MAGICAL
         embed = build_item_embed(item)
         if stack is not None:
             embed.set_footer(text=f"{stack.quantity}× at {location_name}")
-    return embed, ItemDetailView(location_name)
+    return embed, ItemDetailView(location_name, item_name, stack_qty, is_magical)
 
 
 class LocationSelect(discord.ui.Select):
@@ -655,12 +477,14 @@ class LocationItemSelect(discord.ui.Select):
 
 
 class LocationDetailView(discord.ui.View):
-    """Detail embed: an item-picker dropdown (if any stocks) and a Back button."""
+    """Detail embed: item-picker dropdown (if stocked), add-item + back buttons, share."""
 
     def __init__(self, location_name: str, item_names: list[str]) -> None:
         super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
+        self.location_name = location_name
         if item_names:
             self.add_item(LocationItemSelect(location_name, item_names))
+        self.add_item(AddItemButton(location_name, row=2))
         self.add_item(ShareButton(row=4))
 
     @discord.ui.button(
@@ -684,16 +508,38 @@ class LocationDetailView(discord.ui.View):
 
 
 class ItemDetailView(discord.ui.View):
-    """Item-info embed shown in the context of a location. Back goes to that
-    location's detail view, not all-the-way-back to the summary."""
+    """Item-info embed shown in the context of a location. Has Add-more / Take
+    quick-action buttons (disabled for magical items / empty stacks), plus Back
+    to the location detail view."""
 
-    def __init__(self, location_name: str) -> None:
+    def __init__(
+        self,
+        location_name: str,
+        item_name: str,
+        stack_qty: int,
+        is_magical: bool,
+    ) -> None:
         super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
         self.location_name = location_name
-        # Build the back button manually so its label can include the location name.
+        self.item_name = item_name
+
+        self.add_item(
+            AddItemButton(
+                location_name,
+                prefilled_item=item_name,
+                row=0,
+                disabled=is_magical,
+            )
+        )
+        self.add_item(
+            TakeButton(location_name, item_name, stack_qty, row=0)
+        )
+
+        # Built manually so the label can include the location name.
         back_btn = discord.ui.Button(
             label=f"← Back to {location_name[:60]}",
             style=discord.ButtonStyle.primary,
+            row=1,
         )
         back_btn.callback = self._back  # type: ignore[method-assign]
         self.add_item(back_btn)
@@ -719,6 +565,349 @@ def _used_slots(session: Session, location_id: int) -> float:
         .where(InventoryEntry.location_id == location_id)
     ).all()
     return float(sum(stack_slots(q, g, b) for q, g, b in rows))
+
+
+# ---------- Add / Take modals + buttons ----------
+
+
+class AddItemModal(discord.ui.Modal):
+    """Opened from the location detail view ('+ Add item') or the item detail
+    view ('+ Add more', with the item pre-filled)."""
+
+    def __init__(
+        self,
+        location_name: str,
+        *,
+        prefilled_item: str | None = None,
+    ) -> None:
+        super().__init__(title=f"Add to {location_name}"[:45])
+        self.location_name = location_name
+
+        self._item = discord.ui.TextInput(
+            label="Item name",
+            required=True,
+            default=prefilled_item or "",
+            max_length=100,
+        )
+        self._qty = discord.ui.TextInput(
+            label="Quantity",
+            required=True,
+            default="1",
+            max_length=8,
+        )
+        self._notes = discord.ui.TextInput(
+            label="Notes (optional)",
+            required=False,
+            max_length=200,
+        )
+        self.add_item(self._item)
+        self.add_item(self._qty)
+        self.add_item(self._notes)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            quantity = int(str(self._qty.value).strip())
+        except ValueError:
+            await interaction.response.send_message(
+                "**Failed to add.**\nQuantity must be a whole number.",
+                ephemeral=True,
+            )
+            return
+        await _do_add(
+            interaction,
+            location_name=self.location_name,
+            item_name=str(self._item.value),
+            quantity=quantity,
+            notes=str(self._notes.value) if self._notes.value else None,
+            edit_view=True,
+        )
+
+
+class TakeModal(discord.ui.Modal):
+    """Opened from the item detail view ('- Take'). Item is pre-known; only the
+    quantity is needed."""
+
+    def __init__(self, location_name: str, item_name: str, stack_qty: int) -> None:
+        super().__init__(title=f"Take from {location_name}"[:45])
+        self.location_name = location_name
+        self.item_name = item_name
+
+        self._qty = discord.ui.TextInput(
+            label=f"Quantity (1–{stack_qty})",
+            required=True,
+            default="1",
+            max_length=8,
+        )
+        self.add_item(self._qty)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            quantity = int(str(self._qty.value).strip())
+        except ValueError:
+            await interaction.response.send_message(
+                "**Failed to take.**\nQuantity must be a whole number.",
+                ephemeral=True,
+            )
+            return
+        await _do_take(
+            interaction,
+            location_name=self.location_name,
+            item_name=self.item_name,
+            quantity=quantity,
+            edit_view=True,
+        )
+
+
+class AddItemButton(discord.ui.Button):
+    def __init__(
+        self,
+        location_name: str,
+        *,
+        prefilled_item: str | None = None,
+        row: int = 2,
+        disabled: bool = False,
+    ) -> None:
+        super().__init__(
+            label="+ Add more" if prefilled_item else "+ Add item",
+            style=discord.ButtonStyle.success,
+            row=row,
+            disabled=disabled,
+        )
+        self.location_name = location_name
+        self.prefilled_item = prefilled_item
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(
+            AddItemModal(self.location_name, prefilled_item=self.prefilled_item)
+        )
+
+
+class TakeButton(discord.ui.Button):
+    def __init__(
+        self,
+        location_name: str,
+        item_name: str,
+        stack_qty: int,
+        row: int = 0,
+    ) -> None:
+        super().__init__(
+            label="− Take",
+            style=discord.ButtonStyle.danger,
+            row=row,
+            disabled=stack_qty <= 0,
+        )
+        self.location_name = location_name
+        self.item_name = item_name
+        self.stack_qty = stack_qty
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(
+            TakeModal(self.location_name, self.item_name, self.stack_qty)
+        )
+
+
+# ---------- Shared add/take logic ----------
+
+
+async def _do_add(
+    interaction: discord.Interaction,
+    *,
+    location_name: str,
+    item_name: str,
+    quantity: int,
+    notes: str | None = None,
+    edit_view: bool = False,
+) -> None:
+    clean_location = location_name.strip()
+    clean_item = item_name.strip()
+    failure = f"**Failed to add {quantity}× {clean_item} to {clean_location}.**"
+
+    if quantity < 1:
+        await interaction.response.send_message(
+            f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
+        )
+        return
+
+    with session_scope() as session:
+        loc = session.scalar(
+            select(Location).where(
+                Location.name == clean_location, Location.kind == "inventory"
+            )
+        )
+        if loc is None:
+            await interaction.response.send_message(
+                f"{failure}\nNo inventory location named **{clean_location}**.",
+                ephemeral=True,
+            )
+            return
+
+        cat_item = session.scalar(select(Item).where(Item.name == clean_item))
+        if cat_item is None:
+            await interaction.response.send_message(
+                f"{failure}\nNo catalog entry named **{clean_item}**.",
+                ephemeral=True,
+            )
+            return
+        if cat_item.item_type == ITEM_TYPE_MAGICAL:
+            await interaction.response.send_message(
+                f"{failure}\n**{clean_item}** is magical — magical items go in "
+                "the treasury, not inventory.",
+                ephemeral=True,
+            )
+            return
+
+        stack = session.scalar(
+            select(InventoryEntry).where(
+                InventoryEntry.location_id == loc.id,
+                InventoryEntry.item_id == cat_item.id,
+            )
+        )
+        current_qty = stack.quantity if stack else 0
+        new_qty = current_qty + quantity
+        current_stack_slots = stack_slots(
+            current_qty, cat_item.gear_slots, cat_item.bundle_size
+        )
+        new_stack_slots = stack_slots(
+            new_qty, cat_item.gear_slots, cat_item.bundle_size
+        )
+        proposed_delta = new_stack_slots - current_stack_slots
+
+        used = _used_slots(session, loc.id)
+        new_used = used + proposed_delta
+        cap = loc.max_gear_slots
+        if new_used > cap:
+            await interaction.response.send_message(
+                f"{failure}\n**{clean_location}** has "
+                f"{fmt_slots(used)}/{fmt_slots(cap)} slots used; "
+                f"adding {quantity}× **{clean_item}** "
+                f"({fmt_slots(proposed_delta)} more slots) "
+                f"would total {fmt_slots(new_used)}. "
+                "Raise the capacity with `/inventory location-edit` or add less.",
+                ephemeral=True,
+            )
+            return
+
+        if stack is None:
+            stack = InventoryEntry(
+                location_id=loc.id,
+                item_id=cat_item.id,
+                quantity=quantity,
+                notes=(notes.strip() if notes else None) or None,
+                added_by=str(interaction.user.id),
+            )
+            session.add(stack)
+        else:
+            stack.quantity = new_qty
+            if notes:
+                stack.notes = notes.strip() or None
+        session.flush()
+        final_stack_qty = stack.quantity
+
+    confirmation = (
+        f"Added {quantity}× **{clean_item}** to **{clean_location}**. "
+        f"Stack: {final_stack_qty}. "
+        f"Capacity: {fmt_slots(new_used)}/{fmt_slots(cap)} slots."
+    )
+    await _respond(interaction, confirmation, clean_location, edit_view)
+
+
+async def _do_take(
+    interaction: discord.Interaction,
+    *,
+    location_name: str,
+    item_name: str,
+    quantity: int,
+    edit_view: bool = False,
+) -> None:
+    clean_location = location_name.strip()
+    clean_item = item_name.strip()
+    failure = f"**Failed to take {quantity}× {clean_item} from {clean_location}.**"
+
+    if quantity < 1:
+        await interaction.response.send_message(
+            f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
+        )
+        return
+
+    with session_scope() as session:
+        loc = session.scalar(
+            select(Location).where(
+                Location.name == clean_location, Location.kind == "inventory"
+            )
+        )
+        if loc is None:
+            await interaction.response.send_message(
+                f"{failure}\nNo inventory location named **{clean_location}**.",
+                ephemeral=True,
+            )
+            return
+        cat_item = session.scalar(select(Item).where(Item.name == clean_item))
+        if cat_item is None:
+            await interaction.response.send_message(
+                f"{failure}\nNo catalog entry named **{clean_item}**.",
+                ephemeral=True,
+            )
+            return
+        stack = session.scalar(
+            select(InventoryEntry).where(
+                InventoryEntry.location_id == loc.id,
+                InventoryEntry.item_id == cat_item.id,
+            )
+        )
+        if stack is None:
+            await interaction.response.send_message(
+                f"{failure}\nNo **{clean_item}** at **{clean_location}**.",
+                ephemeral=True,
+            )
+            return
+        if quantity > stack.quantity:
+            await interaction.response.send_message(
+                f"{failure}\nOnly {stack.quantity} **{clean_item}** at "
+                f"**{clean_location}**; can't take {quantity}.",
+                ephemeral=True,
+            )
+            return
+
+        stack.quantity -= quantity
+        emptied = stack.quantity == 0
+        if emptied:
+            session.delete(stack)
+
+    if emptied:
+        confirmation = (
+            f"Took the last {quantity}× **{clean_item}** from **{clean_location}**. "
+            "Stack removed."
+        )
+    else:
+        confirmation = (
+            f"Took {quantity}× **{clean_item}** from **{clean_location}**. "
+            f"{stack.quantity} remaining."
+        )
+    await _respond(interaction, confirmation, clean_location, edit_view)
+
+
+async def _respond(
+    interaction: discord.Interaction,
+    confirmation: str,
+    location_name: str,
+    edit_view: bool,
+) -> None:
+    """Send the confirmation. For modal-driven actions also refresh the parent
+    detail view so the dropdown/footer reflects the new state."""
+    if edit_view:
+        payload = _build_detail_payload(location_name)
+        if payload is not None:
+            embed, view = payload
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await interaction.response.defer()
+        await interaction.followup.send(
+            confirmation, view=ShareableView(), ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            confirmation, view=ShareableView(), ephemeral=True
+        )
 
 
 async def setup(bot: commands.Bot) -> None:

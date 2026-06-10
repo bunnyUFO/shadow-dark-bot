@@ -18,7 +18,7 @@ If griefing or accidents become a problem in practice, see the roadmap for the r
 | Wrong category (magical item in non-magical stash) | Invariant check in domain code; ephemeral error reply |
 | Double-borrow | Invariant check before opening a new `borrows` row |
 | Over-take from a stack | Invariant check before decrement |
-| Orphaning a referenced catalog row | Blocked at `/items delete` |
+| Orphaning a referenced catalog row | Blocked at `/items remove` |
 | Deleting a non-empty location | Blocked at `/inventory location-delete` and `/treasury` equivalents |
 | Guild membership | Slash commands are synced per-guild (to every server the bot is in), so non-members of those servers can't see or invoke them |
 
@@ -37,17 +37,17 @@ When we wire it up later (alongside role-based permissions or a `/audit` command
 | `location.edit` | `/inventory location-edit` |
 | `location.delete` | `/inventory location-delete` |
 | `inventory.add` | `/inventory add` |
-| `inventory.take` | `/inventory take` |
+| `inventory.take` | `/inventory browse` → Take button |
 | `treasury.add` | `/treasury add` |
 | `treasury.remove` | `/treasury remove` |
-| `treasury.borrow` | `/treasury borrow` |
-| `treasury.return` | `/treasury return` |
+| `treasury.borrow` | `/treasury browse` → Borrow button |
+| `treasury.return` | `/treasury browse` → Return button |
 
 `payload_json` will store a small JSON snapshot — for `inventory.take` something like `{"item": "Rope, 50ft", "location": "Main Stash", "quantity": 1, "remaining": 2}`. A future `/audit` command can render these without joining other tables.
 
 ## What would NOT be logged (even when wired up)
 
-- Read commands (`info`, `list`, `who-has`).
+- Read commands (`info`, `browse`).
 - Autocomplete suggestions.
 - Discord-level events (member joins, etc.) — out of scope.
 

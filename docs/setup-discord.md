@@ -60,6 +60,6 @@ You should see `pong` (ephemeral, visible only to you).
 
 If `/ping` doesn't appear in the slash command list, the bot either isn't running or was invited without the `applications.commands` scope (re-invite with the URL from step 2).
 
-## Notes on the single-guild assumption
+## Multi-server note
 
-This build assumes the bot lives in exactly one Discord server. If invited to a second server, the bot logs a warning and ignores it — commands are only synced to the first server it joined. To move the bot to a different server, kick it from the current one and re-invite to the new one.
+The bot can live in multiple Discord servers; it syncs guild-scoped slash commands to each server it joins (and on every reconnect for servers it's already in). **However, all servers currently share the same catalog/inventory/treasury/coffers** — there is no per-guild data isolation yet. Multi-tenant data is on the roadmap. Invite the bot to a second server only if you're OK with both servers reading and writing the same dataset.

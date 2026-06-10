@@ -61,10 +61,10 @@ src/shadowdark_bot/
   currency.py       # gp/sp/cp ↔ copper helpers (parse_to_cp, format_cp)
   embeds.py         # build_item_embed, build_location_*_embed, build_treasury_*_embed, build_coffer_*_embed, time helpers
   cogs/
-    items_database.py    # /items add, info, edit, remove, list
-    guild_inventory.py   # /inventory location-create/edit/delete, add, take, list
-    magical_treasury.py  # /treasury add, remove, list, borrow, return, who-has
-    guild_coffers.py     # /coffers show, add, subtract, buy
+    items_database.py    # /items add, info, edit, remove, browse
+    guild_inventory.py   # /inventory location-create/edit/delete, add, browse
+    magical_treasury.py  # /treasury add, remove, browse
+    guild_coffers.py     # /coffers add, subtract, browse
 ```
 
 Cogs implement both the slash-command surface and the invariants (capacity checks, magical-vs-non-magical sorting, borrow-state guards). Models are plain ORM rows. There's no separate "domain layer" — cogs are short enough that the extra indirection wouldn't pay off.
@@ -73,7 +73,7 @@ Cogs implement both the slash-command surface and the invariants (capacity check
 
 **Audit log table.** The `audit_log` schema exists for future use. **No writes happen yet** — wiring it in is deferred until role-based permissions or an `/audit` command lands. The `borrows` table already serves as the audit trail for the most write-heavy area (treasury borrow/return).
 
-**Autocomplete.** discord.py 2.x supports per-parameter autocomplete callbacks. Item names, location names, and treasury entry IDs all use these — typing `/inventory add item:rop` suggests "Rope, 50ft"; `/treasury borrow entry_id:` shows only available instances with their tags. Implemented with simple `LIKE` queries against SQLite (fast for our scale, no FTS needed).
+**Autocomplete.** discord.py 2.x supports per-parameter autocomplete callbacks. Item names, location names, and treasury entry IDs all use these — typing `/inventory add item:rop` suggests "Rope, 50ft"; `/treasury remove entry_id:` shows only available instances with their tags. Implemented with simple `LIKE` queries against SQLite (fast for our scale, no FTS needed).
 
 **Errors as ephemeral replies.** Invariant violations become user-visible ephemeral messages with a `**Failed to <action>.**` header followed by the reason. Never silent failures or stack traces.
 

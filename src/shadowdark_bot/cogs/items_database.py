@@ -5,10 +5,10 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import func, select
 
-from shadowdark_bot.currency import parse_to_cp
+from shadowdark_bot.currency import format_cp, parse_to_cp, parse_value_string
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import build_item_embed
-from shadowdark_bot.sharing import ShareableView
+from shadowdark_bot.sharing import ShareButton, ShareableView
 from shadowdark_bot.models import (
     ITEM_TYPE_ARMOR,
     ITEM_TYPE_COMMON,
@@ -18,7 +18,6 @@ from shadowdark_bot.models import (
     ITEM_TYPE_POTION,
     ITEM_TYPE_SCROLL,
     ITEM_TYPE_WEAPON,
-    ITEM_TYPES,
     InventoryEntry,
     Item,
     TreasuryEntry,
@@ -27,6 +26,19 @@ from shadowdark_bot.models import (
 log = logging.getLogger("shadowdark_bot.items")
 
 MAX_ITEMS_PER_GROUP = 25
+VIEW_TIMEOUT_SECONDS = 300
+
+_TYPE_GROUPS: tuple[tuple[str, str], ...] = (
+    (ITEM_TYPE_COMMON, "Common"),
+    (ITEM_TYPE_WEAPON, "Weapons"),
+    (ITEM_TYPE_ARMOR, "Armor"),
+    (ITEM_TYPE_SCROLL, "Scrolls"),
+    (ITEM_TYPE_POTION, "Potions"),
+    (ITEM_TYPE_LOOT, "Loot"),
+    (ITEM_TYPE_CRAFTED, "Crafted"),
+    (ITEM_TYPE_MAGICAL, "Magical"),
+)
+_TYPE_LABEL: dict[str, str] = {k: v for k, v in _TYPE_GROUPS}
 
 TYPE_CHOICES = [
     app_commands.Choice(name="common", value=ITEM_TYPE_COMMON),
@@ -53,7 +65,7 @@ class ItemsDatabase(commands.Cog):
         name="Item name (must be unique)",
         type="Item type. Magical items live in the treasury; all others go in inventory.",
         description="Optional description",
-        gear_slots="Number of gear slots (Shadow Dark)",
+        gear_slots="Number of gear slots (Shadow Dark). Defaults to 1.",
         bundle_size="How many fit in one gear slot (e.g., 20 for arrows). Defaults to 1.",
         gp="Value in gold pieces (1 gp = 10 sp = 100 cp)",
         sp="Value in silver pieces",
@@ -95,7 +107,7 @@ class ItemsDatabase(commands.Cog):
             item = Item(
                 name=clean_name,
                 description=(description.strip() if description else None) or None,
-                gear_slots=gear_slots if gear_slots is not None else 0.0,
+                gear_slots=gear_slots if gear_slots is not None else 1.0,
                 bundle_size=bundle_size if bundle_size is not None else 1,
                 value_cp=value_cp,
                 item_type=type.value,
@@ -125,33 +137,23 @@ class ItemsDatabase(commands.Cog):
                 embed=embed, view=ShareableView(), ephemeral=True
             )
 
-    @items.command(name="edit", description="Update fields on an existing catalog item")
+    @items.command(
+        name="edit",
+        description="Edit a catalog item — opens a form pre-filled with current values",
+    )
     @app_commands.describe(
         name="Item name to edit",
-        new_name="Rename the item (must be unique)",
-        description="Replace description",
-        gear_slots="Replace gear slots",
-        bundle_size="Replace bundle size (how many fit in one gear slot)",
-        gp="Set value's gold pieces (any of gp/sp/cp replaces the whole value)",
-        sp="Set value's silver pieces",
-        cp="Set value's copper pieces",
-        type="Change item type",
+        type="Optional: also change the item's type",
     )
     @app_commands.choices(type=TYPE_CHOICES)
     async def edit(
         self,
         interaction: discord.Interaction,
         name: str,
-        new_name: str | None = None,
-        description: str | None = None,
-        gear_slots: float | None = None,
-        bundle_size: int | None = None,
-        gp: int | None = None,
-        sp: int | None = None,
-        cp: int | None = None,
         type: app_commands.Choice[str] | None = None,
     ) -> None:
         clean_name = name.strip()
+        new_type = type.value if type is not None else None
         with session_scope() as session:
             item = session.scalar(select(Item).where(Item.name == clean_name))
             if item is None:
@@ -160,94 +162,13 @@ class ItemsDatabase(commands.Cog):
                 )
                 return
 
-            new_type = type.value if type is not None else None
-            # If switching between magical and non-magical, refuse if there
-            # are incompatible references.
-            if new_type is not None and new_type != item.item_type:
-                going_magical = new_type == ITEM_TYPE_MAGICAL
-                leaving_magical = item.item_type == ITEM_TYPE_MAGICAL
-                if going_magical:
-                    blocking = session.scalar(
-                        select(func.count())
-                        .select_from(InventoryEntry)
-                        .where(InventoryEntry.item_id == item.id)
-                    ) or 0
-                    if blocking:
-                        await interaction.response.send_message(
-                            f"Cannot mark **{clean_name}** as magical — it still has "
-                            f"{blocking} inventory stack(s). Remove them first.",
-                            ephemeral=True,
-                        )
-                        return
-                elif leaving_magical:
-                    blocking = session.scalar(
-                        select(func.count())
-                        .select_from(TreasuryEntry)
-                        .where(TreasuryEntry.item_id == item.id)
-                    ) or 0
-                    if blocking:
-                        await interaction.response.send_message(
-                            f"Cannot change **{clean_name}** from magical — it still "
-                            f"has {blocking} treasury instance(s). Remove them first.",
-                            ephemeral=True,
-                        )
-                        return
-
-            if bundle_size is not None and bundle_size < 1:
-                await interaction.response.send_message(
-                    "Bundle size must be ≥ 1.", ephemeral=True
-                )
+            err = _check_type_change(session, item, new_type)
+            if err is not None:
+                await interaction.response.send_message(err, ephemeral=True)
                 return
 
-            changed = False
-            if new_name is not None:
-                clean_new_name = new_name.strip()
-                if not clean_new_name:
-                    await interaction.response.send_message(
-                        "New name cannot be empty.", ephemeral=True
-                    )
-                    return
-                if clean_new_name != item.name:
-                    collision = session.scalar(
-                        select(Item).where(Item.name == clean_new_name)
-                    )
-                    if collision is not None:
-                        await interaction.response.send_message(
-                            f"An item named **{clean_new_name}** already exists.",
-                            ephemeral=True,
-                        )
-                        return
-                    item.name = clean_new_name
-                    changed = True
-            if description is not None:
-                item.description = description.strip() or None
-                changed = True
-            if gear_slots is not None:
-                item.gear_slots = gear_slots
-                changed = True
-            if bundle_size is not None:
-                item.bundle_size = bundle_size
-                changed = True
-            new_value_cp = parse_to_cp(gp, sp, cp)
-            if new_value_cp is not None:
-                item.value_cp = new_value_cp
-                changed = True
-            if new_type is not None and item.item_type != new_type:
-                item.item_type = new_type
-                changed = True
-
-            if not changed:
-                await interaction.response.send_message(
-                    "No changes specified.", ephemeral=True
-                )
-                return
-
-            session.flush()
-            embed = build_item_embed(item)
-            embed.set_footer(text=f"Edited by {interaction.user.display_name}")
-            await interaction.response.send_message(
-                embed=embed, view=ShareableView(), ephemeral=True
-            )
+            modal = EditItemModal.from_item(item, new_type=new_type)
+        await interaction.response.send_modal(modal)
 
     @items.command(name="remove", description="Remove an item from the catalog")
     @app_commands.describe(name="Item name to remove")
@@ -292,54 +213,31 @@ class ItemsDatabase(commands.Cog):
                 ephemeral=True,
             )
 
-    @items.command(name="list", description="List items in the catalog")
+    @items.command(
+        name="browse",
+        description="Browse the catalog: filter by type, inspect an item, open the edit form",
+    )
     @app_commands.describe(type="Filter to one type (omit to show all)")
     @app_commands.choices(type=TYPE_CHOICES)
-    async def list_items(
+    async def browse(
         self,
         interaction: discord.Interaction,
         type: app_commands.Choice[str] | None = None,
     ) -> None:
         type_val = type.value if type else None
-        with session_scope() as session:
-            stmt = select(Item).order_by(Item.name)
-            if type_val is not None:
-                stmt = stmt.where(Item.item_type == type_val)
-            all_items = list(session.scalars(stmt).all())
-
-            if not all_items:
-                msg = (
-                    "No items found with that filter."
-                    if type_val is not None
-                    else "The catalog is empty. Add one with `/items add`."
-                )
-                await interaction.response.send_message(msg, ephemeral=True)
-                return
-
-            embed = discord.Embed(
-                title=f"Item Catalog ({len(all_items)})",
-                color=discord.Color.dark_gray(),
+        payload = _build_catalog_list_payload(type_val)
+        if payload is None:
+            msg = (
+                "No items found with that filter."
+                if type_val is not None
+                else "The catalog is empty. Add one with `/items add`."
             )
-            for type_key, label in (
-                (ITEM_TYPE_COMMON, "Common"),
-                (ITEM_TYPE_WEAPON, "Weapons"),
-                (ITEM_TYPE_ARMOR, "Armor"),
-                (ITEM_TYPE_SCROLL, "Scrolls"),
-                (ITEM_TYPE_POTION, "Potions"),
-                (ITEM_TYPE_LOOT, "Loot"),
-                (ITEM_TYPE_CRAFTED, "Crafted"),
-                (ITEM_TYPE_MAGICAL, "Magical"),
-            ):
-                group = [it for it in all_items if it.item_type == type_key]
-                if group:
-                    embed.add_field(
-                        name=f"{label} ({len(group)})",
-                        value=_format_list_block(group),
-                        inline=False,
-                    )
-            await interaction.response.send_message(
-                embed=embed, view=ShareableView(), ephemeral=True
-            )
+            await interaction.response.send_message(msg, ephemeral=True)
+            return
+        embed, view = payload
+        await interaction.response.send_message(
+            embed=embed, view=view, ephemeral=True
+        )
 
     async def _item_name_autocomplete(
         self,
@@ -379,6 +277,355 @@ def _format_list_block(items: list[Item]) -> str:
 
 def _format_list_line(item: Item) -> str:
     return f"• {item.name}"
+
+
+# ---------- Type-change guard (shared by /items edit slash and modal) ----------
+
+
+def _check_type_change(session, item: Item, new_type: str | None) -> str | None:
+    """Return an error string if changing item.item_type to new_type is blocked
+    by existing inventory/treasury references, else None."""
+    if new_type is None or new_type == item.item_type:
+        return None
+    going_magical = new_type == ITEM_TYPE_MAGICAL
+    leaving_magical = item.item_type == ITEM_TYPE_MAGICAL
+    if going_magical:
+        blocking = session.scalar(
+            select(func.count())
+            .select_from(InventoryEntry)
+            .where(InventoryEntry.item_id == item.id)
+        ) or 0
+        if blocking:
+            return (
+                f"Cannot mark **{item.name}** as magical — it still has "
+                f"{blocking} inventory stack(s). Remove them first."
+            )
+    elif leaving_magical:
+        blocking = session.scalar(
+            select(func.count())
+            .select_from(TreasuryEntry)
+            .where(TreasuryEntry.item_id == item.id)
+        ) or 0
+        if blocking:
+            return (
+                f"Cannot change **{item.name}** from magical — it still "
+                f"has {blocking} treasury instance(s). Remove them first."
+            )
+    return None
+
+
+# ---------- Edit modal ----------
+
+
+class EditItemModal(discord.ui.Modal):
+    """5-field edit form. Type changes are passed in via new_type (from the
+    slash command's optional `type:` arg); they're applied on submit alongside
+    the form fields."""
+
+    def __init__(
+        self,
+        *,
+        item_id: int,
+        original_name: str,
+        default_name: str,
+        default_description: str,
+        default_gear_slots: str,
+        default_bundle_size: str,
+        default_value: str,
+        new_type: str | None = None,
+    ) -> None:
+        super().__init__(title=f"Edit {original_name}"[:45])
+        self.item_id = item_id
+        self.original_name = original_name
+        self.new_type = new_type
+
+        self._name = discord.ui.TextInput(
+            label="Name",
+            required=True,
+            default=default_name,
+            max_length=100,
+        )
+        self._description = discord.ui.TextInput(
+            label="Description",
+            required=False,
+            default=default_description,
+            style=discord.TextStyle.paragraph,
+            max_length=1000,
+        )
+        self._gear_slots = discord.ui.TextInput(
+            label="Gear slots",
+            required=True,
+            default=default_gear_slots,
+            max_length=10,
+        )
+        self._bundle_size = discord.ui.TextInput(
+            label="Bundle size (items per slot)",
+            required=True,
+            default=default_bundle_size,
+            max_length=10,
+        )
+        self._value = discord.ui.TextInput(
+            label='Value (e.g. "5gp 2sp"; blank = unset)',
+            required=False,
+            default=default_value,
+            max_length=50,
+        )
+        self.add_item(self._name)
+        self.add_item(self._description)
+        self.add_item(self._gear_slots)
+        self.add_item(self._bundle_size)
+        self.add_item(self._value)
+
+    @classmethod
+    def from_item(cls, item: Item, *, new_type: str | None = None) -> "EditItemModal":
+        return cls(
+            item_id=item.id,
+            original_name=item.name,
+            default_name=item.name,
+            default_description=item.description or "",
+            default_gear_slots=f"{item.gear_slots:g}",
+            default_bundle_size=str(item.bundle_size),
+            default_value=format_cp(item.value_cp) or "",
+            new_type=new_type,
+        )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        new_name = str(self._name.value).strip()
+        if not new_name:
+            await interaction.response.send_message(
+                "**Failed to save.**\nName cannot be empty.", ephemeral=True
+            )
+            return
+
+        try:
+            gear_slots = float(str(self._gear_slots.value).strip())
+        except ValueError:
+            await interaction.response.send_message(
+                "**Failed to save.**\nGear slots must be a number.", ephemeral=True
+            )
+            return
+        if gear_slots < 0:
+            await interaction.response.send_message(
+                "**Failed to save.**\nGear slots must be ≥ 0.", ephemeral=True
+            )
+            return
+
+        try:
+            bundle_size = int(str(self._bundle_size.value).strip())
+        except ValueError:
+            await interaction.response.send_message(
+                "**Failed to save.**\nBundle size must be a whole number.",
+                ephemeral=True,
+            )
+            return
+        if bundle_size < 1:
+            await interaction.response.send_message(
+                "**Failed to save.**\nBundle size must be ≥ 1.", ephemeral=True
+            )
+            return
+
+        try:
+            value_cp = parse_value_string(str(self._value.value))
+        except ValueError as err:
+            await interaction.response.send_message(
+                f"**Failed to save.**\n{err}", ephemeral=True
+            )
+            return
+
+        description = str(self._description.value).strip() or None
+
+        with session_scope() as session:
+            item = session.get(Item, self.item_id)
+            if item is None:
+                await interaction.response.send_message(
+                    f"**{self.original_name}** no longer exists.", ephemeral=True
+                )
+                return
+
+            if new_name != item.name:
+                collision = session.scalar(
+                    select(Item).where(
+                        Item.name == new_name, Item.id != item.id
+                    )
+                )
+                if collision is not None:
+                    await interaction.response.send_message(
+                        f"**Failed to save.**\nAn item named **{new_name}** "
+                        "already exists.",
+                        ephemeral=True,
+                    )
+                    return
+
+            err = _check_type_change(session, item, self.new_type)
+            if err is not None:
+                await interaction.response.send_message(err, ephemeral=True)
+                return
+
+            item.name = new_name
+            item.description = description
+            item.gear_slots = gear_slots
+            item.bundle_size = bundle_size
+            item.value_cp = value_cp
+            if self.new_type is not None:
+                item.item_type = self.new_type
+            session.flush()
+
+            embed = build_item_embed(item)
+            embed.set_footer(text=f"Edited by {interaction.user.display_name}")
+
+        await interaction.response.send_message(
+            embed=embed, view=ShareableView(), ephemeral=True
+        )
+
+
+# ---------- Browse views ----------
+
+
+def _build_catalog_list_payload(
+    type_val: str | None,
+) -> tuple[discord.Embed, "CatalogListView"] | None:
+    """Build (embed, view) for the browse list. None if no items match."""
+    with session_scope() as session:
+        stmt = select(Item).order_by(Item.name)
+        if type_val is not None:
+            stmt = stmt.where(Item.item_type == type_val)
+        all_items = list(session.scalars(stmt).all())
+        if not all_items:
+            return None
+
+        if type_val is not None:
+            label = _TYPE_LABEL.get(type_val, "Items")
+            title = f"{label} ({len(all_items)})"
+        else:
+            title = f"Item Catalog ({len(all_items)})"
+        embed = discord.Embed(title=title, color=discord.Color.dark_gray())
+
+        if type_val is not None:
+            visible = all_items[:MAX_ITEMS_PER_GROUP]
+            lines = [_format_list_line(it) for it in visible]
+            if len(all_items) > MAX_ITEMS_PER_GROUP:
+                lines.append(f"…and {len(all_items) - MAX_ITEMS_PER_GROUP} more")
+            embed.description = "\n".join(lines)
+        else:
+            for type_key, label in _TYPE_GROUPS:
+                group = [it for it in all_items if it.item_type == type_key]
+                if group:
+                    embed.add_field(
+                        name=f"{label} ({len(group)})",
+                        value=_format_list_block(group),
+                        inline=False,
+                    )
+
+        names = [it.name for it in all_items[:25]]
+        if len(all_items) > 25:
+            embed.set_footer(
+                text="Dropdown shows the first 25 alphabetically — use type: to narrow."
+            )
+    return embed, CatalogListView(names, type_val)
+
+
+def _build_catalog_item_detail_payload(
+    item_name: str, type_val: str | None
+) -> tuple[discord.Embed, "CatalogItemDetailView"] | None:
+    """Build (embed, view) for one item drilled into from browse."""
+    with session_scope() as session:
+        item = session.scalar(select(Item).where(Item.name == item_name))
+        if item is None:
+            return None
+        embed = build_item_embed(item)
+        item_id = item.id
+        original_name = item.name
+        default_description = item.description or ""
+        default_gear_slots = f"{item.gear_slots:g}"
+        default_bundle_size = str(item.bundle_size)
+        default_value = format_cp(item.value_cp) or ""
+    return embed, CatalogItemDetailView(
+        type_val=type_val,
+        modal_kwargs=dict(
+            item_id=item_id,
+            original_name=original_name,
+            default_name=original_name,
+            default_description=default_description,
+            default_gear_slots=default_gear_slots,
+            default_bundle_size=default_bundle_size,
+            default_value=default_value,
+        ),
+    )
+
+
+class CatalogItemSelect(discord.ui.Select):
+    """Dropdown listing catalog items. Picking one drills into its detail."""
+
+    def __init__(self, item_names: list[str], type_val: str | None) -> None:
+        options = [
+            discord.SelectOption(label=name[:100], value=name[:100])
+            for name in item_names[:25]
+        ]
+        super().__init__(
+            placeholder="Inspect an item…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+        self.type_val = type_val
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        item_name = self.values[0]
+        payload = _build_catalog_item_detail_payload(item_name, self.type_val)
+        if payload is None:
+            await interaction.response.send_message(
+                f"**{item_name}** no longer exists.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class CatalogListView(discord.ui.View):
+    """Browse list embed with item-picker dropdown and share."""
+
+    def __init__(self, item_names: list[str], type_val: str | None) -> None:
+        super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
+        if item_names:
+            self.add_item(CatalogItemSelect(item_names, type_val))
+        self.add_item(ShareButton(row=4))
+
+
+class EditItemButton(discord.ui.Button):
+    def __init__(self, modal_kwargs: dict) -> None:
+        super().__init__(label="Edit", style=discord.ButtonStyle.primary, row=0)
+        self._modal_kwargs = modal_kwargs
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(EditItemModal(**self._modal_kwargs))
+
+
+class CatalogItemDetailView(discord.ui.View):
+    """Item-detail embed with Edit + Back + Share."""
+
+    def __init__(self, *, type_val: str | None, modal_kwargs: dict) -> None:
+        super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
+        self.type_val = type_val
+        self.add_item(EditItemButton(modal_kwargs))
+        self.add_item(ShareButton(row=4))
+
+    @discord.ui.button(
+        label="← Back to catalog",
+        style=discord.ButtonStyle.primary,
+        row=1,
+    )
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_catalog_list_payload(self.type_val)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="The catalog is now empty.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
 
 
 async def setup(bot: commands.Bot) -> None:

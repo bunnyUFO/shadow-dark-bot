@@ -119,7 +119,7 @@ pct exec <ctid> -- bash -c "cd /opt/shadow-dark-bot && docker compose logs -f bo
 | Symptom | Check |
 |---|---|
 | `docker compose up` exits immediately | `docker compose logs bot` — usually a bad token or a code-level error during startup |
-| Bot online but commands missing | Bot was invited without `applications.commands` scope (re-invite per `docs/setup-discord.md`), or joined a second guild and is syncing to the wrong one (check the startup log line for the guild name/id) |
+| Bot online but commands missing | Bot was invited without `applications.commands` scope (re-invite per `docs/setup-discord.md`). The startup log prints one `Synced N command(s) to guild …` line per server it's in — confirm the server you're testing in is listed. |
 | `unable to open database file` | If you somehow bypassed the entrypoint: `pct exec <ctid> -- chown -R 1000:1000 /opt/shadow-dark-bot/data && pct exec <ctid> -- bash -c "cd /opt/shadow-dark-bot && docker compose restart bot"` |
 | `script_location key not found` | The Dockerfile got built non-editable; pull latest (`pip install -e .` in the Dockerfile is required so `Path(__file__).parents[2]` resolves to `/app` for finding `alembic.ini`) |
 | `bad interpreter` on `docker-entrypoint.sh` | `.gitattributes` issue — file got CRLF line endings via Windows. Add `*.sh text eol=lf`, `git add --renormalize .`, recommit |

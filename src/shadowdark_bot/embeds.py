@@ -153,40 +153,17 @@ def build_treasury_instance_embed(
     entry: TreasuryEntry,
     actor_mention: str,
     action: str,
-    *,
-    borrower_mention: str | None = None,
-    notes: str | None = None,
-    held_for: str | None = None,
 ) -> discord.Embed:
+    """Confirmation embed for /treasury add and /treasury remove."""
     title = f"#{entry.id}  {entry.item.name}"
     if entry.tag:
         title += f" ({entry.tag})"
 
     embed = discord.Embed(title=title, color=TREASURY_COLOR)
-
-    lines: list[str] = []
     if action == "added":
-        lines.append(f"Added to the treasury by {actor_mention}.")
+        embed.description = f"Added to the treasury by {actor_mention}."
     elif action == "removed":
-        lines.append(f"Removed from the treasury by {actor_mention}.")
-    elif action == "borrowed":
-        if borrower_mention and borrower_mention != actor_mention:
-            lines.append(f"Borrowed by {borrower_mention}.")
-            lines.append(f"_(checked out by {actor_mention})_")
-        else:
-            lines.append(f"Borrowed by {actor_mention}.")
-    elif action == "returned":
-        clause = f"Returned by {actor_mention}."
-        if borrower_mention and held_for:
-            clause += f"\n{borrower_mention} had it for {held_for}."
-        elif held_for:
-            clause += f"\nHeld for {held_for}."
-        lines.append(clause)
-
-    if notes:
-        lines.append(f"_Notes: {notes}_")
-
-    embed.description = "\n".join(lines)
+        embed.description = f"Removed from the treasury by {actor_mention}."
     return embed
 
 
@@ -194,9 +171,8 @@ def build_treasury_info_embed(
     entry: TreasuryEntry,
     open_borrow: Borrow | None = None,
 ) -> discord.Embed:
-    """Static info embed for one treasury entry — used by /treasury info and
-    by the interactive list's drill-down. Mirrors build_item_embed's fields
-    plus current status."""
+    """Static info embed for one treasury entry — used by the interactive
+    list's drill-down. Mirrors build_item_embed's fields plus current status."""
     title = f"#{entry.id}  {entry.item.name}"
     if entry.tag:
         title += f" ({entry.tag})"
@@ -226,37 +202,6 @@ def build_treasury_info_embed(
     else:
         lines.append("**Status:** Available")
 
-    embed.description = "\n".join(lines)
-    return embed
-
-
-def build_who_has_embed(
-    item: Item,
-    pairs: list[tuple[TreasuryEntry, Borrow | None]],
-) -> discord.Embed:
-    plural = "instance" if len(pairs) == 1 else "instances"
-    embed = discord.Embed(
-        title=f"{item.name} — {len(pairs)} {plural}",
-        color=TREASURY_COLOR,
-    )
-
-    if not pairs:
-        embed.description = "_No treasury instances of this item._"
-        return embed
-
-    lines: list[str] = []
-    for entry, borrow_row in pairs:
-        tag_str = f" ({entry.tag})" if entry.tag else " (no tag)"
-        if borrow_row is None:
-            lines.append(f"• #{entry.id}{tag_str} — available")
-        else:
-            line = (
-                f"• #{entry.id}{tag_str} — borrowed by <@{borrow_row.borrower_id}>, "
-                f"{format_timesince(borrow_row.borrowed_at)}"
-            )
-            if borrow_row.notes:
-                line += f"\n   _{borrow_row.notes}_"
-            lines.append(line)
     embed.description = "\n".join(lines)
     return embed
 
