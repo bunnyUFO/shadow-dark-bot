@@ -9,7 +9,7 @@ For now, **all commands are open to all guild members**. There's no role-gating 
 Each of the four systems has a **`browse`** command that is the main, all-in-one way to interact with it. Browse lists what's there, lets you drill down into a specific item or entry, and exposes the common actions as buttons / dropdowns inside the same ephemeral view. The narrower slash commands (`/items add`, `/inventory add`, `/treasury add`, `/coffers add` and friends) are still around as shortcuts for power use, but **most day-to-day use should go through browse**:
 
 - `/items browse` — list / inspect / edit the catalog.
-- `/inventory browse` — list locations / inspect contents / add or take items.
+- `/inventory browse` — list locations / inspect contents / add more or take items already at a location. (Use `/inventory add` to add a brand-new item to a location.)
 - `/treasury browse` — list magical instances / inspect / borrow / return.
 - `/coffers browse` — see the balance / buy catalog items.
 
@@ -53,7 +53,7 @@ For items donated to the guild that anyone can take freely (rope, rations, torch
 | `/inventory location-edit name max_gear_slots? description?` | Update capacity or description. Refuses if shrinking capacity below current usage. | `/inventory location-edit name:"Main Stash" max_gear_slots:30` |
 | `/inventory location-delete name` | Remove a location. Must be empty. | `/inventory location-delete name:"Old Camp"` |
 | `/inventory add location item quantity=1 notes?` | Add to a stack at a location. Item must exist in the catalog and be any type **except magical**. Same item at the same location always merges into one stack; the capacity check uses the bundle-aware delta, so adding to a partially-filled bundle may consume 0 extra slots. | `/inventory add location:"Main Stash" item:"Arrows" quantity:15` |
-| `/inventory browse location?` | The single entry point for inspecting + acting on inventory. No `location` arg: lists every inventory location with `used/max` slot utilization. Three-level drill-down: pick a location → see its contents (with an "Inspect an item…" dropdown and a `+ Add item` button) → pick an item → see its catalog info with a footer showing how many are at that location, plus `+ Add more` and `− Take` quick-action buttons. Add/Take open small modals for quantity (and item name when adding from the location view). With `location`: jumps straight to the location's detail view. | `/inventory browse location:"Main Stash"` |
+| `/inventory browse location?` | The main way to inspect and act on inventory. No `location` arg: lists every inventory location with `used/max` slot utilization. Three-level drill-down: pick a location → see its contents (with an "Inspect an item…" dropdown) → pick an item → see its catalog info with a footer showing how many are at that location, plus `+ Add more` and `− Take` quick-action buttons that open small quantity modals. To add an item that isn't already at the location, use `/inventory add` — it has location/item autocomplete. With `location:`: jumps straight to that location's detail view. | `/inventory browse location:"Main Stash"` |
 
 **Common flow** — donating loot after a session:
 ```

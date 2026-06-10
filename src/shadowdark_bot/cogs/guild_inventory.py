@@ -404,11 +404,10 @@ def _build_item_detail_payload(
             )
         )
         stack_qty = stack.quantity if stack else 0
-        is_magical = item.item_type == ITEM_TYPE_MAGICAL
         embed = build_item_embed(item)
         if stack is not None:
             embed.set_footer(text=f"{stack.quantity}× at {location_name}")
-    return embed, ItemDetailView(location_name, item_name, stack_qty, is_magical)
+    return embed, ItemDetailView(location_name, item_name, stack_qty)
 
 
 class LocationSelect(discord.ui.Select):
@@ -477,14 +476,14 @@ class LocationItemSelect(discord.ui.Select):
 
 
 class LocationDetailView(discord.ui.View):
-    """Detail embed: item-picker dropdown (if stocked), add-item + back buttons, share."""
+    """Detail embed: item-picker dropdown (if stocked) + back + share. Adding
+    new items goes through `/inventory add`."""
 
     def __init__(self, location_name: str, item_names: list[str]) -> None:
         super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
         self.location_name = location_name
         if item_names:
             self.add_item(LocationItemSelect(location_name, item_names))
-        self.add_item(AddItemButton(location_name, row=2))
         self.add_item(ShareButton(row=4))
 
     @discord.ui.button(
@@ -509,28 +508,20 @@ class LocationDetailView(discord.ui.View):
 
 class ItemDetailView(discord.ui.View):
     """Item-info embed shown in the context of a location. Has Add-more / Take
-    quick-action buttons (disabled for magical items / empty stacks), plus Back
-    to the location detail view."""
+    quick-action buttons (Take is disabled for empty stacks) plus Back to the
+    location detail view. Adding an item that isn't already at the location
+    goes through `/inventory add`."""
 
     def __init__(
         self,
         location_name: str,
         item_name: str,
         stack_qty: int,
-        is_magical: bool,
     ) -> None:
         super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
         self.location_name = location_name
         self.item_name = item_name
-
-        self.add_item(
-            AddItemButton(
-                location_name,
-                prefilled_item=item_name,
-                row=0,
-                disabled=is_magical,
-            )
-        )
+        self.add_item(AddMoreButton(location_name, item_name, row=0))
         self.add_item(
             TakeButton(location_name, item_name, stack_qty, row=0)
         )
@@ -567,28 +558,18 @@ def _used_slots(session: Session, location_id: int) -> float:
     return float(sum(stack_slots(q, g, b) for q, g, b in rows))
 
 
-# ---------- Add / Take modals + buttons ----------
+# ---------- Add-more / Take modals + buttons (item detail view only) ----------
 
 
-class AddItemModal(discord.ui.Modal):
-    """Opened from the location detail view ('+ Add item') or the item detail
-    view ('+ Add more', with the item pre-filled)."""
+class AddMoreModal(discord.ui.Modal):
+    """Opened from the item detail view '+ Add more'. Item is pre-known;
+    only the quantity (and optional notes) is needed."""
 
-    def __init__(
-        self,
-        location_name: str,
-        *,
-        prefilled_item: str | None = None,
-    ) -> None:
-        super().__init__(title=f"Add to {location_name}"[:45])
+    def __init__(self, location_name: str, item_name: str) -> None:
+        super().__init__(title=f"Add more {item_name}"[:45])
         self.location_name = location_name
+        self.item_name = item_name
 
-        self._item = discord.ui.TextInput(
-            label="Item name",
-            required=True,
-            default=prefilled_item or "",
-            max_length=100,
-        )
         self._qty = discord.ui.TextInput(
             label="Quantity",
             required=True,
@@ -600,7 +581,6 @@ class AddItemModal(discord.ui.Modal):
             required=False,
             max_length=200,
         )
-        self.add_item(self._item)
         self.add_item(self._qty)
         self.add_item(self._notes)
 
@@ -616,7 +596,7 @@ class AddItemModal(discord.ui.Modal):
         await _do_add(
             interaction,
             location_name=self.location_name,
-            item_name=str(self._item.value),
+            item_name=self.item_name,
             quantity=quantity,
             notes=str(self._notes.value) if self._notes.value else None,
             edit_view=True,
@@ -658,27 +638,19 @@ class TakeModal(discord.ui.Modal):
         )
 
 
-class AddItemButton(discord.ui.Button):
-    def __init__(
-        self,
-        location_name: str,
-        *,
-        prefilled_item: str | None = None,
-        row: int = 2,
-        disabled: bool = False,
-    ) -> None:
+class AddMoreButton(discord.ui.Button):
+    def __init__(self, location_name: str, item_name: str, row: int = 0) -> None:
         super().__init__(
-            label="+ Add more" if prefilled_item else "+ Add item",
+            label="+ Add more",
             style=discord.ButtonStyle.success,
             row=row,
-            disabled=disabled,
         )
         self.location_name = location_name
-        self.prefilled_item = prefilled_item
+        self.item_name = item_name
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(
-            AddItemModal(self.location_name, prefilled_item=self.prefilled_item)
+            AddMoreModal(self.location_name, self.item_name)
         )
 
 
@@ -808,7 +780,9 @@ async def _do_add(
         f"Stack: {final_stack_qty}. "
         f"Capacity: {fmt_slots(new_used)}/{fmt_slots(cap)} slots."
     )
-    await _respond(interaction, confirmation, clean_location, edit_view)
+    await _respond(
+        interaction, confirmation, clean_location, clean_item, edit_view
+    )
 
 
 async def _do_take(
@@ -883,19 +857,23 @@ async def _do_take(
             f"Took {quantity}× **{clean_item}** from **{clean_location}**. "
             f"{stack.quantity} remaining."
         )
-    await _respond(interaction, confirmation, clean_location, edit_view)
+    await _respond(
+        interaction, confirmation, clean_location, clean_item, edit_view
+    )
 
 
 async def _respond(
     interaction: discord.Interaction,
     confirmation: str,
     location_name: str,
+    item_name: str,
     edit_view: bool,
 ) -> None:
     """Send the confirmation. For modal-driven actions also refresh the parent
-    detail view so the dropdown/footer reflects the new state."""
+    item detail view so the embed footer reflects the new stack count (or the
+    stack disappears if the take emptied it)."""
     if edit_view:
-        payload = _build_detail_payload(location_name)
+        payload = _build_item_detail_payload(location_name, item_name)
         if payload is not None:
             embed, view = payload
             await interaction.response.edit_message(embed=embed, view=view)

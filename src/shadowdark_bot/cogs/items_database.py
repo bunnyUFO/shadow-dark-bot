@@ -26,6 +26,7 @@ from shadowdark_bot.models import (
 log = logging.getLogger("shadowdark_bot.items")
 
 MAX_ITEMS_PER_GROUP = 25
+PAGE_SIZE = 25  # Discord caps a string-select at 25 options
 VIEW_TIMEOUT_SECONDS = 300
 
 _TYPE_GROUPS: tuple[tuple[str, str], ...] = (
@@ -483,8 +484,13 @@ class EditItemModal(discord.ui.Modal):
 
 def _build_catalog_list_payload(
     type_val: str | None,
+    page: int = 0,
 ) -> tuple[discord.Embed, "CatalogListView"] | None:
-    """Build (embed, view) for the browse list. None if no items match."""
+    """Build (embed, view) for the browse list. None if no items match.
+
+    The dropdown is page-sliced (PAGE_SIZE items at a time) with Prev/Next
+    buttons; the embed itself shows the full grouped overview so users see
+    everything at a glance."""
     with session_scope() as session:
         stmt = select(Item).order_by(Item.name)
         if type_val is not None:
@@ -493,18 +499,22 @@ def _build_catalog_list_payload(
         if not all_items:
             return None
 
+        total = len(all_items)
+        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        page = max(0, min(page, total_pages - 1))
+
         if type_val is not None:
             label = _TYPE_LABEL.get(type_val, "Items")
-            title = f"{label} ({len(all_items)})"
+            title = f"{label} ({total})"
         else:
-            title = f"Item Catalog ({len(all_items)})"
+            title = f"Item Catalog ({total})"
         embed = discord.Embed(title=title, color=discord.Color.dark_gray())
 
         if type_val is not None:
             visible = all_items[:MAX_ITEMS_PER_GROUP]
             lines = [_format_list_line(it) for it in visible]
-            if len(all_items) > MAX_ITEMS_PER_GROUP:
-                lines.append(f"…and {len(all_items) - MAX_ITEMS_PER_GROUP} more")
+            if total > MAX_ITEMS_PER_GROUP:
+                lines.append(f"…and {total - MAX_ITEMS_PER_GROUP} more")
             embed.description = "\n".join(lines)
         else:
             for type_key, label in _TYPE_GROUPS:
@@ -516,18 +526,28 @@ def _build_catalog_list_payload(
                         inline=False,
                     )
 
-        names = [it.name for it in all_items[:25]]
-        if len(all_items) > 25:
+        start = page * PAGE_SIZE
+        page_items = all_items[start:start + PAGE_SIZE]
+        page_names = [it.name for it in page_items]
+
+        if total_pages > 1:
             embed.set_footer(
-                text="Dropdown shows the first 25 alphabetically — use type: to narrow."
+                text=(
+                    f"Dropdown page {page + 1} of {total_pages} "
+                    f"(items {start + 1}–{start + len(page_items)} alphabetically) "
+                    "— use type: to narrow."
+                )
             )
-    return embed, CatalogListView(names, type_val)
+    return embed, CatalogListView(page_names, type_val, page, total_pages)
 
 
 def _build_catalog_item_detail_payload(
-    item_name: str, type_val: str | None
+    item_name: str,
+    type_val: str | None,
+    page: int = 0,
 ) -> tuple[discord.Embed, "CatalogItemDetailView"] | None:
-    """Build (embed, view) for one item drilled into from browse."""
+    """Build (embed, view) for one item drilled into from browse. `page` is
+    the catalog page the user came from, so Back returns to the same page."""
     with session_scope() as session:
         item = session.scalar(select(Item).where(Item.name == item_name))
         if item is None:
@@ -541,6 +561,7 @@ def _build_catalog_item_detail_payload(
         default_value = format_cp(item.value_cp) or ""
     return embed, CatalogItemDetailView(
         type_val=type_val,
+        page=page,
         modal_kwargs=dict(
             item_id=item_id,
             original_name=original_name,
@@ -556,10 +577,15 @@ def _build_catalog_item_detail_payload(
 class CatalogItemSelect(discord.ui.Select):
     """Dropdown listing catalog items. Picking one drills into its detail."""
 
-    def __init__(self, item_names: list[str], type_val: str | None) -> None:
+    def __init__(
+        self,
+        item_names: list[str],
+        type_val: str | None,
+        page: int,
+    ) -> None:
         options = [
             discord.SelectOption(label=name[:100], value=name[:100])
-            for name in item_names[:25]
+            for name in item_names[:PAGE_SIZE]
         ]
         super().__init__(
             placeholder="Inspect an item…",
@@ -569,10 +595,13 @@ class CatalogItemSelect(discord.ui.Select):
             row=0,
         )
         self.type_val = type_val
+        self.page = page
 
     async def callback(self, interaction: discord.Interaction) -> None:
         item_name = self.values[0]
-        payload = _build_catalog_item_detail_payload(item_name, self.type_val)
+        payload = _build_catalog_item_detail_payload(
+            item_name, self.type_val, self.page
+        )
         if payload is None:
             await interaction.response.send_message(
                 f"**{item_name}** no longer exists.", ephemeral=True
@@ -582,13 +611,59 @@ class CatalogItemSelect(discord.ui.Select):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
-class CatalogListView(discord.ui.View):
-    """Browse list embed with item-picker dropdown and share."""
+class _PageButton(discord.ui.Button):
+    """Base class for the Prev/Next pagination buttons."""
 
-    def __init__(self, item_names: list[str], type_val: str | None) -> None:
+    def __init__(self, *, label: str, delta: int, disabled: bool) -> None:
+        super().__init__(
+            label=label,
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=disabled,
+        )
+        self.delta = delta
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: "CatalogListView" = self.view  # type: ignore[assignment]
+        payload = _build_catalog_list_payload(
+            view.type_val, page=view.page + self.delta
+        )
+        if payload is None:
+            await interaction.response.edit_message(
+                content="The catalog is now empty.", embed=None, view=None
+            )
+            return
+        embed, new_view = payload
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+
+class CatalogListView(discord.ui.View):
+    """Browse list embed with item-picker dropdown, optional Prev/Next, share."""
+
+    def __init__(
+        self,
+        item_names: list[str],
+        type_val: str | None,
+        page: int,
+        total_pages: int,
+    ) -> None:
         super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
+        self.type_val = type_val
+        self.page = page
+        self.total_pages = total_pages
         if item_names:
-            self.add_item(CatalogItemSelect(item_names, type_val))
+            self.add_item(CatalogItemSelect(item_names, type_val, page))
+        if total_pages > 1:
+            self.add_item(
+                _PageButton(label="← Prev", delta=-1, disabled=(page == 0))
+            )
+            self.add_item(
+                _PageButton(
+                    label="Next →",
+                    delta=1,
+                    disabled=(page >= total_pages - 1),
+                )
+            )
         self.add_item(ShareButton(row=4))
 
 
@@ -602,11 +677,19 @@ class EditItemButton(discord.ui.Button):
 
 
 class CatalogItemDetailView(discord.ui.View):
-    """Item-detail embed with Edit + Back + Share."""
+    """Item-detail embed with Edit + Back + Share. Back returns to the page
+    the user came from."""
 
-    def __init__(self, *, type_val: str | None, modal_kwargs: dict) -> None:
+    def __init__(
+        self,
+        *,
+        type_val: str | None,
+        page: int,
+        modal_kwargs: dict,
+    ) -> None:
         super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
         self.type_val = type_val
+        self.page = page
         self.add_item(EditItemButton(modal_kwargs))
         self.add_item(ShareButton(row=4))
 
@@ -618,7 +701,7 @@ class CatalogItemDetailView(discord.ui.View):
     async def back(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        payload = _build_catalog_list_payload(self.type_val)
+        payload = _build_catalog_list_payload(self.type_val, page=self.page)
         if payload is None:
             await interaction.response.edit_message(
                 content="The catalog is now empty.", embed=None, view=None
