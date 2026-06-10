@@ -530,12 +530,14 @@ def _build_catalog_list_payload(
         page_items = all_items[start:start + PAGE_SIZE]
         page_names = [it.name for it in page_items]
 
-        if total_pages > 1:
+        if total_pages > 1 and page_items:
+            first = page_items[0].name
+            last = page_items[-1].name
+            range_str = first if first == last else f"{first} → {last}"
             embed.set_footer(
                 text=(
-                    f"Dropdown page {page + 1} of {total_pages} "
-                    f"(items {start + 1}–{start + len(page_items)} alphabetically) "
-                    "— use type: to narrow."
+                    f"Dropdown page {page + 1} of {total_pages} · "
+                    f"{range_str} · use type: to narrow."
                 )
             )
     return embed, CatalogListView(page_names, type_val, page, total_pages)
