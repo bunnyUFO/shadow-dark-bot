@@ -193,6 +193,11 @@ async def _do_carry(
             f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
         )
         return
+    if freeform_slots < 0:
+        await interaction.response.send_message(
+            f"{failure}\nGear slots each must be ≥ 0.", ephemeral=True
+        )
+        return
 
     with session_scope() as session:
         char = _load_character(session, user_id)
@@ -1046,15 +1051,22 @@ class PlayerCharacters(commands.Cog):
     @app_commands.describe(
         item="Item name — matching a catalog item links it; anything else is freeform",
         quantity="How many (defaults to 1)",
+        gear_slots="Slots per item for a new freeform item (defaults to 1; "
+        "ignored for catalog items)",
     )
     async def carry(
-        self, interaction: discord.Interaction, item: str, quantity: int = 1
+        self,
+        interaction: discord.Interaction,
+        item: str,
+        quantity: int = 1,
+        gear_slots: float | None = None,
     ) -> None:
         await _do_carry(
             interaction,
             user_id=str(interaction.user.id),
             item_name=item,
             quantity=quantity,
+            freeform_slots=gear_slots if gear_slots is not None else 1.0,
         )
 
     @carry.autocomplete("item")
