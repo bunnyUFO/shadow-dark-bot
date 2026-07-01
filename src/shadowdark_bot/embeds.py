@@ -32,6 +32,29 @@ _ITEM_TYPE_DISPLAY: dict[str, tuple[str, discord.Color]] = {
 }
 
 
+# Bold field markers that build_item_embed / build_treasury_info_embed render
+# from an item's structured columns. If a stored description already contains
+# these lines (e.g. an item whose Gear slots/Type/Value/Status got baked into
+# the free-text description), strip them so they aren't rendered a second time.
+_RENDERED_FIELD_PREFIXES = (
+    "**Gear slots:**",
+    "**Type:**",
+    "**Value:**",
+    "**Status:**",
+)
+
+
+def _clean_description(description: str) -> str:
+    """Drop any auto-generated field lines from a free-text description so the
+    structured fields aren't duplicated when the embed re-renders them."""
+    kept = [
+        line
+        for line in description.split("\n")
+        if not line.strip().startswith(_RENDERED_FIELD_PREFIXES)
+    ]
+    return "\n".join(kept).strip("\n")
+
+
 def build_item_embed(item: Item) -> discord.Embed:
     label, color = _ITEM_TYPE_DISPLAY.get(
         item.item_type, ("Common", discord.Color.blue())
@@ -40,8 +63,10 @@ def build_item_embed(item: Item) -> discord.Embed:
 
     lines: list[str] = []
     if item.description:
-        lines.append(item.description)
-        lines.append("")
+        description = _clean_description(item.description)
+        if description:
+            lines.append(description)
+            lines.append("")
     if item.bundle_size > 1:
         lines.append(
             f"**Gear slots:** {fmt_slots(item.gear_slots)} per {item.bundle_size}"
@@ -180,8 +205,10 @@ def build_treasury_info_embed(
 
     lines: list[str] = []
     if entry.item.description:
-        lines.append(entry.item.description)
-        lines.append("")
+        description = _clean_description(entry.item.description)
+        if description:
+            lines.append(description)
+            lines.append("")
     if entry.item.bundle_size > 1:
         lines.append(
             f"**Gear slots:** {fmt_slots(entry.item.gear_slots)} per {entry.item.bundle_size}"
