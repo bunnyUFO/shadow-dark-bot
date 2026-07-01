@@ -13,6 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from shadowdark_bot.rules import stack_slots
 
 ITEM_TYPE_COMMON = "common"
 ITEM_TYPE_MAGICAL = "magical"
@@ -165,3 +166,129 @@ class Coffer(Base):
     balance_cp: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+
+
+class PlayerCharacter(Base):
+    """One Shadow Dark character per Discord user (keyed by user_id).
+
+    Gold is stored as integer copper (like items/coffers). Current HP is not
+    tracked — only max HP. `spell_ability` names the casting stat (int/wis) or
+    is NULL for non-casters; `spell_check_bonus` captures talent-granted bonuses.
+    """
+
+    __tablename__ = "player_characters"
+    __table_args__ = (
+        CheckConstraint("level >= 1", name="ck_characters_level_positive"),
+        CheckConstraint(
+            "spell_ability IN ('int', 'wis')", name="ck_characters_spell_ability"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    char_class: Mapped[str | None] = mapped_column(String)
+    level: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    max_hp: Mapped[int | None] = mapped_column(Integer)
+    armor_class: Mapped[int | None] = mapped_column(Integer)
+    str_score: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default="10"
+    )
+    dex_score: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default="10"
+    )
+    con_score: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default="10"
+    )
+    int_score: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default="10"
+    )
+    wis_score: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default="10"
+    )
+    cha_score: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default="10"
+    )
+    gold_cp: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    talents: Mapped[str | None] = mapped_column(Text)
+    spell_ability: Mapped[str | None] = mapped_column(String)
+    spell_check_bonus: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+    items: Mapped[list["CharacterItem"]] = relationship(
+        back_populates="character", cascade="all, delete-orphan"
+    )
+
+
+class CharacterItem(Base):
+    """A stack of items a character is carrying.
+
+    Hybrid: `item_id` links to the shared catalog (reusing its gear_slots /
+    bundle_size), or is NULL for a freeform typed item whose `name`,
+    `slots_each`, and `bundle_size` live on this row.
+    """
+
+    __tablename__ = "character_items"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_character_items_quantity_positive"),
+        # One stack per catalog item. Freeform rows (item_id NULL) are exempt —
+        # SQLite treats NULLs as distinct — and are de-duped by name in code.
+        UniqueConstraint("character_id", "item_id", name="uq_character_item"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("player_characters.id"), nullable=False
+    )
+    item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id"))
+    name: Mapped[str | None] = mapped_column(String)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    slots_each: Mapped[float | None] = mapped_column(Float)
+    bundle_size: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+    character: Mapped[PlayerCharacter] = relationship(back_populates="items")
+    item: Mapped[Item | None] = relationship()
+
+    @property
+    def is_catalog(self) -> bool:
+        return self.item_id is not None
+
+    @property
+    def display_name(self) -> str:
+        if self.item_id is not None and self.item is not None:
+            return self.item.name
+        return self.name or "(unnamed)"
+
+    @property
+    def effective_gear_slots(self) -> float:
+        if self.item_id is not None and self.item is not None:
+            return self.item.gear_slots
+        return self.slots_each if self.slots_each is not None else 1.0
+
+    @property
+    def effective_bundle_size(self) -> int:
+        if self.item_id is not None and self.item is not None:
+            return self.item.bundle_size
+        return self.bundle_size if self.bundle_size is not None else 1
+
+    @property
+    def slot_cost(self) -> float:
+        """Bundle-aware gear-slot cost of this stack."""
+        return stack_slots(
+            self.quantity, self.effective_gear_slots, self.effective_bundle_size
+        )

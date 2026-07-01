@@ -126,6 +126,25 @@ For guild-owned magical items. They are **never given away** — they're borrowe
 
 ---
 
+## `/character` — Your Player Character
+
+Unlike the four guild-shared systems above, a **character belongs to one player** (keyed by Discord user). Each player has **one** character with lean Shadow Dark stats and a carried inventory. You edit **your own** character through an ephemeral, interactive sheet; you can **view** anyone else's read-only.
+
+Stats covered: name, class, level, **max HP**, AC, the six ability scores (with an auto-computed modifier table), gold (entered gp/sp/cp, stored as copper), a free-text **Talents** section, and an optional **spellcasting** modifier (governing stat INT or WIS plus a manual spell-check bonus for talent-granted bonuses).
+
+Inventory is **hybrid**: a carried item either links to the shared `/items` catalog (reusing its gear-slot / bundle data) or is a **freeform** typed name with its own per-item slot cost. Carry capacity is the Shadow Dark limit: **max(10, STR)** gear slots, using the same bundle-aware ceiling math as guild inventory.
+
+| Command | What it does | Example |
+|---|---|---|
+| `/character sheet` | Open **your** sheet as an ephemeral, interactive embed. If you don't have a character yet, a **Create character** button opens the details form. The sheet's buttons — **Edit Details** (name/class/level/max HP/AC), **Edit Abilities & Gold** (six scores + gold), **Edit Talents & Casting** (talents, spellcasting stat, spell bonus), and **Manage Inventory** — open modals or swap the view in place. | `/character sheet` |
+| `/character carry item quantity?` | Add an item you're carrying. Autocomplete suggests catalog items (a match links it); any other text becomes a freeform item. Blocked if it would exceed your carry capacity. | `/character carry item:"Arrows" quantity:20` |
+| `/character show member` | View another player's sheet read-only. Toggle between **Stats** and **Inventory**; no edit buttons. Includes the Share button. | `/character show member:@Tessa` |
+| `/character delete` | Delete your character (and everything it carries) after a confirm button. | `/character delete` |
+
+**Manage Inventory** (from `/character sheet`) lists your stacks with a dropdown; drilling into one exposes **+ Add more**, **− Take**, and **Remove**, plus an **Add item** modal for quick freeform entries. Everything re-checks capacity and updates in place.
+
+---
+
 ## Built-in invariants (not permissions, but they will block you)
 
 Even though commands are open, the bot enforces invariants that prevent broken state:
@@ -141,5 +160,8 @@ Even though commands are open, the bot enforces invariants that prevent broken s
 - Deleting a non-empty location errors.
 - Changing a catalog item's `type` into or out of `magical` is blocked while it's referenced by inventory or treasury entries. Switching between any of the non-magical types (common/weapon/armor/scroll/potion/loot/crafted) is always allowed.
 - Renaming an item via the `/items edit` modal's Name field is rejected if another item already has that name.
+- You can only edit **your own** character; the interactive sheet's controls reject anyone who isn't the owner. `/character show` is always read-only.
+- Carrying items past your capacity — **max(10, STR)** gear slots — errors (bundle-aware ceiling formula, same as guild inventory).
+- Each player has at most one character; the sheet upserts rather than creating duplicates.
 
 Failed operations reply ephemerally (visible only to you) — no silent failures, no stack traces.
