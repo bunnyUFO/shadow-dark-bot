@@ -83,6 +83,40 @@ items ──────────┬─< inventory_entries >── locations
 | `id` | INTEGER PK | Always 1 (singleton; auto-created on first `/coffers` command) |
 | `balance_cp` | INTEGER NOT NULL DEFAULT 0 | Total balance in copper pieces. Renders normalized (1gp 5sp) via `currency.format_cp`. |
 
+### `player_characters` (one per Discord user)
+Unlike everything above, this is **per-player**, not guild-shared. Keyed by `user_id`.
+| Column | Type | Notes |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `user_id` | TEXT UNIQUE NOT NULL | Discord user ID; the UNIQUE constraint enforces **one character per player** |
+| `name` | TEXT NOT NULL | |
+| `char_class` | TEXT NULL | |
+| `level` | INTEGER NOT NULL DEFAULT 1 | `CHECK (level >= 1)` |
+| `max_hp` | INTEGER NULL | Max HP only — current HP is intentionally not tracked |
+| `armor_class` | INTEGER NULL | |
+| `str/dex/con/int/wis/cha _score` | INTEGER NOT NULL DEFAULT 10 | Six ability scores. Modifiers are derived, not stored (`rules.ability_modifier`) |
+| `gold_cp` | INTEGER NOT NULL DEFAULT 0 | Personal gold in copper (same convention as items/coffers) |
+| `talents` | TEXT NULL | Free-text; talent-granted numeric effects live here as prose |
+| `spell_ability` | TEXT NULL | `CHECK (spell_ability IN ('int','wis'))` or NULL. Governing casting stat; NULL = non-caster |
+| `spell_check_bonus` | INTEGER NOT NULL DEFAULT 0 | Flat bonus for talent-granted spellcasting bonuses. Shown modifier = `ability_modifier(spell stat) + this` |
+| `created_at`, `updated_at` | TIMESTAMP | `updated_at` is bumped on every edit |
+
+### `character_items` (a character's carried stacks — hybrid catalog/freeform)
+| Column | Type | Notes |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `character_id` | INTEGER FK player_characters | |
+| `item_id` | INTEGER FK items NULL | Set → **catalog-linked** (reuses the item's `gear_slots`/`bundle_size`). NULL → **freeform** |
+| `name` | TEXT NULL | Freeform display name (used only when `item_id` IS NULL) |
+| `quantity` | INTEGER NOT NULL | `CHECK (quantity > 0)` — zero rows are deleted |
+| `slots_each` | REAL NULL | Freeform per-item slot cost (defaults to 1); ignored when catalog-linked |
+| `bundle_size` | INTEGER NULL | Freeform bundle size (defaults to 1); ignored when catalog-linked |
+| `notes` | TEXT NULL | |
+| `added_at` | TIMESTAMP | |
+| | | `UNIQUE (character_id, item_id)` — one stack per catalog item. Freeform rows (NULL `item_id`) are exempt (SQLite treats NULLs as distinct) and de-duped by name in domain code |
+
+The `CharacterItem.slot_cost` / `display_name` / `effective_gear_slots` properties (in `models.py`) resolve the catalog-vs-freeform split, reusing `rules.stack_slots`. Carry capacity is `rules.carry_capacity(str_score) = max(10, STR)`.
+
 ### `audit_log` (schema reserved; not yet written to)
 | Column | Type | Notes |
 |---|---|---|
@@ -108,6 +142,9 @@ items ──────────┬─< inventory_entries >── locations
 8. **No shrinking below use**: `/inventory location-edit max_gear_slots:N` is blocked if `N` is less than the current sum of used slots at that location.
 9. **No-collision rename**: editing an item's Name in the `/items edit` modal is blocked if another row already has that name.
 10. **Type change with references**: `/items edit type:…` is blocked when switching *into* magical with inventory stacks present, or *out of* magical with treasury instances present. Switching between any non-magical types is always allowed.
+11. **One character per player**: `player_characters.user_id` is UNIQUE. `/character sheet` upserts (creates on first use, edits thereafter) rather than making duplicates.
+12. **Owner-only character edits**: the interactive sheet's controls check `interaction.user.id` against the owner and reject others. `/character show` renders read-only (no edit controls at all).
+13. **Character carry capacity (bundle-aware)**: free slots = `max(10, STR)`; each stack's cost uses the same `ceil(quantity / bundle_size) * gear_slots` formula (catalog data when linked, the row's `slots_each`/`bundle_size` when freeform). `/character carry` and the Add-more button check the delta against remaining capacity.
 
 ## Why one row per magical instance (instead of quantity)?
 
@@ -129,6 +166,7 @@ Alembic. All migrations apply automatically at bot startup (before connecting to
 | `0005_bundle_size` | Adds `items.bundle_size` INTEGER NOT NULL DEFAULT 1 with `CHECK (bundle_size >= 1)`. Inventory capacity math becomes bundle-aware (ceiling per stack). |
 | `0006_item_type` | Replaces `items.is_magical BOOLEAN` with `items.item_type TEXT` ∈ {`common`, `magical`, `crafted`, `scroll`, `potion`, `weapon`, `armor`, `loot`}. Backfill: `is_magical=1 → 'magical'`, else `'common'`. |
 | `0007_widen_item_type` | Drops and recreates the `ck_items_item_type` constraint to ensure it lists all 8 values. Needed for databases where 0006 was deployed with an earlier, narrower value list; no-op-equivalent on fresh installs. |
+| `0008_player_characters` | Adds the `player_characters` (one per user) and `character_items` (hybrid catalog/freeform carried stacks) tables. |
 
 Future slices (e.g., role-based permissions, audit-log writes) will add new revisions. Each one uses `op.batch_alter_table` so SQLite can recreate tables transparently when needed.
 

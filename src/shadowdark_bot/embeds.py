@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import discord
 
@@ -13,12 +13,20 @@ from shadowdark_bot.models import (
     ITEM_TYPE_SCROLL,
     ITEM_TYPE_WEAPON,
     Borrow,
+    CharacterItem,
     InventoryEntry,
     Item,
     Location,
+    PlayerCharacter,
     TreasuryEntry,
 )
-
+from shadowdark_bot.rules import (
+    ABILITIES,
+    ability_modifier,
+    carry_capacity,
+    format_modifier,
+    spellcasting_modifier,
+)
 
 _ITEM_TYPE_DISPLAY: dict[str, tuple[str, discord.Color]] = {
     ITEM_TYPE_COMMON: ("Common", discord.Color.blue()),
@@ -220,6 +228,103 @@ def _format_treasury_line(entry: TreasuryEntry, borrow_row: Borrow | None) -> st
     return f"• {label}"
 
 
+# ---------- Player characters ----------
+
+CHARACTER_COLOR = discord.Color.dark_teal()
+
+
+def _ability_table(char: PlayerCharacter) -> str:
+    """A two-column code block of scores and modifiers (STR/DEX/CON | INT/WIS/CHA)."""
+    left = ABILITIES[:3]
+    right = ABILITIES[3:]
+    lines: list[str] = []
+    for (lkey, llabel), (rkey, rlabel) in zip(left, right, strict=True):
+        lscore = getattr(char, f"{lkey}_score")
+        rscore = getattr(char, f"{rkey}_score")
+        lmod = format_modifier(ability_modifier(lscore))
+        rmod = format_modifier(ability_modifier(rscore))
+        lines.append(
+            f"{llabel} {lscore:>2} ({lmod})   {rlabel} {rscore:>2} ({rmod})"
+        )
+    return "```\n" + "\n".join(lines) + "\n```"
+
+
+def _spellcasting_line(char: PlayerCharacter) -> str | None:
+    if char.spell_ability is None:
+        return None
+    score = getattr(char, f"{char.spell_ability}_score")
+    base = ability_modifier(score)
+    total = spellcasting_modifier(score, char.spell_check_bonus)
+    label = char.spell_ability.upper()
+    detail = f"{label} {format_modifier(base)}"
+    if char.spell_check_bonus:
+        detail += f", talent {format_modifier(char.spell_check_bonus)}"
+    return f"{format_modifier(total)}  ({detail})"
+
+
+def build_character_sheet_embed(
+    char: PlayerCharacter, items: list[CharacterItem]
+) -> discord.Embed:
+    subtitle = f"Level {char.level}"
+    if char.char_class:
+        subtitle += f" {char.char_class}"
+    embed = discord.Embed(
+        title=char.name, description=subtitle, color=CHARACTER_COLOR
+    )
+
+    hp = str(char.max_hp) if char.max_hp is not None else "—"
+    ac = str(char.armor_class) if char.armor_class is not None else "—"
+    gold = format_cp(char.gold_cp) or "0cp"
+    embed.add_field(name="Max HP", value=hp, inline=True)
+    embed.add_field(name="AC", value=ac, inline=True)
+    embed.add_field(name="Gold", value=gold, inline=True)
+
+    embed.add_field(name="Ability Scores", value=_ability_table(char), inline=False)
+
+    casting = _spellcasting_line(char)
+    if casting is not None:
+        embed.add_field(name="Spellcasting", value=casting, inline=False)
+
+    if char.talents:
+        embed.add_field(name="Talents", value=char.talents[:1024], inline=False)
+
+    used = sum(ci.slot_cost for ci in items)
+    free = carry_capacity(char.str_score)
+    embed.add_field(
+        name="Carrying",
+        value=f"{len(items)} stack(s) — {fmt_slots(used)}/{free} gear slots",
+        inline=False,
+    )
+    return embed
+
+
+def build_character_inventory_embed(
+    char: PlayerCharacter, items: list[CharacterItem]
+) -> discord.Embed:
+    used = sum(ci.slot_cost for ci in items)
+    free = carry_capacity(char.str_score)
+    embed = discord.Embed(
+        title=f"{char.name} — Inventory", color=CHARACTER_COLOR
+    )
+    capacity_line = f"**Capacity:** {fmt_slots(used)}/{free} gear slots used"
+
+    if not items:
+        embed.description = f"{capacity_line}\n\n_(carrying nothing)_"
+        return embed
+
+    lines = [capacity_line, ""]
+    for ci in items[:25]:
+        tag = "catalog" if ci.is_catalog else "freeform"
+        lines.append(
+            f"• {ci.quantity}× {ci.display_name} "
+            f"— {fmt_slots(ci.slot_cost)} slots _[{tag}]_"
+        )
+    if len(items) > 25:
+        lines.append(f"…and {len(items) - 25} more")
+    embed.description = "\n".join(lines)
+    return embed
+
+
 # ---------- Helpers ----------
 
 
@@ -277,17 +382,17 @@ def _fmt_number(n: float) -> str:
 def format_timesince(dt: datetime) -> str:
     """Render a datetime as 'X min ago' / 'Y hours ago' / 'Z days ago'."""
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    now = datetime.now(UTC)
     return _format_seconds(int((now - dt).total_seconds())) + " ago"
 
 
 def format_duration(start: datetime, end: datetime) -> str:
     """Render the duration between two datetimes."""
     if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
+        start = start.replace(tzinfo=UTC)
     if end.tzinfo is None:
-        end = end.replace(tzinfo=timezone.utc)
+        end = end.replace(tzinfo=UTC)
     return _format_seconds(int((end - start).total_seconds()))
 
 

@@ -1,5 +1,4 @@
 import logging
-import math
 
 import discord
 from discord import app_commands
@@ -15,13 +14,8 @@ from shadowdark_bot.embeds import (
     fmt_slots,
 )
 from shadowdark_bot.models import ITEM_TYPE_MAGICAL, InventoryEntry, Item, Location
-from shadowdark_bot.sharing import ShareButton, ShareableView
-
-
-def stack_slots(quantity: int, gear_slots: float, bundle_size: int) -> float:
-    """Slot cost for `quantity` of an item: ceil(quantity / bundle_size) * gear_slots.
-    A partial bundle still consumes a full bundle's worth of slots."""
-    return math.ceil(quantity / max(bundle_size, 1)) * gear_slots
+from shadowdark_bot.rules import stack_slots
+from shadowdark_bot.sharing import ShareableView, ShareButton
 
 log = logging.getLogger("shadowdark_bot.inventory")
 
