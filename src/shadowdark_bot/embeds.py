@@ -32,10 +32,6 @@ _ITEM_TYPE_DISPLAY: dict[str, tuple[str, discord.Color]] = {
 }
 
 
-# Bold field markers that build_item_embed / build_treasury_info_embed render
-# from an item's structured columns. If a stored description already contains
-# these lines (e.g. an item whose Gear slots/Type/Value/Status got baked into
-# the free-text description), strip them so they aren't rendered a second time.
 _RENDERED_FIELD_PREFIXES = (
     "**Gear slots:**",
     "**Type:**",
@@ -45,8 +41,6 @@ _RENDERED_FIELD_PREFIXES = (
 
 
 def _clean_description(description: str) -> str:
-    """Drop any auto-generated field lines from a free-text description so the
-    structured fields aren't duplicated when the embed re-renders them."""
     kept = [
         line
         for line in description.split("\n")
