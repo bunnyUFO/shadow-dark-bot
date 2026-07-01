@@ -118,7 +118,7 @@ Unlike everything above, this is **per-player**, not guild-shared. Keyed by `use
 The `CharacterItem.slot_cost` / `display_name` / `effective_gear_slots` properties (in `models.py`) resolve the catalog-vs-freeform split, reusing `rules.stack_slots`. Carry capacity is `rules.carry_capacity(str_score) = max(10, STR)`.
 
 ### `spells` (built-in reference — seeded, not user-authored)
-Seeded from the Shadow Dark Player Quickstart at startup by `spell_data.seed_spells()` (idempotent upsert by name). Covers Tier 1–2 wizard/priest.
+Seeded at startup by `spell_data.seed_spells()` (idempotent upsert by name). Covers all Tier 1–5 wizard/priest spells (Tier 1–2 verbatim from the Player Quickstart; Tier 3–5 condensed from a community reference).
 | Column | Type | Notes |
 |---|---|---|
 | `id` | INTEGER PK | |

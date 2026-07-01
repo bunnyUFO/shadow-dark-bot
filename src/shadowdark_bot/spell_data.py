@@ -1,8 +1,15 @@
-"""Canonical Shadow Dark spell reference (Player Quickstart, Tier 1–2).
+"""Canonical Shadow Dark spell reference, seeded into the `spells` table at
+startup by `seed_spells()`. Each entry: (name, tier, classes, duration, range,
+text).
 
-Seeded into the `spells` table at startup by `seed_spells()`. Higher tiers
-(3–5) aren't in the quickstart; players can still track them as freeform
-`character_spells`. Each entry: (name, tier, classes, duration, range, text).
+Sources:
+- Tier 1–2 descriptions are the verbatim text from the Shadow Dark Player
+  Quickstart.
+- Tier 3–5 spells (not in the quickstart) use condensed descriptions based on
+  the community reference at https://anjours-arsenal.net/tools/shadowdark-spells.
+  Verify against the Shadow Dark core rules for exact wording.
+
+Players can still track anything not listed here as a freeform character spell.
 """
 
 from sqlalchemy import select
@@ -214,6 +221,253 @@ SPELLS: tuple[tuple[str, int, tuple[str, ...], str, str, str], ...] = (
         "Zone of Truth", 2, PRIEST, "Focus", "Near",
         "You compel a creature you can see to speak truth. It can't utter a "
         "deliberate lie while within range.",
+    ),
+    # ---- Tier 3 (condensed from the community reference) ----
+    (
+        "Animate Dead", 3, WIZARD, "1 day", "Close",
+        "Raise a humanoid corpse (with three limbs and an intact head) as a "
+        "zombie or skeleton under your control.",
+    ),
+    (
+        "Command", 3, PRIEST, "Focus", "Far",
+        "A creature obeys a one-word command while you focus. It may resist if "
+        "the command would cause it direct harm.",
+    ),
+    (
+        "Dispel Magic", 3, WIZARD, "Instant", "Near",
+        "End one spell affecting a target you can see in range.",
+    ),
+    (
+        "Fabricate", 3, WIZARD, "10 rounds", "Near",
+        "Convert tree-sized raw materials into a finished work. It reverts when "
+        "the spell ends.",
+    ),
+    (
+        "Fireball", 3, WIZARD, "Instant", "Far",
+        "Hurl a bead of flame that erupts into a fiery blast, dealing 4d6 "
+        "damage in a near-sized cube.",
+    ),
+    (
+        "Fly", 3, WIZARD, "5 rounds", "Self",
+        "You fly a near distance per turn and can hover.",
+    ),
+    (
+        "Gaseous Form", 3, WIZARD, "10 rounds", "Self",
+        "You turn to smoke with your gear, able to fly and pass through gaps. "
+        "You can't cast spells in this form.",
+    ),
+    (
+        "Illusion", 3, WIZARD, "Focus", "Far",
+        "Create a visible and audible illusion in a near-sized cube. Creatures "
+        "that believe it react to it as real.",
+    ),
+    (
+        "Lay To Rest", 3, PRIEST, "Instant", "Close",
+        "Destroy one undead creature of LV 9 or less that you touch.",
+    ),
+    (
+        "Lightning Bolt", 3, WIZARD, "Instant", "Far",
+        "A blue-white ray strikes creatures in a straight line out to far "
+        "distance for 3d6 damage.",
+    ),
+    (
+        "Magic Circle", 3, WIZARD, "Focus", "Near",
+        "A circle of runes prevents a chosen creature type from attacking, "
+        "casting hostile spells at, or compelling those inside.",
+    ),
+    (
+        "Mass Cure", 3, PRIEST, "Instant", "Near",
+        "All allies within near range regain 2d6 hit points.",
+    ),
+    (
+        "Protection From Energy", 3, WIZARD, "10 minutes", "Close",
+        "A target becomes immune to a chosen damage type: fire, cold, or "
+        "electricity.",
+    ),
+    (
+        "Rebuke Unholy", 3, PRIEST, "Instant", "Near",
+        "Present a holy symbol; demons, devils, and outsiders (or angels and "
+        "wild creatures) must flee or be destroyed.",
+    ),
+    (
+        "Restoration", 3, PRIEST, "Instant", "Close",
+        "End one curse, illness, or affliction affecting a target creature.",
+    ),
+    (
+        "Sending", 3, WIZARD, "Instant", "Unlimited",
+        "Send a brief mental message to a familiar creature on the same plane.",
+    ),
+    (
+        "Speak With Dead", 3, BOTH, "Instant", "Close",
+        "A dead body answers up to three yes/no questions truthfully. Critical "
+        "failure if cast on it twice in 24 hours.",
+    ),
+    # ---- Tier 4 (condensed from the community reference) ----
+    (
+        "Arcane Eye", 4, WIZARD, "Focus", "Near",
+        "Conjure an invisible eye you see through; it can fly and squeeze "
+        "through narrow openings.",
+    ),
+    (
+        "Cloudkill", 4, WIZARD, "5 rounds", "Far",
+        "A putrid poison cloud blinds creatures and deals 2d6 damage per turn; "
+        "it kills LV 9 or less creatures inside.",
+    ),
+    (
+        "Commune", 4, PRIEST, "Instant", "Self",
+        "Ask your deity up to three yes/no questions for truthful answers. "
+        "Critical failure if cast twice in 24 hours.",
+    ),
+    (
+        "Confusion", 4, WIZARD, "Focus", "Near",
+        "A target can't take actions and moves randomly. LV 9+ creatures may "
+        "resist each turn.",
+    ),
+    (
+        "Control Water", 4, BOTH, "Focus", "Far",
+        "Move and shape water up to 100 feet in width and depth — change its "
+        "direction or defy gravity.",
+    ),
+    (
+        "Dimension Door", 4, WIZARD, "Instant", "Self",
+        "Teleport yourself and one willing creature to a visible location.",
+    ),
+    (
+        "Divination", 4, WIZARD, "Instant", "Self",
+        "Ask one yes/no question via casting bones or stargazing. Critical "
+        "failure if cast twice in 24 hours.",
+    ),
+    (
+        "Flame Strike", 4, PRIEST, "Instant", "Far",
+        "A pillar of holy fire immolates one visible creature for 2d6 damage.",
+    ),
+    (
+        "Passwall", 4, WIZARD, "5 rounds", "Close",
+        "A tunnel of your height opens in a barrier, extending a near distance "
+        "in a straight line.",
+    ),
+    (
+        "Pillar Of Salt", 4, PRIEST, "Focus", "Near",
+        "Transform a LV 5 or less creature into a salt statue; permanent after "
+        "3 consecutive rounds of focus.",
+    ),
+    (
+        "Polymorph", 4, WIZARD, "10 rounds", "Touch",
+        "Transform a touched creature into a natural creature of equal or "
+        "smaller size; it keeps its non-physical stats.",
+    ),
+    (
+        "Regenerate", 4, PRIEST, "Focus", "Close",
+        "A target regains 1d4 hit points on your turn and regrows lost body "
+        "parts.",
+    ),
+    (
+        "Resilient Sphere", 4, WIZARD, "5 rounds", "Close",
+        "A weightless, glassy sphere extends out to close range; nothing passes "
+        "through or crushes it.",
+    ),
+    (
+        "Stoneskin", 4, WIZARD, "10 rounds", "Self",
+        "Your skin becomes granite; your armor class becomes 17 (20 on a "
+        "critical spellcasting check).",
+    ),
+    (
+        "Telekinesis", 4, WIZARD, "Focus", "Far",
+        "Lift and move a 1,000-pound-or-less creature or object in any "
+        "direction, or hold it in place.",
+    ),
+    (
+        "Wall of Force", 4, WIZARD, "5 rounds", "Near",
+        "Conjure a transparent wall of force covering a near-sized area; "
+        "nothing passes through.",
+    ),
+    (
+        "Wrath", 4, PRIEST, "10 rounds", "Self",
+        "Your weapons become magical +2 and deal an additional d8 damage.",
+    ),
+    # ---- Tier 5 (condensed from the community reference) ----
+    (
+        "Antimagic Shell", 5, WIZARD, "Focus", "Self",
+        "An invisible cube of null-magic centered on you blocks all "
+        "spellcasting and magical effects within it.",
+    ),
+    (
+        "Create Undead", 5, WIZARD, "1 day", "Close",
+        "Summon a wight or wraith under your control; it acts on your turn.",
+    ),
+    (
+        "Disintegrate", 5, WIZARD, "Instant", "Far",
+        "A green ray destroys a LV 5 or less creature instantly, or deals 3d8 "
+        "to higher levels; it obliterates nonmagical objects.",
+    ),
+    (
+        "Divine Vengeance", 5, PRIEST, "10 rounds", "Self",
+        "Become a holy avatar with flight, magical weapons, and +4 to attack "
+        "and damage.",
+    ),
+    (
+        "Dominion", 5, PRIEST, "10 rounds", "Near",
+        "Summon a combined 16 levels or less of beings (demons or angels, by "
+        "your alignment) to aid you.",
+    ),
+    (
+        "Heal", 5, PRIEST, "Instant", "Close",
+        "Restore a touched creature to full hit points. You can't recast it "
+        "until after a rest.",
+    ),
+    (
+        "Hold Monster", 5, WIZARD, "Focus", "Near",
+        "Paralyze one creature. LV 9+ creatures may resist each turn.",
+    ),
+    (
+        "Judgment", 5, PRIEST, "5 rounds", "Close",
+        "Banish an intelligent creature of LV 10 or less to face your god's "
+        "judgment; it returns healed or damaged.",
+    ),
+    (
+        "Plane Shift", 5, BOTH, "Instant", "Close",
+        "Transport yourself and willing creatures within close range to another "
+        "plane.",
+    ),
+    (
+        "Power Word Kill", 5, WIZARD, "Instant", "Near",
+        "Speak a Word of Doom; a LV 9 or less creature that hears you dies. "
+        "Critical failure gives disadvantage.",
+    ),
+    (
+        "Prismatic Orb", 5, WIZARD, "Instant", "Far",
+        "An energy orb deals 3d8 damage (6d8 if anathema to the target) with a "
+        "concussive blast.",
+    ),
+    (
+        "Prophecy", 5, PRIEST, "Instant", "Self",
+        "Ask one question for truthful divine guidance. Requires penance to "
+        "recast.",
+    ),
+    (
+        "Scrying", 5, WIZARD, "Focus", "Self",
+        "Observe a distant creature or location on the same plane via a crystal "
+        "ball or pool (DC 18 for unfamiliar targets).",
+    ),
+    (
+        "Shapechange", 5, WIZARD, "Focus", "Self",
+        "Transform into a natural creature of LV 10 or less you've seen; gain "
+        "its physical stats, keep your mental stats.",
+    ),
+    (
+        "Summon Extraplanar", 5, WIZARD, "Focus", "Near",
+        "Summon an elemental or outsider of LV 7 or less under your control; it "
+        "turns hostile if you lose focus.",
+    ),
+    (
+        "Teleport", 5, WIZARD, "Instant", "Close",
+        "Transport yourself and willing creatures to a known sigil or visited "
+        "location; 50% chance off-target otherwise.",
+    ),
+    (
+        "Wish", 5, WIZARD, "Instant", "Self",
+        "Alter reality with a single wish, interpreted by the GM. Critical "
+        "failure gives disadvantage.",
     ),
 )
 
