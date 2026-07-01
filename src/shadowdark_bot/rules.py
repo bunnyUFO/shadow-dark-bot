@@ -25,27 +25,17 @@ ABILITIES: tuple[tuple[str, str], ...] = (
 
 
 def ability_modifier(score: int) -> int:
-    """The Shadow Dark ability-score modifier.
+    """The Shadow Dark ability-score modifier (Player Quickstart, "Stats" table).
 
-    Uses the game's breakpoint table (not ``floor((score - 10) / 2)``):
-    1 → −4, 2–3 → −3, 4–5 → −2, 6–8 → −1, 9–12 → +0, 13–15 → +1,
-    16–17 → +2, 18 → +3. Scores past either end clamp to the nearest row.
+    1–3 → −4, 4–5 → −3, 6–7 → −2, 8–9 → −1, 10–11 → +0, 12–13 → +1,
+    14–15 → +2, 16–17 → +3, 18+ → +4. This is ``floor((score − 10) / 2)``
+    clamped to the −4…+4 range (scores can exceed 18 via talents).
     """
-    if score <= 1:
-        return -4
     if score <= 3:
-        return -3
-    if score <= 5:
-        return -2
-    if score <= 8:
-        return -1
-    if score <= 12:
-        return 0
-    if score <= 15:
-        return 1
-    if score <= 17:
-        return 2
-    return 3
+        return -4
+    if score >= 18:
+        return 4
+    return (score - 10) // 2
 
 
 def format_modifier(mod: int) -> str:
