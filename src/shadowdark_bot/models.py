@@ -229,6 +229,9 @@ class PlayerCharacter(Base):
     items: Mapped[list["CharacterItem"]] = relationship(
         back_populates="character", cascade="all, delete-orphan"
     )
+    spells: Mapped[list["CharacterSpell"]] = relationship(
+        back_populates="character", cascade="all, delete-orphan"
+    )
 
 
 class CharacterItem(Base):
@@ -292,3 +295,71 @@ class CharacterItem(Base):
         return stack_slots(
             self.quantity, self.effective_gear_slots, self.effective_bundle_size
         )
+
+
+class Spell(Base):
+    """Built-in spell reference (seeded from the Shadow Dark Player Quickstart).
+
+    `classes` is a comma-joined subset of {'priest', 'wizard'} (some spells,
+    like Light, belong to both).
+    """
+
+    __tablename__ = "spells"
+    __table_args__ = (CheckConstraint("tier >= 1", name="ck_spells_tier_positive"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    tier: Mapped[int] = mapped_column(Integer, nullable=False)
+    classes: Mapped[str] = mapped_column(String, nullable=False)
+    duration: Mapped[str | None] = mapped_column(String)
+    range_: Mapped[str | None] = mapped_column("range", String)
+    description: Mapped[str | None] = mapped_column(Text)
+
+    @property
+    def class_list(self) -> list[str]:
+        return [c for c in self.classes.split(",") if c]
+
+
+class CharacterSpell(Base):
+    """A spell a character knows.
+
+    Hybrid: `spell_id` links to the built-in `spells` reference (so the detail
+    view can show duration/range/description), or is NULL for a freeform spell
+    whose `name`/`tier` live on this row (e.g. higher-tier spells not in the
+    quickstart).
+    """
+
+    __tablename__ = "character_spells"
+    __table_args__ = (
+        UniqueConstraint("character_id", "spell_id", name="uq_character_spell"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("player_characters.id"), nullable=False
+    )
+    spell_id: Mapped[int | None] = mapped_column(ForeignKey("spells.id"))
+    name: Mapped[str | None] = mapped_column(String)
+    tier: Mapped[int | None] = mapped_column(Integer)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+    character: Mapped[PlayerCharacter] = relationship(back_populates="spells")
+    spell: Mapped[Spell | None] = relationship()
+
+    @property
+    def is_reference(self) -> bool:
+        return self.spell_id is not None
+
+    @property
+    def display_name(self) -> str:
+        if self.spell_id is not None and self.spell is not None:
+            return self.spell.name
+        return self.name or "(unnamed)"
+
+    @property
+    def display_tier(self) -> int | None:
+        if self.spell_id is not None and self.spell is not None:
+            return self.spell.tier
+        return self.tier

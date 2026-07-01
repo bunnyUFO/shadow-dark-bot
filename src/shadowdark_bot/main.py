@@ -27,6 +27,14 @@ def run_migrations() -> None:
     log.info("Migrations applied.")
 
 
+def seed_reference_data() -> None:
+    """Populate built-in reference tables (idempotent). Runs after migrations."""
+    from shadowdark_bot.spell_data import seed_spells
+
+    seed_spells()
+    log.info("Reference data seeded.")
+
+
 class ShadowDarkBot(commands.Bot):
     """Syncs slash commands to every guild it's in. Note: data is shared
     across all guilds — see roadmap for multi-tenant work."""
@@ -74,6 +82,7 @@ async def ping(interaction: discord.Interaction) -> None:
 
 def main() -> None:
     run_migrations()
+    seed_reference_data()
     bot.run(settings.DISCORD_TOKEN, log_handler=None)
 
 

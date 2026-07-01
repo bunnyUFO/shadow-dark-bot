@@ -130,18 +130,22 @@ For guild-owned magical items. They are **never given away** — they're borrowe
 
 Unlike the four guild-shared systems above, a **character belongs to one player** (keyed by Discord user). Each player has **one** character with lean Shadow Dark stats and a carried inventory. You edit **your own** character through an ephemeral, interactive sheet; you can **view** anyone else's read-only.
 
-Stats covered: name, class, level, **max HP**, AC, the six ability scores (with an auto-computed modifier table), gold (entered gp/sp/cp, stored as copper), a free-text **Talents** section, and an optional **spellcasting** modifier (governing stat INT or WIS plus a manual spell-check bonus for talent-granted bonuses).
+Stats covered: name, class, level, **max HP**, AC, the six ability scores (with an auto-computed modifier table — Shadow Dark's `floor((score−10)/2)` clamped to ±4), gold (entered gp/sp/cp, stored as copper), a free-text **Talents** section, an optional **spellcasting** modifier (governing stat INT or WIS plus a manual spell-check bonus for talent-granted bonuses), and a **known spells** list.
 
 Inventory is **hybrid**: a carried item either links to the shared `/items` catalog (reusing its gear-slot / bundle data) or is a **freeform** typed name with its own per-item slot cost. Carry capacity is the Shadow Dark limit: **max(10, STR)** gear slots, using the same bundle-aware ceiling math as guild inventory.
 
 | Command | What it does | Example |
 |---|---|---|
-| `/character sheet` | Open **your** sheet as an ephemeral, interactive embed. If you don't have a character yet, a **Create character** button opens the details form. The sheet's buttons — **Edit Details** (name/class/level/max HP/AC), **Edit Abilities & Gold** (six scores + gold), **Edit Talents & Casting** (talents, spellcasting stat, spell bonus), and **Manage Inventory** — open modals or swap the view in place. | `/character sheet` |
-| `/character carry item quantity?` | Add an item you're carrying. Autocomplete suggests catalog items (a match links it); any other text becomes a freeform item. Blocked if it would exceed your carry capacity. | `/character carry item:"Arrows" quantity:20` |
+| `/character sheet` | Open **your** sheet as an ephemeral, interactive embed. If you don't have a character yet, a **Create character** button opens the details form. The sheet's buttons — **Edit Details** (name/class/level/max HP/AC), **Edit Abilities & Gold** (six scores + gold), **Edit Talents & Casting** (talents, spellcasting stat, spell bonus), **Manage Inventory**, and **Manage Spells** — open modals or swap the view in place. | `/character sheet` |
+| `/character carry item quantity? gear_slots?` | Add an item you're carrying. Autocomplete suggests catalog items (a match links it); any other text becomes a freeform item. `gear_slots` sets the per-item slot cost for a new freeform item (ignored for catalog items). Blocked if it would exceed your carry capacity. | `/character carry item:"Arrows" quantity:20` |
+| `/character spell-add spell` | Learn a spell. Autocomplete suggests the built-in Shadow Dark reference (Tier 1–2 wizard/priest); a match links its full text (duration/range/description). Any other text is recorded as a freeform spell. | `/character spell-add spell:"Magic Missile"` |
+| `/character spell-remove spell` | Forget a spell you know (autocomplete over your known spells). | `/character spell-remove spell:"Sleep"` |
 | `/character show member` | View another player's sheet read-only. Toggle between **Stats** and **Inventory**; no edit buttons. Includes the Share button. | `/character show member:@Tessa` |
 | `/character delete` | Delete your character (and everything it carries) after a confirm button. | `/character delete` |
 
 **Manage Inventory** (from `/character sheet`) lists your stacks with a dropdown; drilling into one exposes **+ Add more**, **− Take**, and **Remove**, plus an **Add item** modal for quick freeform entries. Everything re-checks capacity and updates in place.
+
+**Manage Spells** works the same way: a dropdown of your known spells (grouped by tier on the sheet), a detail view showing the reference text with a **Forget** button, and an **Add spell** modal. The built-in reference covers the Player Quickstart's Tier 1–2 wizard and priest spells; higher tiers are supported as freeform entries. Spells-known limits are **not** enforced — the list is a tracker, not a rules engine.
 
 ---
 

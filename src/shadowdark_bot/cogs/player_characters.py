@@ -14,7 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, selectinload
 
 from shadowdark_bot.currency import format_cp, parse_value_string
 from shadowdark_bot.db import session_scope
@@ -22,9 +22,17 @@ from shadowdark_bot.embeds import (
     CHARACTER_COLOR,
     build_character_inventory_embed,
     build_character_sheet_embed,
+    build_character_spells_embed,
+    build_spell_embed,
     fmt_slots,
 )
-from shadowdark_bot.models import CharacterItem, Item, PlayerCharacter
+from shadowdark_bot.models import (
+    CharacterItem,
+    CharacterSpell,
+    Item,
+    PlayerCharacter,
+    Spell,
+)
 from shadowdark_bot.rules import (
     ABILITIES,
     SPELL_ABILITIES,
@@ -42,20 +50,28 @@ VIEW_TIMEOUT_SECONDS = 300
 
 
 def _load_character(session: Session, user_id: str) -> PlayerCharacter | None:
-    """Load a character with its items (and each item's catalog row) eagerly."""
-    return (
-        session.scalars(
-            select(PlayerCharacter)
-            .options(joinedload(PlayerCharacter.items).joinedload(CharacterItem.item))
-            .where(PlayerCharacter.user_id == user_id)
+    """Load a character with its items and spells (and their reference rows).
+
+    Uses selectinload for the two collections so they don't cross-join.
+    """
+    return session.scalars(
+        select(PlayerCharacter)
+        .options(
+            selectinload(PlayerCharacter.items).joinedload(CharacterItem.item),
+            selectinload(PlayerCharacter.spells).joinedload(CharacterSpell.spell),
         )
-        .unique()
-        .first()
-    )
+        .where(PlayerCharacter.user_id == user_id)
+    ).first()
 
 
 def _sorted_items(char: PlayerCharacter) -> list[CharacterItem]:
     return sorted(char.items, key=lambda c: c.display_name.lower())
+
+
+def _sorted_spells(char: PlayerCharacter) -> list[CharacterSpell]:
+    return sorted(
+        char.spells, key=lambda s: ((s.display_tier or 0), s.display_name.lower())
+    )
 
 
 def _touch(char: PlayerCharacter) -> None:
@@ -97,7 +113,9 @@ def _build_sheet_payload(user_id: str) -> tuple[discord.Embed, "CharacterSheetVi
         char = _load_character(session, user_id)
         if char is None:
             return None
-        embed = build_character_sheet_embed(char, _sorted_items(char))
+        embed = build_character_sheet_embed(
+            char, _sorted_items(char), _sorted_spells(char)
+        )
     return embed, CharacterSheetView(user_id)
 
 
@@ -154,8 +172,49 @@ def _build_show_payload(
         if mode == "inventory":
             embed = build_character_inventory_embed(char, items)
         else:
-            embed = build_character_sheet_embed(char, items)
+            embed = build_character_sheet_embed(char, items, _sorted_spells(char))
     return embed, CharacterShowView(target_id, mode)
+
+
+def _build_spells_payload(
+    user_id: str,
+) -> tuple[discord.Embed, "CharacterSpellsView"] | None:
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            return None
+        spells = _sorted_spells(char)
+        embed = build_character_spells_embed(char, spells)
+        choices = [
+            (
+                cs.id,
+                cs.display_name
+                + (f" (T{cs.display_tier})" if cs.display_tier else ""),
+            )
+            for cs in spells
+        ]
+    return embed, CharacterSpellsView(user_id, choices)
+
+
+def _build_spell_detail_payload(
+    user_id: str, cs_id: int
+) -> tuple[discord.Embed, "CharacterSpellDetailView"] | None:
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            return None
+        cs = next((s for s in char.spells if s.id == cs_id), None)
+        if cs is None:
+            return None
+        if cs.is_reference and cs.spell is not None:
+            embed = build_spell_embed(cs.spell)
+        else:
+            embed = discord.Embed(title=cs.display_name, color=CHARACTER_COLOR)
+            tier = cs.display_tier
+            header = f"**Tier {tier}**\n" if tier else ""
+            embed.description = f"{header}_(freeform spell — no reference text)_"
+        name = cs.display_name
+    return embed, CharacterSpellDetailView(user_id, cs_id, name)
 
 
 async def _refresh_sheet(interaction: discord.Interaction, user_id: str) -> None:
@@ -407,6 +466,108 @@ async def _respond(
     and follow up with an ephemeral confirmation; otherwise reply directly."""
     if edit_view:
         payload = _build_inventory_payload(user_id)
+        if payload is not None:
+            embed, view = payload
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await interaction.response.defer()
+        await interaction.followup.send(
+            confirmation, view=ShareableView(), ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            confirmation, view=ShareableView(), ephemeral=True
+        )
+
+
+async def _do_add_spell(
+    interaction: discord.Interaction,
+    *,
+    user_id: str,
+    spell_name: str,
+    tier: int | None = None,
+    edit_view: bool = False,
+) -> None:
+    clean = spell_name.strip()
+    failure = f"**Failed to learn {clean}.**"
+    if not clean:
+        await interaction.response.send_message(
+            f"{failure}\nSpell name cannot be empty.", ephemeral=True
+        )
+        return
+
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            await interaction.response.send_message(
+                f"{failure}\nYou don't have a character yet — run `/character sheet`.",
+                ephemeral=True,
+            )
+            return
+
+        # ilike without wildcards = case-insensitive exact match on a reference spell.
+        ref = session.scalar(select(Spell).where(Spell.name.ilike(clean)))
+        if ref is not None:
+            existing = next(
+                (s for s in char.spells if s.spell_id == ref.id), None
+            )
+        else:
+            existing = next(
+                (
+                    s
+                    for s in char.spells
+                    if s.spell_id is None and (s.name or "").lower() == clean.lower()
+                ),
+                None,
+            )
+        if existing is not None:
+            await interaction.response.send_message(
+                f"{failure}\nYou already know **{existing.display_name}**.",
+                ephemeral=True,
+            )
+            return
+
+        if ref is not None:
+            session.add(CharacterSpell(character_id=char.id, spell_id=ref.id))
+            display = ref.name
+        else:
+            session.add(CharacterSpell(character_id=char.id, name=clean, tier=tier))
+            display = clean
+        _touch(char)
+        session.flush()
+
+    await _respond_spells(interaction, f"Learned **{display}**.", user_id, edit_view)
+
+
+async def _do_remove_spell(
+    interaction: discord.Interaction, *, user_id: str, cs_id: int, edit_view: bool = True
+) -> None:
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            await interaction.response.send_message(
+                "**Failed to forget.**\nCharacter not found.", ephemeral=True
+            )
+            return
+        cs = next((s for s in char.spells if s.id == cs_id), None)
+        if cs is None:
+            await interaction.response.send_message(
+                "**Failed to forget.**\nYou don't know that spell.", ephemeral=True
+            )
+            return
+        display = cs.display_name
+        session.delete(cs)
+        _touch(char)
+
+    await _respond_spells(interaction, f"Forgot **{display}**.", user_id, edit_view)
+
+
+async def _respond_spells(
+    interaction: discord.Interaction, confirmation: str, user_id: str, edit_view: bool
+) -> None:
+    """Like `_respond`, but refreshes the Manage Spells view for interactive edits."""
+    if edit_view:
+        payload = _build_spells_payload(user_id)
         if payload is not None:
             embed, view = payload
             await interaction.response.edit_message(embed=embed, view=view)
@@ -707,6 +868,44 @@ class AddItemModal(discord.ui.Modal):
         )
 
 
+class AddSpellModal(discord.ui.Modal):
+    """Learn a spell. A name matching the reference links its details; otherwise
+    a freeform spell is recorded with the optional tier."""
+
+    def __init__(self, user_id: str) -> None:
+        super().__init__(title="Learn a spell")
+        self.user_id = user_id
+        self._name = discord.ui.TextInput(
+            label="Spell name (a known name links its text)",
+            required=True,
+            max_length=100,
+        )
+        self._tier = discord.ui.TextInput(
+            label="Tier (freeform only; blank = unknown)",
+            required=False,
+            max_length=2,
+        )
+        self.add_item(self._name)
+        self.add_item(self._tier)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            tier = _parse_optional_int(str(self._tier.value), minimum=1)
+        except ValueError:
+            await interaction.response.send_message(
+                "**Failed to learn.**\nTier must be a whole number ≥ 1.",
+                ephemeral=True,
+            )
+            return
+        await _do_add_spell(
+            interaction,
+            user_id=self.user_id,
+            spell_name=str(self._name.value),
+            tier=tier,
+            edit_view=True,
+        )
+
+
 class _QuantityModal(discord.ui.Modal):
     """Shared single-quantity modal for the item detail Add-more / Take buttons."""
 
@@ -812,6 +1011,21 @@ class CharacterSheetView(_OwnerView):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         payload = _build_inventory_payload(self.user_id)
+        if payload is None:
+            await interaction.response.send_message(
+                "Character not found.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(
+        label="Manage Spells", style=discord.ButtonStyle.secondary, row=1
+    )
+    async def manage_spells(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_spells_payload(self.user_id)
         if payload is None:
             await interaction.response.send_message(
                 "Character not found.", ephemeral=True
@@ -929,6 +1143,89 @@ class CharacterItemDetailView(_OwnerView):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         payload = _build_inventory_payload(self.user_id)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Character not found.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class CharacterSpellSelect(discord.ui.Select):
+    def __init__(self, user_id: str, choices: list[tuple[int, str]]) -> None:
+        options = [
+            discord.SelectOption(label=label[:100], value=str(cid))
+            for cid, label in choices[:25]
+        ]
+        super().__init__(
+            placeholder="View a known spell…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        payload = _build_spell_detail_payload(self.user_id, int(self.values[0]))
+        if payload is None:
+            await interaction.response.send_message(
+                "You no longer know that spell.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class CharacterSpellsView(_OwnerView):
+    def __init__(self, user_id: str, choices: list[tuple[int, str]]) -> None:
+        super().__init__(user_id)
+        if choices:
+            self.add_item(CharacterSpellSelect(user_id, choices))
+        self.add_item(ShareButton(row=4))
+
+    @discord.ui.button(label="Add spell", style=discord.ButtonStyle.success, row=1)
+    async def add_spell_btn(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.send_modal(AddSpellModal(self.user_id))
+
+    @discord.ui.button(
+        label="← Back to sheet", style=discord.ButtonStyle.primary, row=1
+    )
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_sheet_payload(self.user_id)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Character not found.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class CharacterSpellDetailView(_OwnerView):
+    def __init__(self, user_id: str, cs_id: int, spell_name: str) -> None:
+        super().__init__(user_id)
+        self.cs_id = cs_id
+        self.add_item(ShareButton(row=4))
+
+    @discord.ui.button(label="Forget", style=discord.ButtonStyle.danger, row=0)
+    async def forget(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await _do_remove_spell(interaction, user_id=self.user_id, cs_id=self.cs_id)
+
+    @discord.ui.button(
+        label="← Back to spells", style=discord.ButtonStyle.primary, row=1
+    )
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_spells_payload(self.user_id)
         if payload is None:
             await interaction.response.edit_message(
                 content="Character not found.", embed=None, view=None
@@ -1081,6 +1378,86 @@ class PlayerCharacters(commands.Cog):
                 ).all()
             )
         return [app_commands.Choice(name=n, value=n) for n in names]
+
+    @character.command(
+        name="spell-add",
+        description="Learn a spell (reference autocomplete; freeform allowed)",
+    )
+    @app_commands.describe(
+        spell="Spell name — a known reference name links its details; "
+        "anything else is freeform"
+    )
+    async def spell_add(self, interaction: discord.Interaction, spell: str) -> None:
+        await _do_add_spell(
+            interaction, user_id=str(interaction.user.id), spell_name=spell
+        )
+
+    @spell_add.autocomplete("spell")
+    async def _ac_spell_add(self, interaction, current):
+        with session_scope() as session:
+            rows = list(
+                session.scalars(
+                    select(Spell)
+                    .where(Spell.name.ilike(f"%{current}%"))
+                    .order_by(Spell.tier, Spell.name)
+                    .limit(25)
+                ).all()
+            )
+            choices = [
+                app_commands.Choice(
+                    name=f"{s.name} — T{s.tier} {'/'.join(s.class_list)}"[:100],
+                    value=s.name,
+                )
+                for s in rows
+            ]
+        return choices
+
+    @character.command(name="spell-remove", description="Forget a spell you know")
+    @app_commands.describe(spell="Spell to forget")
+    async def spell_remove(self, interaction: discord.Interaction, spell: str) -> None:
+        user_id = str(interaction.user.id)
+        with session_scope() as session:
+            char = _load_character(session, user_id)
+            if char is None:
+                await interaction.response.send_message(
+                    "You don't have a character yet — run `/character sheet`.",
+                    ephemeral=True,
+                )
+                return
+            cs = next(
+                (
+                    s
+                    for s in char.spells
+                    if s.display_name.lower() == spell.strip().lower()
+                ),
+                None,
+            )
+            if cs is None:
+                await interaction.response.send_message(
+                    f"You don't know a spell called **{spell.strip()}**.",
+                    ephemeral=True,
+                )
+                return
+            cs_id = cs.id
+        await _do_remove_spell(
+            interaction, user_id=user_id, cs_id=cs_id, edit_view=False
+        )
+
+    @spell_remove.autocomplete("spell")
+    async def _ac_spell_remove(self, interaction, current):
+        user_id = str(interaction.user.id)
+        with session_scope() as session:
+            char = _load_character(session, user_id)
+            names: list[str] = []
+            if char is not None:
+                names = sorted(
+                    {
+                        s.display_name
+                        for s in char.spells
+                        if current.lower() in s.display_name.lower()
+                    }
+                )
+        return [app_commands.Choice(name=n, value=n) for n in names[:25]]
 
     @character.command(
         name="show", description="View another player's character (read-only)"
