@@ -12,6 +12,7 @@ Each of the four systems has a **`browse`** command that is the main, all-in-one
 - `/inventory browse` — list locations / inspect contents / add more or take items already at a location. (Use `/inventory add` to add a brand-new item to a location.)
 - `/treasury browse` — list magical instances / inspect / borrow / return.
 - `/coffers browse` — see the balance / buy catalog items.
+- `/spells browse` — look up the Shadow Dark spell reference, filtered by class / tier / alignment.
 
 If you're not sure which command to run, run `/<group> browse`.
 
@@ -146,6 +147,16 @@ Spells are managed **only** through the **Manage Spells** button on `/character 
 **Manage Inventory** (from `/character sheet`) lists your stacks with a dropdown; drilling into one exposes **+ Add more**, **− Take**, and **Remove**, plus an **Add item** modal for quick freeform entries. Everything re-checks capacity and updates in place.
 
 **Manage Spells** lists your known spells (grouped by tier on the sheet), a detail view showing the reference text with a **Forget** button, and an **Add spell** flow: pick a tier, then pick a spell from a dropdown. **Only reference spells matching your character's class can be added — no custom spells.** Your class comes from your spellcasting stat (INT → wizard, WIS → priest), so set that via **Edit Talents & Casting** first. The built-in reference covers all Tier 1–5 wizard and priest spells (Tier 1–2 verbatim from the Player Quickstart; Tier 3–5 condensed from a community reference), plus **48 alignment-gated wizard spells** (Druids = Neutral, Mages = Lawful, Sorcerers = Chaotic), tagged by alignment. Spells-known limits are **not** enforced — the list is a tracker, not a rules engine.
+
+---
+
+## `/spells` — Spell Reference
+
+A read-only lookup of the built-in spell reference (independent of characters — anyone can browse).
+
+| Command | What it does | Example |
+|---|---|---|
+| `/spells browse spell_class? tier? alignment?` | List spells with optional filters, then inspect one from a dropdown (full duration/range/description). Filters: **spell_class** (Wizard/Priest), **tier** (1–5), **alignment** (All/Neutral/Lawful/Chaotic — All is the default and includes standard spells). Paginated when a filter set returns more than 25 results; ephemeral with a Share button. | `/spells browse spell_class:Wizard tier:3 alignment:Chaotic` |
 
 ---
 

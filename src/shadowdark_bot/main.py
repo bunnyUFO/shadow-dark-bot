@@ -50,6 +50,7 @@ class ShadowDarkBot(commands.Bot):
         await self.load_extension("shadowdark_bot.cogs.magical_treasury")
         await self.load_extension("shadowdark_bot.cogs.guild_coffers")
         await self.load_extension("shadowdark_bot.cogs.player_characters")
+        await self.load_extension("shadowdark_bot.cogs.spell_reference")
 
     async def _sync_to_guild(self, guild: discord.Guild) -> None:
         if guild.id in self._synced_guilds:
