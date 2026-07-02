@@ -73,7 +73,7 @@ shadow-dark-bot/
 │           ├── guild_inventory.py    ← /inventory location-create/edit/delete, add, browse
 │           ├── magical_treasury.py   ← /treasury add, remove, browse
 │           ├── guild_coffers.py      ← /coffers add, subtract, browse
-│           ├── player_characters.py  ← /character sheet, carry, show, delete (+ Manage Spells)
+│           ├── player_characters.py  ← /character sheet, carry, show (+ Manage Spells, Delete button)
 │           └── spell_reference.py     ← /spells browse (class/tier/alignment filters)
 │
 └── docs/                         ← human-readable documentation (not loaded at runtime)

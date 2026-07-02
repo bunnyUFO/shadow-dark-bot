@@ -137,10 +137,11 @@ Inventory is **hybrid**: a carried item either links to the shared `/items` cata
 
 | Command | What it does | Example |
 |---|---|---|
-| `/character sheet` | Open **your** sheet as an ephemeral, interactive embed. If you don't have a character yet, a **Create character** button opens the details form. The sheet's buttons — **Edit Details** (name/class/level/max HP/AC), **Edit Abilities & Gold** (six scores + gold), **Edit Talents & Casting** (talents, spellcasting stat, spell bonus), **Edit Identity** (ancestry, alignment, languages), **Manage Inventory**, and **Manage Spells** — open modals or swap the view in place. | `/character sheet` |
+| `/character sheet` | Open **your** sheet as an ephemeral, interactive embed. If you don't have a character yet, a **Create character** button opens the details form. The sheet's buttons — **Edit Details** (name/class/level/max HP/AC), **Edit Abilities & Gold** (six scores + gold), **Edit Talents & Casting** (talents, spellcasting stat, spell bonus), **Edit Identity** (ancestry, alignment, languages), **Manage Inventory**, **Manage Spells**, and **Delete character** — open modals or swap the view in place. | `/character sheet` |
 | `/character carry item quantity? gear_slots?` | Add an item you're carrying. Autocomplete suggests catalog items (a match links it); any other text becomes a freeform item. `gear_slots` sets the per-item slot cost for a new freeform item (ignored for catalog items). Blocked if it would exceed your carry capacity. | `/character carry item:"Arrows" quantity:20` |
 | `/character show member` | View another player's sheet read-only. Toggle between **Stats** and **Inventory**; no edit buttons. Includes the Share button. | `/character show member:@Tessa` |
-| `/character delete` | Delete your character (and everything it carries) after a confirm button. | `/character delete` |
+
+Deleting a character is a **Delete character** button on `/character sheet` (there's no delete command). It swaps to an "Are you sure you want to delete **&lt;name&gt;**?" confirmation embed with **Delete** / **Cancel**; Cancel returns to the sheet.
 
 Spells are managed **only** through the **Manage Spells** button on `/character sheet` — there are no `spell-add`/`spell-remove` slash commands.
 

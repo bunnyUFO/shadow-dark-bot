@@ -1154,6 +1154,34 @@ class CharacterSheetView(_OwnerView):
         embed, view = payload
         await interaction.response.edit_message(embed=embed, view=view)
 
+    @discord.ui.button(
+        label="Delete character", style=discord.ButtonStyle.danger, row=2
+    )
+    async def delete(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        with session_scope() as session:
+            char = _load_character(session, self.user_id)
+            if char is None:
+                await interaction.response.send_message(
+                    "Character not found.", ephemeral=True
+                )
+                return
+            name = char.name
+            count = len(char.items)
+        embed = discord.Embed(
+            title="Delete character?",
+            description=(
+                f"Are you sure you want to delete **{name}**? "
+                f"This also drops its {count} carried stack(s) and all known "
+                "spells, and can't be undone."
+            ),
+            color=discord.Color.red(),
+        )
+        await interaction.response.edit_message(
+            embed=embed, view=DeleteConfirmView(self.user_id)
+        )
+
 
 class CharacterItemSelect(discord.ui.Select):
     def __init__(self, user_id: str, choices: list[tuple[int, str]]) -> None:
@@ -1574,9 +1602,14 @@ class DeleteConfirmView(_OwnerView):
     async def cancel(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        await interaction.response.edit_message(
-            content="Deletion cancelled.", embed=None, view=None
-        )
+        payload = _build_sheet_payload(self.user_id)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Deletion cancelled.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
 # ---------- Cog ----------
@@ -1668,24 +1701,6 @@ class PlayerCharacters(commands.Cog):
             return
         embed, view = payload
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-    @character.command(name="delete", description="Delete your character")
-    async def delete(self, interaction: discord.Interaction) -> None:
-        user_id = str(interaction.user.id)
-        with session_scope() as session:
-            char = _load_character(session, user_id)
-            if char is None:
-                await interaction.response.send_message(
-                    "You don't have a character to delete.", ephemeral=True
-                )
-                return
-            name = char.name
-            count = len(char.items)
-        await interaction.response.send_message(
-            f"Delete **{name}** and its {count} carried stack(s)? This can't be undone.",
-            view=DeleteConfirmView(user_id),
-            ephemeral=True,
-        )
 
 
 async def setup(bot: commands.Bot) -> None:
