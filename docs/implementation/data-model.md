@@ -142,7 +142,7 @@ Seeded at startup by `spell_data.seed_spells()` (idempotent upsert by name). Cov
 | `added_at` | TIMESTAMP | |
 | | | `UNIQUE (character_id, spell_id)` — one row per reference spell |
 
-`CharacterSpell.display_name` / `display_tier` / `is_reference` resolve the split. Spells are managed through the shared `/spells` browser (Learn/Forget on the spell detail when opened from a character). **Learning is class-gated**: the character's spell class comes from `spell_ability` (`int` → wizard, `wis` → priest), and only reference spells whose `classes` include it can be learned — enforced in `spell_reference._do_learn` (no alignment gating). Spells-known limits are not enforced (tracker, not rules engine).
+`CharacterSpell.display_name` / `display_tier` / `is_reference` resolve the split. Spells are managed through `/character`'s dedicated **Manage Spells** flow (a class-limited tier→spell picker + Forget), separate from the read-only `/spells browse` reference. **Learning is class-gated**: the character's spell class comes from `spell_ability` (`int` → wizard, `wis` → priest), and only reference spells whose `classes` include it are offered/allowed — enforced in `player_characters._do_learn_spell`. Any tier is learnable (no level gating); there is no alignment gating. Spells-known limits are not enforced (tracker, not rules engine).
 
 ### `audit_log` (schema reserved; not yet written to)
 | Column | Type | Notes |

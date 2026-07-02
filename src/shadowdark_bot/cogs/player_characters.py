@@ -22,6 +22,8 @@ from shadowdark_bot.embeds import (
     CHARACTER_COLOR,
     build_character_inventory_embed,
     build_character_sheet_embed,
+    build_character_spells_embed,
+    build_spell_embed,
     fmt_slots,
 )
 from shadowdark_bot.models import (
@@ -29,6 +31,7 @@ from shadowdark_bot.models import (
     CharacterSpell,
     Item,
     PlayerCharacter,
+    Spell,
 )
 from shadowdark_bot.rules import (
     ABILITIES,
@@ -73,6 +76,39 @@ def _sorted_spells(char: PlayerCharacter) -> list[CharacterSpell]:
 
 def _touch(char: PlayerCharacter) -> None:
     char.updated_at = datetime.now(UTC)
+
+
+# The spellcasting stat picks the spell list a character draws from:
+# Wizards cast with INT, Priests with WIS. (No alignment gating.)
+_SPELL_CLASS_BY_ABILITY = {"int": "wizard", "wis": "priest"}
+_ALIGNMENT_NAMES = {"L": "Lawful", "N": "Neutral", "C": "Chaotic"}
+
+
+def _spell_class_for(char: PlayerCharacter) -> str | None:
+    """The spell class a character can learn from, or None if they aren't a
+    caster (no spellcasting stat set)."""
+    return _SPELL_CLASS_BY_ABILITY.get(char.spell_ability or "")
+
+
+def _addable_spells(
+    session: Session, char: PlayerCharacter, cls: str, tier: int | None = None
+) -> list[Spell]:
+    """Reference spells of the character's class (and tier, if given) not already
+    known. Any tier is learnable — scrolls and the like can grant higher-tier
+    spells — so tiers are never gated by character level."""
+    known_ids = {s.spell_id for s in char.spells if s.spell_id is not None}
+    stmt = select(Spell).where(Spell.classes.contains(cls))
+    if tier is not None:
+        stmt = stmt.where(Spell.tier == tier)
+    stmt = stmt.order_by(Spell.tier, Spell.name)
+    return [sp for sp in session.scalars(stmt).all() if sp.id not in known_ids]
+
+
+def _spell_choice_label(spell: Spell) -> str:
+    label = spell.name
+    if spell.alignment:
+        label += f" ({_ALIGNMENT_NAMES.get(spell.alignment, spell.alignment)})"
+    return label
 
 
 def _parse_scores(raw: str) -> list[int]:
@@ -171,6 +207,103 @@ def _build_show_payload(
         else:
             embed = build_character_sheet_embed(char, items, _sorted_spells(char))
     return embed, CharacterShowView(target_id, mode)
+
+
+# ---------- Spell management (bespoke, class-limited) ----------
+
+
+def _build_spells_payload(
+    user_id: str,
+) -> tuple[discord.Embed, "CharacterSpellsView"] | None:
+    """Manage-spells landing: your known spells (with a Forget path) plus a
+    Learn button."""
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            return None
+        spells = _sorted_spells(char)
+        embed = build_character_spells_embed(char, spells)
+        is_caster = _spell_class_for(char) is not None
+        choices = [
+            (cs.id, cs.display_name + (f" (T{cs.display_tier})" if cs.display_tier else ""))
+            for cs in spells
+        ]
+    return embed, CharacterSpellsView(user_id, choices, is_caster)
+
+
+def _build_char_spell_detail_payload(
+    user_id: str, cs_id: int
+) -> tuple[discord.Embed, "CharacterSpellDetailView"] | None:
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            return None
+        cs = next((s for s in char.spells if s.id == cs_id), None)
+        if cs is None:
+            return None
+        if cs.is_reference and cs.spell is not None:
+            embed = build_spell_embed(cs.spell)
+        else:
+            embed = discord.Embed(title=cs.display_name, color=CHARACTER_COLOR)
+            tier = cs.display_tier
+            embed.description = (f"**Tier {tier}**\n" if tier else "") + "_(no reference text)_"
+        name = cs.display_name
+    return embed, CharacterSpellDetailView(user_id, cs_id, name)
+
+
+def _build_learn_tier_payload(
+    user_id: str,
+) -> tuple[discord.Embed, "LearnTierView"] | None:
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            return None
+        cls = _spell_class_for(char)
+        if cls is None:
+            return None
+        addable = _addable_spells(session, char, cls)
+        tiers = sorted({sp.tier for sp in addable})
+        embed = discord.Embed(title="Learn a spell — choose a tier", color=CHARACTER_COLOR)
+        if tiers:
+            embed.description = (
+                f"Choose a tier of **{cls}** spells ({len(addable)} learnable). "
+                "Any tier is allowed."
+            )
+        else:
+            embed.description = f"You already know every **{cls}** spell in the reference."
+    return embed, LearnTierView(user_id, tiers)
+
+
+def _build_learn_pick_payload(
+    user_id: str, tier: int
+) -> tuple[discord.Embed, "LearnPickView"] | None:
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            return None
+        cls = _spell_class_for(char)
+        if cls is None:
+            return None
+        choices = [
+            (sp.name, _spell_choice_label(sp))
+            for sp in _addable_spells(session, char, cls, tier)
+        ]
+        embed = discord.Embed(title=f"Tier {tier} {cls} spells", color=CHARACTER_COLOR)
+        embed.description = (
+            "Pick a spell to inspect and learn." if choices else "Nothing left to learn here."
+        )
+    return embed, LearnPickView(user_id, tier, choices)
+
+
+def _build_learn_detail_payload(
+    user_id: str, tier: int, spell_name: str
+) -> tuple[discord.Embed, "LearnDetailView"] | None:
+    with session_scope() as session:
+        sp = session.scalar(select(Spell).where(Spell.name == spell_name))
+        if sp is None:
+            return None
+        embed = build_spell_embed(sp)
+    return embed, LearnDetailView(user_id, tier, spell_name)
 
 
 async def _refresh_sheet(interaction: discord.Interaction, user_id: str) -> None:
@@ -434,6 +567,93 @@ async def _respond(
         await interaction.response.send_message(
             confirmation, view=ShareableView(), ephemeral=True
         )
+
+
+async def _do_learn_spell(
+    interaction: discord.Interaction, *, user_id: str, tier: int, spell_name: str
+) -> None:
+    """Learn a reference spell of the character's class. Any tier is allowed;
+    only the class is checked (no alignment gating)."""
+    failure = f"**Failed to learn {spell_name}.**"
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            await interaction.response.send_message(
+                f"{failure}\nCharacter not found.", ephemeral=True
+            )
+            return
+        cls = _spell_class_for(char)
+        if cls is None:
+            await interaction.response.send_message(
+                f"{failure}\nYour character isn't a spellcaster — set a "
+                "spellcasting stat (INT or WIS) via **Edit Talents & Casting**.",
+                ephemeral=True,
+            )
+            return
+        sp = session.scalar(select(Spell).where(Spell.name == spell_name))
+        if sp is None:
+            await interaction.response.send_message(
+                f"{failure}\nThat spell no longer exists.", ephemeral=True
+            )
+            return
+        if cls not in sp.class_list:
+            allowed = " / ".join(c.capitalize() for c in sp.class_list)
+            await interaction.response.send_message(
+                f"{failure}\n**{sp.name}** is a {allowed} spell; your character "
+                f"casts {cls} spells.",
+                ephemeral=True,
+            )
+            return
+        if any(s.spell_id == sp.id for s in char.spells):
+            await interaction.response.send_message(
+                f"{failure}\nYou already know **{sp.name}**.", ephemeral=True
+            )
+            return
+        session.add(CharacterSpell(character_id=char.id, spell_id=sp.id))
+        _touch(char)
+        session.flush()
+
+    # Return to the tier's pick list (the learned spell is now excluded).
+    payload = _build_learn_pick_payload(user_id, tier)
+    if payload is not None:
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+    else:
+        await interaction.response.defer()
+    await interaction.followup.send(
+        f"Learned **{spell_name}**.", view=ShareableView(), ephemeral=True
+    )
+
+
+async def _do_forget_spell(
+    interaction: discord.Interaction, *, user_id: str, cs_id: int
+) -> None:
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            await interaction.response.send_message(
+                "**Failed to forget.**\nCharacter not found.", ephemeral=True
+            )
+            return
+        cs = next((s for s in char.spells if s.id == cs_id), None)
+        if cs is None:
+            await interaction.response.send_message(
+                "**Failed to forget.**\nYou don't know that spell.", ephemeral=True
+            )
+            return
+        display = cs.display_name
+        session.delete(cs)
+        _touch(char)
+
+    payload = _build_spells_payload(user_id)
+    if payload is not None:
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+    else:
+        await interaction.response.defer()
+    await interaction.followup.send(
+        f"Forgot **{display}**.", view=ShareableView(), ephemeral=True
+    )
 
 
 # ---------- Modals ----------
@@ -925,15 +1145,10 @@ class CharacterSheetView(_OwnerView):
     async def manage_spells(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        # Spells are managed through the shared /spells browser (with a
-        # character context that adds Learn/Forget to the detail view).
-        from shadowdark_bot.cogs.spell_reference import build_manage_spells_payload
-
-        payload = build_manage_spells_payload(self.user_id)
+        payload = _build_spells_payload(self.user_id)
         if payload is None:
             await interaction.response.send_message(
-                "Character not found, or the spell reference is empty.",
-                ephemeral=True,
+                "Character not found.", ephemeral=True
             )
             return
         embed, view = payload
@@ -1048,6 +1263,242 @@ class CharacterItemDetailView(_OwnerView):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         payload = _build_inventory_payload(self.user_id)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Character not found.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class CharacterSpellSelect(discord.ui.Select):
+    def __init__(self, user_id: str, choices: list[tuple[int, str]]) -> None:
+        options = [
+            discord.SelectOption(label=label[:100], value=str(cid))
+            for cid, label in choices[:25]
+        ]
+        super().__init__(
+            placeholder="View a known spell…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        payload = _build_char_spell_detail_payload(self.user_id, int(self.values[0]))
+        if payload is None:
+            await interaction.response.send_message(
+                "You no longer know that spell.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class CharacterSpellsView(_OwnerView):
+    """Manage-spells landing: known-spell dropdown + Learn + Back to sheet."""
+
+    def __init__(
+        self, user_id: str, choices: list[tuple[int, str]], is_caster: bool
+    ) -> None:
+        super().__init__(user_id)
+        self.is_caster = is_caster
+        if choices:
+            self.add_item(CharacterSpellSelect(user_id, choices))
+        self.add_item(ShareButton(row=4))
+
+    @discord.ui.button(label="Learn a spell", style=discord.ButtonStyle.success, row=1)
+    async def learn(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        if not self.is_caster:
+            await interaction.response.send_message(
+                "Your character isn't a spellcaster — set a spellcasting stat "
+                "(INT or WIS) via **Edit Talents & Casting** first.",
+                ephemeral=True,
+            )
+            return
+        payload = _build_learn_tier_payload(self.user_id)
+        if payload is None:
+            await interaction.response.send_message(
+                "Character not found.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(
+        label="← Back to sheet", style=discord.ButtonStyle.primary, row=1
+    )
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_sheet_payload(self.user_id)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Character not found.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class CharacterSpellDetailView(_OwnerView):
+    """A known spell's detail with a Forget button."""
+
+    def __init__(self, user_id: str, cs_id: int, spell_name: str) -> None:
+        super().__init__(user_id)
+        self.cs_id = cs_id
+        self.add_item(ShareButton(row=4))
+
+    @discord.ui.button(label="Forget", style=discord.ButtonStyle.danger, row=0)
+    async def forget(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await _do_forget_spell(interaction, user_id=self.user_id, cs_id=self.cs_id)
+
+    @discord.ui.button(
+        label="← Back to spells", style=discord.ButtonStyle.primary, row=1
+    )
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_spells_payload(self.user_id)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Character not found.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class LearnTierSelect(discord.ui.Select):
+    def __init__(self, user_id: str, tiers: list[int]) -> None:
+        options = [
+            discord.SelectOption(label=f"Tier {t}", value=str(t)) for t in tiers[:25]
+        ]
+        super().__init__(
+            placeholder="Choose a tier…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        payload = _build_learn_pick_payload(self.user_id, int(self.values[0]))
+        if payload is None:
+            await interaction.response.send_message(
+                "Character not found.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class LearnTierView(_OwnerView):
+    def __init__(self, user_id: str, tiers: list[int]) -> None:
+        super().__init__(user_id)
+        if tiers:
+            self.add_item(LearnTierSelect(user_id, tiers))
+
+    @discord.ui.button(
+        label="← Back to spells", style=discord.ButtonStyle.primary, row=1
+    )
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_spells_payload(self.user_id)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Character not found.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class LearnPickSelect(discord.ui.Select):
+    def __init__(self, user_id: str, tier: int, choices: list[tuple[str, str]]) -> None:
+        options = [
+            discord.SelectOption(label=label[:100], value=name[:100])
+            for name, label in choices[:25]
+        ]
+        super().__init__(
+            placeholder="Choose a spell…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+        self.user_id = user_id
+        self.tier = tier
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        payload = _build_learn_detail_payload(self.user_id, self.tier, self.values[0])
+        if payload is None:
+            await interaction.response.send_message(
+                "That spell no longer exists.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class LearnPickView(_OwnerView):
+    def __init__(
+        self, user_id: str, tier: int, choices: list[tuple[str, str]]
+    ) -> None:
+        super().__init__(user_id)
+        self.tier = tier
+        if choices:
+            self.add_item(LearnPickSelect(user_id, tier, choices))
+
+    @discord.ui.button(
+        label="← Back to tiers", style=discord.ButtonStyle.primary, row=1
+    )
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_learn_tier_payload(self.user_id)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Character not found.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class LearnDetailView(_OwnerView):
+    """A learnable spell's detail with a Learn button (class-checked on press)."""
+
+    def __init__(self, user_id: str, tier: int, spell_name: str) -> None:
+        super().__init__(user_id)
+        self.tier = tier
+        self.spell_name = spell_name
+        self.add_item(ShareButton(row=4))
+
+    @discord.ui.button(label="Learn", style=discord.ButtonStyle.success, row=0)
+    async def learn(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await _do_learn_spell(
+            interaction, user_id=self.user_id, tier=self.tier, spell_name=self.spell_name
+        )
+
+    @discord.ui.button(
+        label="← Back to list", style=discord.ButtonStyle.primary, row=1
+    )
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_learn_pick_payload(self.user_id, self.tier)
         if payload is None:
             await interaction.response.edit_message(
                 content="Character not found.", embed=None, view=None
