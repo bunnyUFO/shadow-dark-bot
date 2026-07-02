@@ -90,7 +90,10 @@ Unlike everything above, this is **per-player**, not guild-shared. Keyed by `use
 | `id` | INTEGER PK | |
 | `user_id` | TEXT UNIQUE NOT NULL | Discord user ID; the UNIQUE constraint enforces **one character per player** |
 | `name` | TEXT NOT NULL | |
+| `ancestry` | TEXT NULL | e.g. Elf, Dwarf |
 | `char_class` | TEXT NULL | |
+| `alignment` | TEXT NULL | Lawful / Neutral / Chaotic (display only; not used to gate spells) |
+| `languages` | TEXT NULL | Free text (comma-separated known languages) |
 | `level` | INTEGER NOT NULL DEFAULT 1 | `CHECK (level >= 1)` |
 | `max_hp` | INTEGER NULL | Max HP only — current HP is intentionally not tracked |
 | `armor_class` | INTEGER NULL | |
@@ -139,7 +142,7 @@ Seeded at startup by `spell_data.seed_spells()` (idempotent upsert by name). Cov
 | `added_at` | TIMESTAMP | |
 | | | `UNIQUE (character_id, spell_id)` — one row per reference spell |
 
-`CharacterSpell.display_name` / `display_tier` / `is_reference` resolve the split. **Adding a spell is class-gated**: the character's spell class comes from `spell_ability` (`int` → wizard, `wis` → priest), and only reference spells whose `classes` include it can be added — enforced in `_do_add_spell`. Spells-known limits are not enforced (tracker, not rules engine).
+`CharacterSpell.display_name` / `display_tier` / `is_reference` resolve the split. Spells are managed through the shared `/spells` browser (Learn/Forget on the spell detail when opened from a character). **Learning is class-gated**: the character's spell class comes from `spell_ability` (`int` → wizard, `wis` → priest), and only reference spells whose `classes` include it can be learned — enforced in `spell_reference._do_learn` (no alignment gating). Spells-known limits are not enforced (tracker, not rules engine).
 
 ### `audit_log` (schema reserved; not yet written to)
 | Column | Type | Notes |
@@ -193,6 +196,7 @@ Alembic. All migrations apply automatically at bot startup (before connecting to
 | `0008_player_characters` | Adds the `player_characters` (one per user) and `character_items` (hybrid catalog/freeform carried stacks) tables. |
 | `0009_spells` | Adds the `spells` reference table (seeded at startup) and `character_spells` (known spells). |
 | `0010_spell_alignment` | Adds `spells.alignment` for alignment-gated wizard spells. |
+| `0011_character_identity` | Adds `player_characters.ancestry`, `alignment`, and `languages`. |
 
 Future slices (e.g., role-based permissions, audit-log writes) will add new revisions. Each one uses `op.batch_alter_table` so SQLite can recreate tables transparently when needed.
 

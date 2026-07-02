@@ -334,8 +334,12 @@ def build_character_sheet_embed(
     spells: list[CharacterSpell] | None = None,
 ) -> discord.Embed:
     subtitle = f"Level {char.level}"
+    if char.ancestry:
+        subtitle += f" {char.ancestry}"
     if char.char_class:
         subtitle += f" {char.char_class}"
+    if char.alignment:
+        subtitle += f" · {char.alignment}"
     embed = discord.Embed(
         title=char.name, description=subtitle, color=CHARACTER_COLOR
     )
@@ -352,6 +356,9 @@ def build_character_sheet_embed(
     casting = _spellcasting_line(char)
     if casting is not None:
         embed.add_field(name="Spellcasting", value=casting, inline=False)
+
+    if char.languages:
+        embed.add_field(name="Languages", value=char.languages[:1024], inline=False)
 
     if char.talents:
         embed.add_field(name="Talents", value=char.talents[:1024], inline=False)
