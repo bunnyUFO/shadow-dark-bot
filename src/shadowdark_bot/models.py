@@ -188,6 +188,7 @@ class PlayerCharacter(Base):
     user_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     ancestry: Mapped[str | None] = mapped_column(String)
+    background: Mapped[str | None] = mapped_column(String)
     char_class: Mapped[str | None] = mapped_column(String)
     alignment: Mapped[str | None] = mapped_column(String)
     languages: Mapped[str | None] = mapped_column(String)
@@ -217,6 +218,7 @@ class PlayerCharacter(Base):
     gold_cp: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    proficiencies: Mapped[str | None] = mapped_column(Text)
     talents: Mapped[str | None] = mapped_column(Text)
     spell_ability: Mapped[str | None] = mapped_column(String)
     spell_check_bonus: Mapped[int] = mapped_column(

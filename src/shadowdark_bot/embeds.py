@@ -328,11 +328,8 @@ def build_character_spells_embed(
     return embed
 
 
-def build_character_sheet_embed(
-    char: PlayerCharacter,
-    items: list[CharacterItem],
-    spells: list[CharacterSpell] | None = None,
-) -> discord.Embed:
+def _character_header(char: PlayerCharacter) -> tuple[str, str]:
+    """(title, subtitle) shown at the top of every character-sheet tab."""
     subtitle = f"Level {char.level}"
     if char.ancestry:
         subtitle += f" {char.ancestry}"
@@ -340,16 +337,19 @@ def build_character_sheet_embed(
         subtitle += f" {char.char_class}"
     if char.alignment:
         subtitle += f" · {char.alignment}"
-    embed = discord.Embed(
-        title=char.name, description=subtitle, color=CHARACTER_COLOR
-    )
+    return char.name, subtitle
+
+
+def build_combat_embed(
+    char: PlayerCharacter, spells: list[CharacterSpell] | None = None
+) -> discord.Embed:
+    """Combat tab (home): HP/AC, ability scores, spellcasting, proficiencies, spells."""
+    title, subtitle = _character_header(char)
+    embed = discord.Embed(title=title, description=subtitle, color=CHARACTER_COLOR)
 
     hp = str(char.max_hp) if char.max_hp is not None else "—"
     ac = str(char.armor_class) if char.armor_class is not None else "—"
-    gold = format_cp(char.gold_cp) or "0cp"
-    embed.add_field(name="Max HP", value=hp, inline=True)
-    embed.add_field(name="AC", value=ac, inline=True)
-    embed.add_field(name="Gold", value=gold, inline=True)
+    embed.add_field(name="HP / AC", value=f"**HP** {hp}  •  **AC** {ac}", inline=False)
 
     embed.add_field(name="Ability Scores", value=_ability_table(char), inline=False)
 
@@ -357,11 +357,10 @@ def build_character_sheet_embed(
     if casting is not None:
         embed.add_field(name="Spellcasting", value=casting, inline=False)
 
-    if char.languages:
-        embed.add_field(name="Languages", value=char.languages[:1024], inline=False)
-
-    if char.talents:
-        embed.add_field(name="Talents", value=char.talents[:1024], inline=False)
+    if char.proficiencies:
+        embed.add_field(
+            name="Proficiencies", value=char.proficiencies[:1024], inline=False
+        )
 
     spells = spells or []
     spell_value = _spell_list_value(spells)
@@ -369,13 +368,53 @@ def build_character_sheet_embed(
         embed.add_field(name="Spells", value=spell_value[:1024], inline=False)
     elif char.spell_ability is not None:
         embed.add_field(name="Spells", value="_(none known)_", inline=False)
+    return embed
 
+
+def _items_block(items: list[CharacterItem]) -> str:
+    if not items:
+        return "_(carrying nothing)_"
+    lines = []
+    for ci in items[:25]:
+        tag = "catalog" if ci.is_catalog else "freeform"
+        lines.append(
+            f"• {ci.quantity}× {ci.display_name} "
+            f"— {fmt_slots(ci.slot_cost)} slots _[{tag}]_"
+        )
+    if len(items) > 25:
+        lines.append(f"…and {len(items) - 25} more")
+    return "\n".join(lines)
+
+
+def build_inventory_tab_embed(
+    char: PlayerCharacter, items: list[CharacterItem]
+) -> discord.Embed:
+    """Inventory tab: carried items and gold."""
+    title, subtitle = _character_header(char)
+    embed = discord.Embed(title=title, description=subtitle, color=CHARACTER_COLOR)
     used = sum(ci.slot_cost for ci in items)
     free = carry_capacity(char.str_score)
+    embed.add_field(name="Gold", value=format_cp(char.gold_cp) or "0cp", inline=False)
     embed.add_field(
-        name="Carrying",
-        value=f"{len(items)} stack(s) — {fmt_slots(used)}/{free} gear slots",
+        name=f"Items — {fmt_slots(used)}/{free} gear slots",
+        value=_items_block(items),
         inline=False,
+    )
+    return embed
+
+
+def build_roleplaying_embed(char: PlayerCharacter) -> discord.Embed:
+    """Roleplaying tab: background, languages, talents."""
+    title, subtitle = _character_header(char)
+    embed = discord.Embed(title=title, description=subtitle, color=CHARACTER_COLOR)
+    embed.add_field(
+        name="Background", value=(char.background or "_(none)_")[:1024], inline=False
+    )
+    embed.add_field(
+        name="Languages", value=(char.languages or "_(none)_")[:1024], inline=False
+    )
+    embed.add_field(
+        name="Talents", value=(char.talents or "_(none)_")[:1024], inline=False
     )
     return embed
 
