@@ -348,9 +348,11 @@ def build_combat_embed(
     embed = discord.Embed(title=title, description=subtitle, color=CHARACTER_COLOR)
 
     hp = str(char.max_hp) if char.max_hp is not None else "—"
-    # AC is the entered base (armor) plus the character's DEX modifier.
+    # AC is the entered base (armor) plus the character's DEX modifier, shown
+    # with the breakdown, e.g. "11 (10 + DEX)".
     if char.armor_class is not None:
-        ac = str(char.armor_class + ability_modifier(char.dex_score))
+        total = char.armor_class + ability_modifier(char.dex_score)
+        ac = f"{total} ({char.armor_class} + DEX)"
     else:
         ac = "—"
     embed.add_field(
