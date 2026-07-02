@@ -188,6 +188,7 @@ class PlayerCharacter(Base):
     user_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     ancestry: Mapped[str | None] = mapped_column(String)
+    background: Mapped[str | None] = mapped_column(String)
     char_class: Mapped[str | None] = mapped_column(String)
     alignment: Mapped[str | None] = mapped_column(String)
     languages: Mapped[str | None] = mapped_column(String)

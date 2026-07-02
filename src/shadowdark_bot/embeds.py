@@ -357,6 +357,9 @@ def build_character_sheet_embed(
     if casting is not None:
         embed.add_field(name="Spellcasting", value=casting, inline=False)
 
+    if char.background:
+        embed.add_field(name="Background", value=char.background[:1024], inline=True)
+
     if char.languages:
         embed.add_field(name="Languages", value=char.languages[:1024], inline=False)
 

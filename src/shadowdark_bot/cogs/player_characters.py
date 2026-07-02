@@ -898,6 +898,7 @@ class EditIdentityModal(discord.ui.Modal):
         user_id: str,
         *,
         ancestry: str = "",
+        background: str = "",
         alignment: str = "",
         languages: str = "",
     ) -> None:
@@ -905,6 +906,9 @@ class EditIdentityModal(discord.ui.Modal):
         self.user_id = user_id
         self._ancestry = discord.ui.TextInput(
             label="Ancestry", required=False, default=ancestry, max_length=50
+        )
+        self._background = discord.ui.TextInput(
+            label="Background", required=False, default=background, max_length=100
         )
         self._alignment = discord.ui.TextInput(
             label="Alignment (Lawful / Neutral / Chaotic)",
@@ -920,6 +924,7 @@ class EditIdentityModal(discord.ui.Modal):
             max_length=300,
         )
         self.add_item(self._ancestry)
+        self.add_item(self._background)
         self.add_item(self._alignment)
         self.add_item(self._languages)
 
@@ -928,6 +933,7 @@ class EditIdentityModal(discord.ui.Modal):
         return cls(
             char.user_id,
             ancestry=char.ancestry or "",
+            background=char.background or "",
             alignment=char.alignment or "",
             languages=char.languages or "",
         )
@@ -957,6 +963,7 @@ class EditIdentityModal(discord.ui.Modal):
                 )
                 return
             char.ancestry = str(self._ancestry.value).strip() or None
+            char.background = str(self._background.value).strip() or None
             char.alignment = alignment
             char.languages = str(self._languages.value).strip() or None
             _touch(char)

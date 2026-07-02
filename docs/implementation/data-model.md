@@ -91,6 +91,7 @@ Unlike everything above, this is **per-player**, not guild-shared. Keyed by `use
 | `user_id` | TEXT UNIQUE NOT NULL | Discord user ID; the UNIQUE constraint enforces **one character per player** |
 | `name` | TEXT NOT NULL | |
 | `ancestry` | TEXT NULL | e.g. Elf, Dwarf |
+| `background` | TEXT NULL | e.g. Urchin, Noble |
 | `char_class` | TEXT NULL | |
 | `alignment` | TEXT NULL | Lawful / Neutral / Chaotic (display only; not used to gate spells) |
 | `languages` | TEXT NULL | Free text (comma-separated known languages) |
@@ -197,6 +198,7 @@ Alembic. All migrations apply automatically at bot startup (before connecting to
 | `0009_spells` | Adds the `spells` reference table (seeded at startup) and `character_spells` (known spells). |
 | `0010_spell_alignment` | Adds `spells.alignment` for alignment-gated wizard spells. |
 | `0011_character_identity` | Adds `player_characters.ancestry`, `alignment`, and `languages`. |
+| `0012_character_background` | Adds `player_characters.background`. |
 
 Future slices (e.g., role-based permissions, audit-log writes) will add new revisions. Each one uses `op.batch_alter_table` so SQLite can recreate tables transparently when needed.
 
