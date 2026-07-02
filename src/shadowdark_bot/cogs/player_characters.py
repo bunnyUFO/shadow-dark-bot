@@ -21,8 +21,10 @@ from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import (
     CHARACTER_COLOR,
     build_character_inventory_embed,
-    build_character_sheet_embed,
     build_character_spells_embed,
+    build_combat_embed,
+    build_inventory_tab_embed,
+    build_roleplaying_embed,
     build_spell_embed,
     fmt_slots,
 )
@@ -141,15 +143,26 @@ def _parse_optional_int(raw: str, *, minimum: int | None = None) -> int | None:
 # ---------- Payload builders ----------
 
 
-def _build_sheet_payload(user_id: str) -> tuple[discord.Embed, "CharacterSheetView"] | None:
+SHEET_TABS = ("combat", "inventory", "roleplaying")
+
+
+def _build_tab_embed(char: PlayerCharacter, tab: str) -> discord.Embed:
+    if tab == "inventory":
+        return build_inventory_tab_embed(char, _sorted_items(char))
+    if tab == "roleplaying":
+        return build_roleplaying_embed(char)
+    return build_combat_embed(char, _sorted_spells(char))
+
+
+def _build_sheet_payload(
+    user_id: str, tab: str = "combat"
+) -> tuple[discord.Embed, "CharacterSheetView"] | None:
     with session_scope() as session:
         char = _load_character(session, user_id)
         if char is None:
             return None
-        embed = build_character_sheet_embed(
-            char, _sorted_items(char), _sorted_spells(char)
-        )
-    return embed, CharacterSheetView(user_id)
+        embed = _build_tab_embed(char, tab)
+    return embed, CharacterSheetView(user_id, tab)
 
 
 def _build_inventory_payload(
@@ -195,18 +208,14 @@ def _build_item_detail_payload(
 
 
 def _build_show_payload(
-    target_id: str, mode: str
+    target_id: str, tab: str = "combat"
 ) -> tuple[discord.Embed, "CharacterShowView"] | None:
     with session_scope() as session:
         char = _load_character(session, target_id)
         if char is None:
             return None
-        items = _sorted_items(char)
-        if mode == "inventory":
-            embed = build_character_inventory_embed(char, items)
-        else:
-            embed = build_character_sheet_embed(char, items, _sorted_spells(char))
-    return embed, CharacterShowView(target_id, mode)
+        embed = _build_tab_embed(char, tab)
+    return embed, CharacterShowView(target_id, tab)
 
 
 # ---------- Spell management (bespoke, class-limited) ----------
@@ -306,8 +315,10 @@ def _build_learn_detail_payload(
     return embed, LearnDetailView(user_id, tier, spell_name)
 
 
-async def _refresh_sheet(interaction: discord.Interaction, user_id: str) -> None:
-    payload = _build_sheet_payload(user_id)
+async def _refresh_sheet(
+    interaction: discord.Interaction, user_id: str, tab: str = "combat"
+) -> None:
+    payload = _build_sheet_payload(user_id, tab)
     if payload is None:
         await interaction.response.edit_message(
             content="Character not found.", embed=None, view=None
@@ -744,12 +755,18 @@ class EditDetailsModal(discord.ui.Modal):
             _touch(char)
             session.flush()
 
-        await _refresh_sheet(interaction, self.user_id)
+        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "combat"))
+
+
+def _modal_tab(modal: discord.ui.Modal, default: str) -> str:
+    """Which sheet tab to refresh to after a modal submit (set by the sheet
+    view when it opens the modal)."""
+    return getattr(modal, "refresh_tab", default)
 
 
 class EditAbilitiesModal(discord.ui.Modal):
-    def __init__(self, user_id: str, *, scores: str = "", gold: str = "") -> None:
-        super().__init__(title="Abilities & gold")
+    def __init__(self, user_id: str, *, scores: str = "") -> None:
+        super().__init__(title="Ability scores")
         self.user_id = user_id
         self._scores = discord.ui.TextInput(
             label="Scores: STR DEX CON INT WIS CHA",
@@ -757,19 +774,12 @@ class EditAbilitiesModal(discord.ui.Modal):
             default=scores,
             max_length=40,
         )
-        self._gold = discord.ui.TextInput(
-            label='Gold (e.g. "10gp 5sp"; blank = 0)',
-            required=False,
-            default=gold,
-            max_length=50,
-        )
         self.add_item(self._scores)
-        self.add_item(self._gold)
 
     @classmethod
     def from_char(cls, char: PlayerCharacter) -> "EditAbilitiesModal":
         scores = " ".join(str(getattr(char, f"{k}_score")) for k, _ in ABILITIES)
-        return cls(char.user_id, scores=scores, gold=format_cp(char.gold_cp) or "0cp")
+        return cls(char.user_id, scores=scores)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
@@ -779,14 +789,6 @@ class EditAbilitiesModal(discord.ui.Modal):
                 f"**Failed to save.**\n{err}", ephemeral=True
             )
             return
-        try:
-            gold = parse_value_string(str(self._gold.value))
-        except ValueError as err:
-            await interaction.response.send_message(
-                f"**Failed to save.**\n{err}", ephemeral=True
-            )
-            return
-
         with session_scope() as session:
             char = session.scalar(
                 select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
@@ -799,31 +801,57 @@ class EditAbilitiesModal(discord.ui.Modal):
                 return
             for (key, _), value in zip(ABILITIES, scores, strict=True):
                 setattr(char, f"{key}_score", value)
+            _touch(char)
+            session.flush()
+        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "combat"))
+
+
+class EditGoldModal(discord.ui.Modal):
+    def __init__(self, user_id: str, *, gold: str = "") -> None:
+        super().__init__(title="Gold")
+        self.user_id = user_id
+        self._gold = discord.ui.TextInput(
+            label='Gold (e.g. "10gp 5sp"; blank = 0)',
+            required=False,
+            default=gold,
+            max_length=50,
+        )
+        self.add_item(self._gold)
+
+    @classmethod
+    def from_char(cls, char: PlayerCharacter) -> "EditGoldModal":
+        return cls(char.user_id, gold=format_cp(char.gold_cp) or "0cp")
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            gold = parse_value_string(str(self._gold.value))
+        except ValueError as err:
+            await interaction.response.send_message(
+                f"**Failed to save.**\n{err}", ephemeral=True
+            )
+            return
+        with session_scope() as session:
+            char = session.scalar(
+                select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
+            )
+            if char is None:
+                await interaction.response.send_message(
+                    "Character not found — run `/character sheet` first.",
+                    ephemeral=True,
+                )
+                return
             char.gold_cp = gold if gold is not None else 0
             _touch(char)
             session.flush()
+        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "inventory"))
 
-        await _refresh_sheet(interaction, self.user_id)
 
-
-class EditTalentsCastingModal(discord.ui.Modal):
+class EditCastingModal(discord.ui.Modal):
     def __init__(
-        self,
-        user_id: str,
-        *,
-        talents: str = "",
-        spell_stat: str = "",
-        spell_bonus: str = "0",
+        self, user_id: str, *, spell_stat: str = "", spell_bonus: str = "0"
     ) -> None:
-        super().__init__(title="Talents & casting")
+        super().__init__(title="Spellcasting")
         self.user_id = user_id
-        self._talents = discord.ui.TextInput(
-            label="Talents",
-            required=False,
-            default=talents,
-            style=discord.TextStyle.paragraph,
-            max_length=1000,
-        )
         self._spell_stat = discord.ui.TextInput(
             label="Spellcasting stat (INT / WIS / none)",
             required=False,
@@ -836,15 +864,13 @@ class EditTalentsCastingModal(discord.ui.Modal):
             default=spell_bonus,
             max_length=3,
         )
-        self.add_item(self._talents)
         self.add_item(self._spell_stat)
         self.add_item(self._spell_bonus)
 
     @classmethod
-    def from_char(cls, char: PlayerCharacter) -> "EditTalentsCastingModal":
+    def from_char(cls, char: PlayerCharacter) -> "EditCastingModal":
         return cls(
             char.user_id,
-            talents=char.talents or "",
             spell_stat=char.spell_ability.upper() if char.spell_ability else "",
             spell_bonus=str(char.spell_check_bonus),
         )
@@ -869,7 +895,75 @@ class EditTalentsCastingModal(discord.ui.Modal):
                 ephemeral=True,
             )
             return
+        with session_scope() as session:
+            char = session.scalar(
+                select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
+            )
+            if char is None:
+                await interaction.response.send_message(
+                    "Character not found — run `/character sheet` first.",
+                    ephemeral=True,
+                )
+                return
+            char.spell_ability = spell_ability
+            char.spell_check_bonus = bonus
+            _touch(char)
+            session.flush()
+        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "combat"))
 
+
+class EditProficienciesModal(discord.ui.Modal):
+    def __init__(self, user_id: str, *, proficiencies: str = "") -> None:
+        super().__init__(title="Proficiencies")
+        self.user_id = user_id
+        self._prof = discord.ui.TextInput(
+            label="Proficiencies",
+            required=False,
+            default=proficiencies,
+            style=discord.TextStyle.paragraph,
+            max_length=1000,
+        )
+        self.add_item(self._prof)
+
+    @classmethod
+    def from_char(cls, char: PlayerCharacter) -> "EditProficienciesModal":
+        return cls(char.user_id, proficiencies=char.proficiencies or "")
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        with session_scope() as session:
+            char = session.scalar(
+                select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
+            )
+            if char is None:
+                await interaction.response.send_message(
+                    "Character not found — run `/character sheet` first.",
+                    ephemeral=True,
+                )
+                return
+            char.proficiencies = str(self._prof.value).strip() or None
+            _touch(char)
+            session.flush()
+        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "combat"))
+
+
+class EditTalentsModal(discord.ui.Modal):
+    def __init__(self, user_id: str, *, talents: str = "") -> None:
+        super().__init__(title="Talents")
+        self.user_id = user_id
+        self._talents = discord.ui.TextInput(
+            label="Talents",
+            required=False,
+            default=talents,
+            style=discord.TextStyle.paragraph,
+            max_length=1000,
+        )
+        self.add_item(self._talents)
+
+    @classmethod
+    def from_char(cls, char: PlayerCharacter) -> "EditTalentsModal":
+        return cls(char.user_id, talents=char.talents or "")
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
         with session_scope() as session:
             char = session.scalar(
                 select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
@@ -881,12 +975,9 @@ class EditTalentsCastingModal(discord.ui.Modal):
                 )
                 return
             char.talents = str(self._talents.value).strip() or None
-            char.spell_ability = spell_ability
-            char.spell_check_bonus = bonus
             _touch(char)
             session.flush()
-
-        await _refresh_sheet(interaction, self.user_id)
+        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "roleplaying"))
 
 
 _ALIGNMENTS = {"lawful": "Lawful", "neutral": "Neutral", "chaotic": "Chaotic"}
@@ -969,7 +1060,7 @@ class EditIdentityModal(discord.ui.Modal):
             _touch(char)
             session.flush()
 
-        await _refresh_sheet(interaction, self.user_id)
+        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "roleplaying"))
 
 
 class AddItemModal(discord.ui.Modal):
@@ -1083,92 +1174,117 @@ class NoCharacterView(_OwnerView):
         await interaction.response.send_modal(EditDetailsModal(self.user_id))
 
 
-class CharacterSheetView(_OwnerView):
-    def __init__(self, user_id: str) -> None:
-        super().__init__(user_id)
-        self.add_item(ShareButton(row=4))
+class _TabButton(discord.ui.Button):
+    """Switches the sheet to another tab (the active tab's button is disabled)."""
 
-    async def _open(self, interaction: discord.Interaction, factory) -> None:
+    def __init__(self, label: str, tab: str, active: bool) -> None:
+        super().__init__(
+            label=label,
+            style=discord.ButtonStyle.secondary
+            if active
+            else discord.ButtonStyle.primary,
+            disabled=active,
+            row=0,
+        )
+        self.tab = tab
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: CharacterSheetView = self.view  # type: ignore[assignment]
+        payload = _build_sheet_payload(view.user_id, self.tab)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Character not found.", embed=None, view=None
+            )
+            return
+        embed, new_view = payload
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+
+class _EditButton(discord.ui.Button):
+    """Opens an edit modal, tagging it with the current tab so the sheet
+    refreshes back to where the edit was launched from."""
+
+    def __init__(self, label: str, factory, row: int) -> None:
+        super().__init__(label=label, style=discord.ButtonStyle.primary, row=row)
+        self.factory = factory
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: CharacterSheetView = self.view  # type: ignore[assignment]
         with session_scope() as session:
             char = session.scalar(
-                select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
+                select(PlayerCharacter).where(PlayerCharacter.user_id == view.user_id)
             )
             if char is None:
                 await interaction.response.send_message(
                     "Character not found.", ephemeral=True
                 )
                 return
-            modal = factory(char)
+            modal = self.factory(char)
+        modal.refresh_tab = view.tab
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Edit Details", style=discord.ButtonStyle.primary, row=0)
-    async def edit_details(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self._open(interaction, EditDetailsModal.from_char)
 
-    @discord.ui.button(
-        label="Edit Abilities & Gold", style=discord.ButtonStyle.primary, row=0
-    )
-    async def edit_abilities(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self._open(interaction, EditAbilitiesModal.from_char)
+class _SubViewButton(discord.ui.Button):
+    """Swaps to a sub-view (Manage Inventory / Manage Spells)."""
 
-    @discord.ui.button(
-        label="Edit Talents & Casting", style=discord.ButtonStyle.primary, row=0
-    )
-    async def edit_talents(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self._open(interaction, EditTalentsCastingModal.from_char)
+    def __init__(self, label: str, builder, row: int) -> None:
+        super().__init__(label=label, style=discord.ButtonStyle.success, row=row)
+        self.builder = builder
 
-    @discord.ui.button(
-        label="Edit Identity", style=discord.ButtonStyle.primary, row=0
-    )
-    async def edit_identity(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self._open(interaction, EditIdentityModal.from_char)
-
-    @discord.ui.button(
-        label="Manage Inventory", style=discord.ButtonStyle.secondary, row=1
-    )
-    async def manage_inventory(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        payload = _build_inventory_payload(self.user_id)
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: CharacterSheetView = self.view  # type: ignore[assignment]
+        payload = self.builder(view.user_id)
         if payload is None:
             await interaction.response.send_message(
                 "Character not found.", ephemeral=True
             )
             return
-        embed, view = payload
-        await interaction.response.edit_message(embed=embed, view=view)
+        embed, sub_view = payload
+        await interaction.response.edit_message(embed=embed, view=sub_view)
 
-    @discord.ui.button(
-        label="Manage Spells", style=discord.ButtonStyle.secondary, row=1
-    )
-    async def manage_spells(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        payload = _build_spells_payload(self.user_id)
-        if payload is None:
-            await interaction.response.send_message(
-                "Character not found.", ephemeral=True
+
+class CharacterSheetView(_OwnerView):
+    """Tabbed character sheet: Combat (home) / Inventory / Roleplaying."""
+
+    def __init__(self, user_id: str, tab: str = "combat") -> None:
+        super().__init__(user_id)
+        self.tab = tab
+
+        self.add_item(_TabButton("Combat", "combat", tab == "combat"))
+        self.add_item(_TabButton("Inventory", "inventory", tab == "inventory"))
+        self.add_item(_TabButton("Roleplaying", "roleplaying", tab == "roleplaying"))
+
+        if tab == "combat":
+            self.add_item(_EditButton("Edit Details", EditDetailsModal.from_char, 1))
+            self.add_item(_EditButton("Edit Abilities", EditAbilitiesModal.from_char, 1))
+            self.add_item(_EditButton("Edit Casting", EditCastingModal.from_char, 1))
+            self.add_item(
+                _EditButton("Edit Proficiencies", EditProficienciesModal.from_char, 1)
             )
-            return
-        embed, view = payload
-        await interaction.response.edit_message(embed=embed, view=view)
+            self.add_item(_SubViewButton("Manage Spells", _build_spells_payload, 2))
+        elif tab == "inventory":
+            self.add_item(
+                _SubViewButton("Manage Inventory", _build_inventory_payload, 1)
+            )
+            self.add_item(_EditButton("Edit Gold", EditGoldModal.from_char, 1))
+        else:  # roleplaying
+            self.add_item(_EditButton("Edit Identity", EditIdentityModal.from_char, 1))
+            self.add_item(_EditButton("Edit Talents", EditTalentsModal.from_char, 1))
+            self.add_item(_DeleteButton(2))
 
-    @discord.ui.button(
-        label="Delete character", style=discord.ButtonStyle.danger, row=2
-    )
-    async def delete(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
+        self.add_item(ShareButton(row=4))
+
+
+class _DeleteButton(discord.ui.Button):
+    def __init__(self, row: int) -> None:
+        super().__init__(
+            label="Delete character", style=discord.ButtonStyle.danger, row=row
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: CharacterSheetView = self.view  # type: ignore[assignment]
         with session_scope() as session:
-            char = _load_character(session, self.user_id)
+            char = _load_character(session, view.user_id)
             if char is None:
                 await interaction.response.send_message(
                     "Character not found.", ephemeral=True
@@ -1186,7 +1302,7 @@ class CharacterSheetView(_OwnerView):
             color=discord.Color.red(),
         )
         await interaction.response.edit_message(
-            embed=embed, view=DeleteConfirmView(self.user_id)
+            embed=embed, view=DeleteConfirmView(view.user_id)
         )
 
 
@@ -1235,7 +1351,7 @@ class CharacterInventoryView(_OwnerView):
     async def back(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        payload = _build_sheet_payload(self.user_id)
+        payload = _build_sheet_payload(self.user_id, "inventory")
         if payload is None:
             await interaction.response.edit_message(
                 content="Character not found.", embed=None, view=None
@@ -1543,51 +1659,44 @@ class LearnDetailView(_OwnerView):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
-class CharacterShowView(discord.ui.View):
-    """Read-only view of another player's sheet — toggle Stats/Inventory + share."""
-
-    def __init__(self, target_id: str, mode: str) -> None:
-        super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
-        self.target_id = target_id
-        self.mode = mode
-
-        stats = discord.ui.Button(
-            label="Stats",
+class _ShowTabButton(discord.ui.Button):
+    def __init__(self, label: str, tab: str, active: bool) -> None:
+        super().__init__(
+            label=label,
             style=discord.ButtonStyle.secondary
-            if mode == "stats"
+            if active
             else discord.ButtonStyle.primary,
-            disabled=mode == "stats",
+            disabled=active,
             row=0,
         )
-        inv = discord.ui.Button(
-            label="Inventory",
-            style=discord.ButtonStyle.secondary
-            if mode == "inventory"
-            else discord.ButtonStyle.primary,
-            disabled=mode == "inventory",
-            row=0,
-        )
-        stats.callback = self._show_stats  # type: ignore[method-assign]
-        inv.callback = self._show_inventory  # type: ignore[method-assign]
-        self.add_item(stats)
-        self.add_item(inv)
-        self.add_item(ShareButton(row=4))
+        self.tab = tab
 
-    async def _swap(self, interaction: discord.Interaction, mode: str) -> None:
-        payload = _build_show_payload(self.target_id, mode)
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: CharacterShowView = self.view  # type: ignore[assignment]
+        payload = _build_show_payload(view.target_id, self.tab)
         if payload is None:
             await interaction.response.edit_message(
                 content="That character no longer exists.", embed=None, view=None
             )
             return
-        embed, view = payload
-        await interaction.response.edit_message(embed=embed, view=view)
+        embed, new_view = payload
+        await interaction.response.edit_message(embed=embed, view=new_view)
 
-    async def _show_stats(self, interaction: discord.Interaction) -> None:
-        await self._swap(interaction, "stats")
 
-    async def _show_inventory(self, interaction: discord.Interaction) -> None:
-        await self._swap(interaction, "inventory")
+class CharacterShowView(discord.ui.View):
+    """Read-only view of another player's sheet — Combat / Inventory /
+    Roleplaying tabs + share. No edit controls."""
+
+    def __init__(self, target_id: str, tab: str = "combat") -> None:
+        super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
+        self.target_id = target_id
+        self.tab = tab
+        self.add_item(_ShowTabButton("Combat", "combat", tab == "combat"))
+        self.add_item(_ShowTabButton("Inventory", "inventory", tab == "inventory"))
+        self.add_item(
+            _ShowTabButton("Roleplaying", "roleplaying", tab == "roleplaying")
+        )
+        self.add_item(ShareButton(row=4))
 
 
 class DeleteConfirmView(_OwnerView):
@@ -1609,7 +1718,7 @@ class DeleteConfirmView(_OwnerView):
     async def cancel(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        payload = _build_sheet_payload(self.user_id)
+        payload = _build_sheet_payload(self.user_id, "roleplaying")
         if payload is None:
             await interaction.response.edit_message(
                 content="Deletion cancelled.", embed=None, view=None
@@ -1699,7 +1808,7 @@ class PlayerCharacters(commands.Cog):
     async def show(
         self, interaction: discord.Interaction, member: discord.Member
     ) -> None:
-        payload = _build_show_payload(str(member.id), "stats")
+        payload = _build_show_payload(str(member.id), "combat")
         if payload is None:
             await interaction.response.send_message(
                 f"**{member.display_name}** doesn't have a character yet.",

@@ -131,15 +131,21 @@ For guild-owned magical items. They are **never given away** — they're borrowe
 
 Unlike the four guild-shared systems above, a **character belongs to one player** (keyed by Discord user). Each player has **one** character with lean Shadow Dark stats and a carried inventory. You edit **your own** character through an ephemeral, interactive sheet; you can **view** anyone else's read-only.
 
-Stats covered: name, **ancestry**, **background**, class, **alignment**, level, **max HP**, AC, the six ability scores (with an auto-computed modifier table — Shadow Dark's `floor((score−10)/2)` clamped to ±4), gold (entered gp/sp/cp, stored as copper), **known languages**, a free-text **Talents** section, an optional **spellcasting** modifier (governing stat INT or WIS plus a manual spell-check bonus for talent-granted bonuses), and a **known spells** list.
+Stats covered: name, **ancestry**, **background**, class, **alignment**, level, **max HP**, AC, the six ability scores (with an auto-computed modifier table — Shadow Dark's `floor((score−10)/2)` clamped to ±4), gold (entered gp/sp/cp, stored as copper), **known languages**, **proficiencies**, a free-text **Talents** section, an optional **spellcasting** modifier (governing stat INT or WIS plus a manual spell-check bonus for talent-granted bonuses), and a **known spells** list.
 
 Inventory is **hybrid**: a carried item either links to the shared `/items` catalog (reusing its gear-slot / bundle data) or is a **freeform** typed name with its own per-item slot cost. Carry capacity is the Shadow Dark limit: **max(10, STR)** gear slots, using the same bundle-aware ceiling math as guild inventory.
 
 | Command | What it does | Example |
 |---|---|---|
-| `/character sheet` | Open **your** sheet as an ephemeral, interactive embed. If you don't have a character yet, a **Create character** button opens the details form. The sheet's buttons — **Edit Details** (name/class/level/max HP/AC), **Edit Abilities & Gold** (six scores + gold), **Edit Talents & Casting** (talents, spellcasting stat, spell bonus), **Edit Identity** (ancestry, background, alignment, languages), **Manage Inventory**, **Manage Spells**, and **Delete character** — open modals or swap the view in place. | `/character sheet` |
+| `/character sheet` | Open **your** sheet as an ephemeral, interactive embed with three tabs (buttons on the top row): **Combat** (home), **Inventory**, and **Roleplaying**. If you don't have a character yet, a **Create character** button opens the details form. | `/character sheet` |
 | `/character carry item quantity? gear_slots?` | Add an item you're carrying. Autocomplete suggests catalog items (a match links it); any other text becomes a freeform item. `gear_slots` sets the per-item slot cost for a new freeform item (ignored for catalog items). Blocked if it would exceed your carry capacity. | `/character carry item:"Arrows" quantity:20` |
-| `/character show member` | View another player's sheet read-only. Toggle between **Stats** and **Inventory**; no edit buttons. Includes the Share button. | `/character show member:@Tessa` |
+| `/character show member` | View another player's sheet read-only, with the same **Combat / Inventory / Roleplaying** tabs; no edit buttons. Includes the Share button. | `/character show member:@Tessa` |
+
+The three tabs keep each view short:
+
+- **Combat** (home) — HP / AC (one line), ability scores + modifiers, spellcasting, proficiencies, and known spells. Buttons: **Edit Details** (name/class/level/max HP/AC), **Edit Abilities** (six scores), **Edit Casting** (spellcasting stat + bonus), **Edit Proficiencies**, and **Manage Spells**.
+- **Inventory** — gold and carried items (with capacity). Buttons: **Manage Inventory** and **Edit Gold**.
+- **Roleplaying** — background, languages, talents. Buttons: **Edit Identity** (ancestry/background/alignment/languages), **Edit Talents**, and **Delete character**.
 
 Deleting a character is a **Delete character** button on `/character sheet` (there's no delete command). It swaps to an "Are you sure you want to delete **&lt;name&gt;**?" confirmation embed with **Delete** / **Cancel**; Cancel returns to the sheet.
 
@@ -147,7 +153,7 @@ Spells are managed **only** through the **Manage Spells** button on `/character 
 
 **Manage Inventory** (from `/character sheet`) lists your stacks with a dropdown; drilling into one exposes **+ Add more**, **− Take**, and **Remove**, plus an **Add item** modal for quick freeform entries. Everything re-checks capacity and updates in place.
 
-**Manage Spells** is a dedicated, class-limited manager (separate from `/spells browse`). It lists your known spells — inspect one to see its full text with a **Forget** button — and a **Learn a spell** button. Learning is a tier selector → a dropdown of your class's spells at that tier (not yet known) → the spell's detail with a **Learn** button. Only your character's class of spells is shown, and **any tier is learnable** (scrolls and the like can grant higher-tier spells, so tiers aren't gated by level). Learn is class-checked on press — a wrong-class spell fails with a message; there is **no** alignment gating. Your class comes from your spellcasting stat (INT → wizard, WIS → priest), so set that via **Edit Talents & Casting** first. Spells-known limits are **not** enforced — the list is a tracker, not a rules engine.
+**Manage Spells** is a dedicated, class-limited manager (separate from `/spells browse`). It lists your known spells — inspect one to see its full text with a **Forget** button — and a **Learn a spell** button. Learning is a tier selector → a dropdown of your class's spells at that tier (not yet known) → the spell's detail with a **Learn** button. Only your character's class of spells is shown, and **any tier is learnable** (scrolls and the like can grant higher-tier spells, so tiers aren't gated by level). Learn is class-checked on press — a wrong-class spell fails with a message; there is **no** alignment gating. Your class comes from your spellcasting stat (INT → wizard, WIS → priest), so set that via **Edit Casting** (Combat tab) first. Spells-known limits are **not** enforced — the list is a tracker, not a rules engine.
 
 ---
 

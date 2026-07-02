@@ -100,6 +100,7 @@ Unlike everything above, this is **per-player**, not guild-shared. Keyed by `use
 | `armor_class` | INTEGER NULL | |
 | `str/dex/con/int/wis/cha _score` | INTEGER NOT NULL DEFAULT 10 | Six ability scores. Modifiers are derived, not stored (`rules.ability_modifier`) |
 | `gold_cp` | INTEGER NOT NULL DEFAULT 0 | Personal gold in copper (same convention as items/coffers) |
+| `proficiencies` | TEXT NULL | Free-text (shown on the Combat tab) |
 | `talents` | TEXT NULL | Free-text; talent-granted numeric effects live here as prose |
 | `spell_ability` | TEXT NULL | `CHECK (spell_ability IN ('int','wis'))` or NULL. Governing casting stat; NULL = non-caster |
 | `spell_check_bonus` | INTEGER NOT NULL DEFAULT 0 | Flat bonus for talent-granted spellcasting bonuses. Shown modifier = `ability_modifier(spell stat) + this` |
@@ -199,6 +200,7 @@ Alembic. All migrations apply automatically at bot startup (before connecting to
 | `0010_spell_alignment` | Adds `spells.alignment` for alignment-gated wizard spells. |
 | `0011_character_identity` | Adds `player_characters.ancestry`, `alignment`, and `languages`. |
 | `0012_character_background` | Adds `player_characters.background`. |
+| `0013_character_proficiencies` | Adds `player_characters.proficiencies`. |
 
 Future slices (e.g., role-based permissions, audit-log writes) will add new revisions. Each one uses `op.batch_alter_table` so SQLite can recreate tables transparently when needed.
 
