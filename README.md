@@ -11,7 +11,7 @@ Feature-complete for the first slice. Six command groups working end-to-end. The
 - **`/treasury`** — magical-item borrow/return tracking. Each physical instance has its own row; same catalog item can be checked out by multiple users at once. `add`, `remove`, and **`browse`** (browse → entry → `Borrow for me` / `Borrow for someone…` / `Return` buttons). Everything's logged in the `borrows` ledger.
 - **`/coffers`** — shared guild funds in gp/sp/cp. `add`, `subtract`, and **`browse`** (browse → balance + a dropdown of buyable catalog items → quantity modal). Single shared balance, stored internally as integer copper.
 - **`/character`** — your own player character (one per player, not guild-shared). `sheet` opens an ephemeral, owner-only interactive sheet split into three tabs — **Combat** (home: HP/AC, ability scores + modifiers, spellcasting, proficiencies, spells), **Inventory** (gold + a hybrid catalog/freeform carried inventory with `max(10, STR)` carry capacity), and **Roleplaying** (background, languages, talents). Known spells come from a built-in Shadow Dark spell reference (all Tier 1–5 wizard/priest plus 48 alignment-gated wizard spells). **Manage Spells** is a dedicated, class-limited manager (a tier selector → your class's spells → a Learn button on the spell detail, plus Forget for known spells), separate from the read-only `/spells browse`. Any tier is learnable; wrong-class spells are rejected. `carry` adds items, and `show <member>` views anyone else's sheet read-only.
-- **`/spells`** — a read-only browser for the built-in spell reference. `browse` filters by class (wizard/priest), tier (1–5), and alignment (all/neutral/lawful/chaotic), then lets you inspect a spell's full duration/range/description.
+- **`/spells`** — a read-only reference for the built-in spell list. `info` looks up a single spell by name (with autocomplete); `browse` filters by class (wizard/priest), tier (1–5), alignment (all/neutral/lawful/chaotic), and name substring, then lets you inspect a spell's full duration/range/description.
 
 The bot can be installed in multiple Discord servers; commands sync to every server it joins. **Data is currently shared across all servers** — see the roadmap for the multi-tenant slice that gives each server its own catalog/inventory/treasury/coffers.
 
@@ -76,7 +76,7 @@ shadow-dark-bot/
 │           ├── magical_treasury.py   ← /treasury add, remove, browse
 │           ├── guild_coffers.py      ← /coffers add, subtract, browse
 │           ├── player_characters.py  ← /character sheet, carry, show (+ Manage Spells, Delete button)
-│           └── spell_reference.py     ← /spells browse (class/tier/alignment filters)
+│           └── spell_reference.py     ← /spells browse (class/tier/alignment/name) + /spells info
 │
 └── docs/                         ← human-readable documentation (not loaded at runtime)
     ├── commands.md               ← every slash command, what it does, examples

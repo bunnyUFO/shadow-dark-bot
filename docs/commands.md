@@ -163,7 +163,8 @@ A read-only lookup of the built-in spell reference (independent of characters �
 
 | Command | What it does | Example |
 |---|---|---|
-| `/spells browse spell_class? tier? alignment?` | List spells with optional filters, then inspect one from a dropdown (full duration/range/description). Filters: **spell_class** (Wizard/Priest), **tier** (1–5), **alignment** (All/Neutral/Lawful/Chaotic — All is the default and includes standard spells). Paginated when a filter set returns more than 25 results; ephemeral with a Share button. | `/spells browse spell_class:Wizard tier:3 alignment:Chaotic` |
+| `/spells info spell` | Jump straight to one spell's full detail (duration/range/description). Autocomplete suggests matching spells as you type; a partial name resolves to the first match. | `/spells info spell:"Magic Missile"` |
+| `/spells browse spell_class? tier? alignment? name?` | List spells with optional filters, then inspect one from a dropdown (full duration/range/description). Filters combine: **spell_class** (Wizard/Priest), **tier** (1–5), **alignment** (All/Neutral/Lawful/Chaotic — All is the default and includes standard spells), and **name** (substring). Paginated when more than 25 results match; ephemeral with a Share button. | `/spells browse spell_class:Wizard tier:3 name:fire` |
 
 ---
 
