@@ -143,7 +143,7 @@ Inventory is **hybrid**: a carried item either links to the shared `/items` cata
 
 The three tabs keep each view short:
 
-- **Combat** (home) — HP / AC (one line), ability scores + modifiers, spellcasting, proficiencies, and known spells. Buttons: **Edit Details** (name/class/level/max HP/AC), **Edit Abilities** (six scores), **Edit Casting** (spellcasting stat + bonus), **Edit Proficiencies**, and **Manage Spells**.
+- **Combat** (home) — ability scores + modifiers, with **HP** and **AC** shown beneath the table in the same section. AC is your entered **base AC** (from armor, or 10 unarmored) **plus your DEX modifier**, shown with the breakdown, e.g. `AC 11 (10 + DEX)`. Also spellcasting, proficiencies, and known spells. Buttons: **Edit Details** (name/class/level/max HP/base AC), **Edit Abilities** (six scores), **Edit Casting** (spellcasting stat + bonus), **Edit Proficiencies**, and **Manage Spells**.
 - **Inventory** — gold and carried items (with capacity). Buttons: **Manage Inventory** and **Edit Gold**.
 - **Roleplaying** — background, languages, talents. Buttons: **Edit Identity** (ancestry/background/alignment/languages), **Edit Talents**, and **Delete character**.
 

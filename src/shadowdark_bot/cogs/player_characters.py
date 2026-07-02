@@ -698,7 +698,10 @@ class EditDetailsModal(discord.ui.Modal):
             label="Max HP (blank = unset)", required=False, default=max_hp, max_length=4
         )
         self._ac = discord.ui.TextInput(
-            label="Armor Class (blank = unset)", required=False, default=ac, max_length=3
+            label="Base AC / armor (DEX added on sheet)",
+            required=False,
+            default=ac,
+            max_length=3,
         )
         for field in (self._name, self._class, self._level, self._hp, self._ac):
             self.add_item(field)

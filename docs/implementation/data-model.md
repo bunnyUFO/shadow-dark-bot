@@ -97,7 +97,7 @@ Unlike everything above, this is **per-player**, not guild-shared. Keyed by `use
 | `languages` | TEXT NULL | Free text (comma-separated known languages) |
 | `level` | INTEGER NOT NULL DEFAULT 1 | `CHECK (level >= 1)` |
 | `max_hp` | INTEGER NULL | Max HP only — current HP is intentionally not tracked |
-| `armor_class` | INTEGER NULL | |
+| `armor_class` | INTEGER NULL | Base AC (from armor, or 10 unarmored). The sheet displays it plus the DEX modifier |
 | `str/dex/con/int/wis/cha _score` | INTEGER NOT NULL DEFAULT 10 | Six ability scores. Modifiers are derived, not stored (`rules.ability_modifier`) |
 | `gold_cp` | INTEGER NOT NULL DEFAULT 0 | Personal gold in copper (same convention as items/coffers) |
 | `proficiencies` | TEXT NULL | Free-text (shown on the Combat tab) |
