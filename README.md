@@ -4,13 +4,14 @@ A Discord bot for Shadow Dark TTRPG guilds. Tracks the guild's item catalog, sha
 
 ## Status
 
-Feature-complete for the first slice. Five command groups working end-to-end. The four guild-shared groups each have a **`browse`** command that is the main entry point — list, inspect, and act on entries from one ephemeral view:
+Feature-complete for the first slice. Six command groups working end-to-end. The four guild-shared groups each have a **`browse`** command that is the main entry point — list, inspect, and act on entries from one ephemeral view:
 
 - **`/items`** — the catalog of every item the guild has discovered. `add`, `info`, `edit`, `remove`, **`browse`** (browse → drill into an item → Edit button opens a pre-filled modal). Values in gp/sp/cp, gear slots, **bundle size** (e.g., 20 arrows per slot), and an **item type** picker with eight options: `common`, `weapon`, `armor`, `scroll`, `potion`, `loot`, `crafted`, `magical`. Color-coded embeds by type. Items can be renamed via the Name field in the edit modal.
 - **`/inventory`** — shared stashes for everything except magical items (so common / weapon / armor / scroll / potion / loot / crafted all go here). Multiple named locations with per-location gear-slot capacity. Capacity math is bundle-aware: adding 5 arrows then 15 more uses 1 slot total, not 2. `add` (use this to put a new item into a location — autocomplete on item + location), location CRUD, and **`browse`** (browse → location → item → `+ Add more` / `− Take` buttons for items already at the location).
 - **`/treasury`** — magical-item borrow/return tracking. Each physical instance has its own row; same catalog item can be checked out by multiple users at once. `add`, `remove`, and **`browse`** (browse → entry → `Borrow for me` / `Borrow for someone…` / `Return` buttons). Everything's logged in the `borrows` ledger.
 - **`/coffers`** — shared guild funds in gp/sp/cp. `add`, `subtract`, and **`browse`** (browse → balance + a dropdown of buyable catalog items → quantity modal). Single shared balance, stored internally as integer copper.
-- **`/character`** — your own player character (one per player, not guild-shared). `sheet` opens an ephemeral, owner-only interactive sheet: lean Shadow Dark stats (class/level/max HP/AC, six abilities with a derived modifier table, gold, talents, optional spellcasting modifier) plus a hybrid catalog/freeform carried inventory with `max(10, STR)` carry capacity. `carry` adds items, and `show <member>` views anyone else's sheet read-only.
+- **`/character`** — your own player character (one per player, not guild-shared). `sheet` opens an ephemeral, owner-only interactive sheet: lean Shadow Dark stats (ancestry/class/alignment/level/max HP/AC, six abilities with a derived modifier table, gold, known languages, talents, optional spellcasting modifier), a hybrid catalog/freeform carried inventory with `max(10, STR)` carry capacity, and a known-spells list backed by a built-in Shadow Dark spell reference (all Tier 1–5 wizard/priest plus 48 alignment-gated wizard spells). **Manage Spells** is a dedicated, class-limited manager (a tier selector → your class's spells → a Learn button on the spell detail, plus Forget for known spells), separate from the read-only `/spells browse`. Any tier is learnable; wrong-class spells are rejected. `carry` adds items, and `show <member>` views anyone else's sheet read-only.
+- **`/spells`** — a read-only browser for the built-in spell reference. `browse` filters by class (wizard/priest), tier (1–5), and alignment (all/neutral/lawful/chaotic), then lets you inspect a spell's full duration/range/description.
 
 The bot can be installed in multiple Discord servers; commands sync to every server it joins. **Data is currently shared across all servers** — see the roadmap for the multi-tenant slice that gives each server its own catalog/inventory/treasury/coffers.
 
@@ -47,7 +48,10 @@ shadow-dark-bot/
 │       ├── 0005_bundle_size.py         ← adds items.bundle_size (default 1) for stack-per-slot items
 │       ├── 0006_item_type.py           ← replaces is_magical bool with item_type enum (8 values: common/weapon/armor/scroll/potion/loot/crafted/magical)
 │       ├── 0007_widen_item_type.py     ← recreates the check constraint so older deployments learn the new type values
-│       └── 0008_player_characters.py   ← adds the player_characters + character_items tables
+│       ├── 0008_player_characters.py   ← adds the player_characters + character_items tables
+│       ├── 0009_spells.py              ← adds the spells reference + character_spells tables
+│       ├── 0010_spell_alignment.py     ← adds spells.alignment for alignment-gated spells
+│       └── 0011_character_identity.py  ← adds ancestry/alignment/languages to characters
 │
 ├── data/                         ← runtime data — gitignored
 │   └── shadowdark.db             ← the SQLite database file (auto-created on first run)
@@ -61,6 +65,7 @@ shadow-dark-bot/
 │       ├── models.py             ← the ORM models — Python classes mirroring DB tables
 │       ├── currency.py           ← gp/sp/cp ↔ copper conversion + formatting helpers
 │       ├── rules.py              ← pure Shadow Dark rules helpers (ability modifiers, carry limit, slot cost)
+│       ├── spell_data.py         ← Tier 1–5 + alignment spell reference + idempotent seeder
 │       ├── embeds.py             ← functions that build the pretty Discord embed cards
 │       └── cogs/                 ← "cog" = discord.py term for a group of related commands
 │           ├── __init__.py
@@ -68,7 +73,8 @@ shadow-dark-bot/
 │           ├── guild_inventory.py    ← /inventory location-create/edit/delete, add, browse
 │           ├── magical_treasury.py   ← /treasury add, remove, browse
 │           ├── guild_coffers.py      ← /coffers add, subtract, browse
-│           └── player_characters.py  ← /character sheet, carry, show, delete
+│           ├── player_characters.py  ← /character sheet, carry, show, delete (+ Manage Spells)
+│           └── spell_reference.py     ← /spells browse (class/tier/alignment filters)
 │
 └── docs/                         ← human-readable documentation (not loaded at runtime)
     ├── commands.md               ← every slash command, what it does, examples

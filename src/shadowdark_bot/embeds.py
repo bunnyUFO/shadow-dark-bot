@@ -14,10 +14,12 @@ from shadowdark_bot.models import (
     ITEM_TYPE_WEAPON,
     Borrow,
     CharacterItem,
+    CharacterSpell,
     InventoryEntry,
     Item,
     Location,
     PlayerCharacter,
+    Spell,
     TreasuryEntry,
 )
 from shadowdark_bot.rules import (
@@ -253,6 +255,8 @@ def _format_treasury_line(entry: TreasuryEntry, borrow_row: Borrow | None) -> st
 
 CHARACTER_COLOR = discord.Color.dark_teal()
 
+_ALIGNMENT_NAMES = {"L": "Lawful", "N": "Neutral", "C": "Chaotic"}
+
 
 def _ability_table(char: PlayerCharacter) -> str:
     """A two-column code block of scores and modifiers (STR/DEX/CON | INT/WIS/CHA)."""
@@ -283,12 +287,59 @@ def _spellcasting_line(char: PlayerCharacter) -> str | None:
     return f"{format_modifier(total)}  ({detail})"
 
 
+def _spell_list_value(spells: list[CharacterSpell]) -> str | None:
+    """Known spells grouped by tier, e.g. `**Tier 1:** Light, Sleep`."""
+    if not spells:
+        return None
+    by_tier: dict[int | None, list[str]] = {}
+    for s in spells:
+        by_tier.setdefault(s.display_tier, []).append(s.display_name)
+    parts: list[str] = []
+    for tier in sorted(by_tier, key=lambda t: (t is None, t or 0)):
+        label = f"Tier {tier}" if tier is not None else "Other"
+        parts.append(f"**{label}:** {', '.join(sorted(by_tier[tier]))}")
+    return "\n".join(parts)
+
+
+def build_spell_embed(spell: Spell) -> discord.Embed:
+    """Reference detail for one spell (from the built-in list)."""
+    classes = " / ".join(c.capitalize() for c in spell.class_list)
+    embed = discord.Embed(title=spell.name, color=CHARACTER_COLOR)
+    header = f"**Tier {spell.tier}** · {classes}"
+    if spell.alignment:
+        header += f" · {_ALIGNMENT_NAMES.get(spell.alignment, spell.alignment)}"
+    lines = [header]
+    if spell.duration:
+        lines.append(f"**Duration:** {spell.duration}")
+    if spell.range_:
+        lines.append(f"**Range:** {spell.range_}")
+    if spell.description:
+        lines.append("")
+        lines.append(spell.description)
+    embed.description = "\n".join(lines)
+    return embed
+
+
+def build_character_spells_embed(
+    char: PlayerCharacter, spells: list[CharacterSpell]
+) -> discord.Embed:
+    embed = discord.Embed(title=f"{char.name} — Spells", color=CHARACTER_COLOR)
+    embed.description = _spell_list_value(spells) or "_(no spells known)_"
+    return embed
+
+
 def build_character_sheet_embed(
-    char: PlayerCharacter, items: list[CharacterItem]
+    char: PlayerCharacter,
+    items: list[CharacterItem],
+    spells: list[CharacterSpell] | None = None,
 ) -> discord.Embed:
     subtitle = f"Level {char.level}"
+    if char.ancestry:
+        subtitle += f" {char.ancestry}"
     if char.char_class:
         subtitle += f" {char.char_class}"
+    if char.alignment:
+        subtitle += f" · {char.alignment}"
     embed = discord.Embed(
         title=char.name, description=subtitle, color=CHARACTER_COLOR
     )
@@ -306,8 +357,18 @@ def build_character_sheet_embed(
     if casting is not None:
         embed.add_field(name="Spellcasting", value=casting, inline=False)
 
+    if char.languages:
+        embed.add_field(name="Languages", value=char.languages[:1024], inline=False)
+
     if char.talents:
         embed.add_field(name="Talents", value=char.talents[:1024], inline=False)
+
+    spells = spells or []
+    spell_value = _spell_list_value(spells)
+    if spell_value is not None:
+        embed.add_field(name="Spells", value=spell_value[:1024], inline=False)
+    elif char.spell_ability is not None:
+        embed.add_field(name="Spells", value="_(none known)_", inline=False)
 
     used = sum(ci.slot_cost for ci in items)
     free = carry_capacity(char.str_score)
