@@ -314,6 +314,9 @@ class Spell(Base):
     duration: Mapped[str | None] = mapped_column(String)
     range_: Mapped[str | None] = mapped_column("range", String)
     description: Mapped[str | None] = mapped_column(Text)
+    # Alignment restriction for alignment-gated spells: 'L'/'N'/'C', or NULL
+    # for a standard spell available to the whole class.
+    alignment: Mapped[str | None] = mapped_column(String)
 
     @property
     def class_list(self) -> list[str]:

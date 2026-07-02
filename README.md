@@ -10,7 +10,7 @@ Feature-complete for the first slice. Five command groups working end-to-end. Th
 - **`/inventory`** — shared stashes for everything except magical items (so common / weapon / armor / scroll / potion / loot / crafted all go here). Multiple named locations with per-location gear-slot capacity. Capacity math is bundle-aware: adding 5 arrows then 15 more uses 1 slot total, not 2. `add` (use this to put a new item into a location — autocomplete on item + location), location CRUD, and **`browse`** (browse → location → item → `+ Add more` / `− Take` buttons for items already at the location).
 - **`/treasury`** — magical-item borrow/return tracking. Each physical instance has its own row; same catalog item can be checked out by multiple users at once. `add`, `remove`, and **`browse`** (browse → entry → `Borrow for me` / `Borrow for someone…` / `Return` buttons). Everything's logged in the `borrows` ledger.
 - **`/coffers`** — shared guild funds in gp/sp/cp. `add`, `subtract`, and **`browse`** (browse → balance + a dropdown of buyable catalog items → quantity modal). Single shared balance, stored internally as integer copper.
-- **`/character`** — your own player character (one per player, not guild-shared). `sheet` opens an ephemeral, owner-only interactive sheet: lean Shadow Dark stats (class/level/max HP/AC, six abilities with a derived modifier table, gold, talents, optional spellcasting modifier), a hybrid catalog/freeform carried inventory with `max(10, STR)` carry capacity, and a known-spells list backed by a built-in Shadow Dark spell reference (all Tier 1–5 wizard/priest; anything else freeform). `carry` adds items, `spell-add`/`spell-remove` manage spells, and `show <member>` views anyone else's sheet read-only.
+- **`/character`** — your own player character (one per player, not guild-shared). `sheet` opens an ephemeral, owner-only interactive sheet: lean Shadow Dark stats (class/level/max HP/AC, six abilities with a derived modifier table, gold, talents, optional spellcasting modifier), a hybrid catalog/freeform carried inventory with `max(10, STR)` carry capacity, and a known-spells list backed by a built-in Shadow Dark spell reference (all Tier 1–5 wizard/priest plus 48 alignment-gated wizard spells). Spells are added through the sheet's **Manage Spells** picker, class-gated by the character's spellcasting stat (no slash commands, no custom spells). `carry` adds items, and `show <member>` views anyone else's sheet read-only.
 
 The bot can be installed in multiple Discord servers; commands sync to every server it joins. **Data is currently shared across all servers** — see the roadmap for the multi-tenant slice that gives each server its own catalog/inventory/treasury/coffers.
 
@@ -48,7 +48,8 @@ shadow-dark-bot/
 │       ├── 0006_item_type.py           ← replaces is_magical bool with item_type enum (8 values: common/weapon/armor/scroll/potion/loot/crafted/magical)
 │       ├── 0007_widen_item_type.py     ← recreates the check constraint so older deployments learn the new type values
 │       ├── 0008_player_characters.py   ← adds the player_characters + character_items tables
-│       └── 0009_spells.py              ← adds the spells reference + character_spells tables
+│       ├── 0009_spells.py              ← adds the spells reference + character_spells tables
+│       └── 0010_spell_alignment.py     ← adds spells.alignment for alignment-gated spells
 │
 ├── data/                         ← runtime data — gitignored
 │   └── shadowdark.db             ← the SQLite database file (auto-created on first run)
@@ -62,7 +63,7 @@ shadow-dark-bot/
 │       ├── models.py             ← the ORM models — Python classes mirroring DB tables
 │       ├── currency.py           ← gp/sp/cp ↔ copper conversion + formatting helpers
 │       ├── rules.py              ← pure Shadow Dark rules helpers (ability modifiers, carry limit, slot cost)
-│       ├── spell_data.py         ← canonical Tier 1–5 spell reference + idempotent seeder
+│       ├── spell_data.py         ← Tier 1–5 + alignment spell reference + idempotent seeder
 │       ├── embeds.py             ← functions that build the pretty Discord embed cards
 │       └── cogs/                 ← "cog" = discord.py term for a group of related commands
 │           ├── __init__.py
@@ -70,7 +71,7 @@ shadow-dark-bot/
 │           ├── guild_inventory.py    ← /inventory location-create/edit/delete, add, browse
 │           ├── magical_treasury.py   ← /treasury add, remove, browse
 │           ├── guild_coffers.py      ← /coffers add, subtract, browse
-│           └── player_characters.py  ← /character sheet, carry, spell-add/remove, show, delete
+│           └── player_characters.py  ← /character sheet, carry, show, delete (+ Manage Spells)
 │
 └── docs/                         ← human-readable documentation (not loaded at runtime)
     ├── commands.md               ← every slash command, what it does, examples

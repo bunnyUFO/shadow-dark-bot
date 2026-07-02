@@ -74,6 +74,38 @@ def _sorted_spells(char: PlayerCharacter) -> list[CharacterSpell]:
     )
 
 
+# The spellcasting stat determines which spell list a character draws from:
+# Wizards cast with INT, Priests with WIS.
+_SPELL_CLASS_BY_ABILITY = {"int": "wizard", "wis": "priest"}
+_ALIGNMENT_NAMES = {"L": "Lawful", "N": "Neutral", "C": "Chaotic"}
+
+
+def _spell_class_for(char: PlayerCharacter) -> str | None:
+    """The spell class a character can learn from, or None if they're not a
+    caster (no spellcasting stat set)."""
+    return _SPELL_CLASS_BY_ABILITY.get(char.spell_ability or "")
+
+
+def _addable_spells(
+    session: Session, char: PlayerCharacter, cls: str, tier: int | None = None
+) -> list[Spell]:
+    """Reference spells of the character's class (and tier, if given) that they
+    don't already know, ordered by tier then name."""
+    known_ids = {s.spell_id for s in char.spells if s.spell_id is not None}
+    stmt = select(Spell).where(Spell.classes.contains(cls))
+    if tier is not None:
+        stmt = stmt.where(Spell.tier == tier)
+    stmt = stmt.order_by(Spell.tier, Spell.name)
+    return [sp for sp in session.scalars(stmt).all() if sp.id not in known_ids]
+
+
+def _spell_choice_label(spell: Spell) -> str:
+    label = spell.name
+    if spell.alignment:
+        label += f" ({_ALIGNMENT_NAMES.get(spell.alignment, spell.alignment)})"
+    return label
+
+
 def _touch(char: PlayerCharacter) -> None:
     char.updated_at = datetime.now(UTC)
 
@@ -215,6 +247,52 @@ def _build_spell_detail_payload(
             embed.description = f"{header}_(freeform spell — no reference text)_"
         name = cs.display_name
     return embed, CharacterSpellDetailView(user_id, cs_id, name)
+
+
+def _build_spell_add_tier_payload(
+    user_id: str,
+) -> tuple[discord.Embed, "SpellAddTierView"] | None:
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            return None
+        cls = _spell_class_for(char)
+        if cls is None:
+            return None
+        addable = _addable_spells(session, char, cls)
+        tiers = sorted({sp.tier for sp in addable})
+        embed = discord.Embed(
+            title="Learn a spell — choose a tier", color=CHARACTER_COLOR
+        )
+        if tiers:
+            embed.description = (
+                f"Pick a tier of **{cls}** spells to browse "
+                f"({len(addable)} available)."
+            )
+        else:
+            embed.description = f"You already know every **{cls}** spell in the reference."
+    return embed, SpellAddTierView(user_id, tiers)
+
+
+def _build_spell_add_pick_payload(
+    user_id: str, tier: int
+) -> tuple[discord.Embed, "SpellAddPickView"] | None:
+    with session_scope() as session:
+        char = _load_character(session, user_id)
+        if char is None:
+            return None
+        cls = _spell_class_for(char)
+        if cls is None:
+            return None
+        addable = _addable_spells(session, char, cls, tier)
+        choices = [(sp.name, _spell_choice_label(sp)) for sp in addable]
+        embed = discord.Embed(
+            title=f"Tier {tier} {cls} spells", color=CHARACTER_COLOR
+        )
+        embed.description = (
+            "Pick a spell to learn." if choices else "Nothing left to learn here."
+        )
+    return embed, SpellAddPickView(user_id, tier, choices)
 
 
 async def _refresh_sheet(interaction: discord.Interaction, user_id: str) -> None:
@@ -485,9 +563,10 @@ async def _do_add_spell(
     *,
     user_id: str,
     spell_name: str,
-    tier: int | None = None,
     edit_view: bool = False,
 ) -> None:
+    """Learn a spell. Only reference spells matching the character's class are
+    allowed — no custom spells."""
     clean = spell_name.strip()
     failure = f"**Failed to learn {clean}.**"
     if not clean:
@@ -505,36 +584,42 @@ async def _do_add_spell(
             )
             return
 
-        # ilike without wildcards = case-insensitive exact match on a reference spell.
-        ref = session.scalar(select(Spell).where(Spell.name.ilike(clean)))
-        if ref is not None:
-            existing = next(
-                (s for s in char.spells if s.spell_id == ref.id), None
-            )
-        else:
-            existing = next(
-                (
-                    s
-                    for s in char.spells
-                    if s.spell_id is None and (s.name or "").lower() == clean.lower()
-                ),
-                None,
-            )
-        if existing is not None:
+        cls = _spell_class_for(char)
+        if cls is None:
             await interaction.response.send_message(
-                f"{failure}\nYou already know **{existing.display_name}**.",
+                f"{failure}\nYour character isn't a spellcaster — set a "
+                "spellcasting stat (INT or WIS) via **Edit Talents & Casting**.",
                 ephemeral=True,
             )
             return
 
-        if ref is not None:
-            session.add(CharacterSpell(character_id=char.id, spell_id=ref.id))
-            display = ref.name
-        else:
-            session.add(CharacterSpell(character_id=char.id, name=clean, tier=tier))
-            display = clean
+        # ilike without wildcards = case-insensitive exact match on a reference spell.
+        ref = session.scalar(select(Spell).where(Spell.name.ilike(clean)))
+        if ref is None:
+            await interaction.response.send_message(
+                f"{failure}\n**{clean}** isn't a known Shadow Dark spell. "
+                "Only spells from the reference can be learned.",
+                ephemeral=True,
+            )
+            return
+        if cls not in ref.class_list:
+            allowed = " / ".join(c.capitalize() for c in ref.class_list)
+            await interaction.response.send_message(
+                f"{failure}\n**{ref.name}** is a {allowed} spell; your character "
+                f"casts {cls} spells.",
+                ephemeral=True,
+            )
+            return
+        if any(s.spell_id == ref.id for s in char.spells):
+            await interaction.response.send_message(
+                f"{failure}\nYou already know **{ref.name}**.", ephemeral=True
+            )
+            return
+
+        session.add(CharacterSpell(character_id=char.id, spell_id=ref.id))
         _touch(char)
         session.flush()
+        display = ref.name
 
     await _respond_spells(interaction, f"Learned **{display}**.", user_id, edit_view)
 
@@ -868,44 +953,6 @@ class AddItemModal(discord.ui.Modal):
         )
 
 
-class AddSpellModal(discord.ui.Modal):
-    """Learn a spell. A name matching the reference links its details; otherwise
-    a freeform spell is recorded with the optional tier."""
-
-    def __init__(self, user_id: str) -> None:
-        super().__init__(title="Learn a spell")
-        self.user_id = user_id
-        self._name = discord.ui.TextInput(
-            label="Spell name (a known name links its text)",
-            required=True,
-            max_length=100,
-        )
-        self._tier = discord.ui.TextInput(
-            label="Tier (freeform only; blank = unknown)",
-            required=False,
-            max_length=2,
-        )
-        self.add_item(self._name)
-        self.add_item(self._tier)
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        try:
-            tier = _parse_optional_int(str(self._tier.value), minimum=1)
-        except ValueError:
-            await interaction.response.send_message(
-                "**Failed to learn.**\nTier must be a whole number ≥ 1.",
-                ephemeral=True,
-            )
-            return
-        await _do_add_spell(
-            interaction,
-            user_id=self.user_id,
-            spell_name=str(self._name.value),
-            tier=tier,
-            edit_view=True,
-        )
-
-
 class _QuantityModal(discord.ui.Modal):
     """Shared single-quantity modal for the item detail Add-more / Take buttons."""
 
@@ -1189,7 +1236,29 @@ class CharacterSpellsView(_OwnerView):
     async def add_spell_btn(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        await interaction.response.send_modal(AddSpellModal(self.user_id))
+        with session_scope() as session:
+            char = _load_character(session, self.user_id)
+            cls = _spell_class_for(char) if char is not None else None
+        if char is None:
+            await interaction.response.send_message(
+                "Character not found.", ephemeral=True
+            )
+            return
+        if cls is None:
+            await interaction.response.send_message(
+                "Your character isn't a spellcaster — set a spellcasting stat "
+                "(INT or WIS) via **Edit Talents & Casting** first.",
+                ephemeral=True,
+            )
+            return
+        payload = _build_spell_add_tier_payload(self.user_id)
+        if payload is None:
+            await interaction.response.send_message(
+                "Character not found.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(
         label="← Back to sheet", style=discord.ButtonStyle.primary, row=1
@@ -1198,6 +1267,102 @@ class CharacterSpellsView(_OwnerView):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         payload = _build_sheet_payload(self.user_id)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Character not found.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class SpellAddTierSelect(discord.ui.Select):
+    def __init__(self, user_id: str, tiers: list[int]) -> None:
+        options = [
+            discord.SelectOption(label=f"Tier {t}", value=str(t)) for t in tiers[:25]
+        ]
+        super().__init__(
+            placeholder="Choose a tier…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        payload = _build_spell_add_pick_payload(self.user_id, int(self.values[0]))
+        if payload is None:
+            await interaction.response.send_message(
+                "Character not found.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class SpellAddTierView(_OwnerView):
+    def __init__(self, user_id: str, tiers: list[int]) -> None:
+        super().__init__(user_id)
+        if tiers:
+            self.add_item(SpellAddTierSelect(user_id, tiers))
+
+    @discord.ui.button(
+        label="← Back to spells", style=discord.ButtonStyle.primary, row=1
+    )
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_spells_payload(self.user_id)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Character not found.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class SpellAddSelect(discord.ui.Select):
+    def __init__(self, user_id: str, choices: list[tuple[str, str]]) -> None:
+        options = [
+            discord.SelectOption(label=label[:100], value=name[:100])
+            for name, label in choices[:25]
+        ]
+        super().__init__(
+            placeholder="Choose a spell to learn…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await _do_add_spell(
+            interaction,
+            user_id=self.user_id,
+            spell_name=self.values[0],
+            edit_view=True,
+        )
+
+
+class SpellAddPickView(_OwnerView):
+    def __init__(
+        self, user_id: str, tier: int, choices: list[tuple[str, str]]
+    ) -> None:
+        super().__init__(user_id)
+        self.tier = tier
+        if choices:
+            self.add_item(SpellAddSelect(user_id, choices))
+
+    @discord.ui.button(
+        label="← Back to tiers", style=discord.ButtonStyle.primary, row=1
+    )
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_spell_add_tier_payload(self.user_id)
         if payload is None:
             await interaction.response.edit_message(
                 content="Character not found.", embed=None, view=None
@@ -1378,86 +1543,6 @@ class PlayerCharacters(commands.Cog):
                 ).all()
             )
         return [app_commands.Choice(name=n, value=n) for n in names]
-
-    @character.command(
-        name="spell-add",
-        description="Learn a spell (reference autocomplete; freeform allowed)",
-    )
-    @app_commands.describe(
-        spell="Spell name — a known reference name links its details; "
-        "anything else is freeform"
-    )
-    async def spell_add(self, interaction: discord.Interaction, spell: str) -> None:
-        await _do_add_spell(
-            interaction, user_id=str(interaction.user.id), spell_name=spell
-        )
-
-    @spell_add.autocomplete("spell")
-    async def _ac_spell_add(self, interaction, current):
-        with session_scope() as session:
-            rows = list(
-                session.scalars(
-                    select(Spell)
-                    .where(Spell.name.ilike(f"%{current}%"))
-                    .order_by(Spell.tier, Spell.name)
-                    .limit(25)
-                ).all()
-            )
-            choices = [
-                app_commands.Choice(
-                    name=f"{s.name} — T{s.tier} {'/'.join(s.class_list)}"[:100],
-                    value=s.name,
-                )
-                for s in rows
-            ]
-        return choices
-
-    @character.command(name="spell-remove", description="Forget a spell you know")
-    @app_commands.describe(spell="Spell to forget")
-    async def spell_remove(self, interaction: discord.Interaction, spell: str) -> None:
-        user_id = str(interaction.user.id)
-        with session_scope() as session:
-            char = _load_character(session, user_id)
-            if char is None:
-                await interaction.response.send_message(
-                    "You don't have a character yet — run `/character sheet`.",
-                    ephemeral=True,
-                )
-                return
-            cs = next(
-                (
-                    s
-                    for s in char.spells
-                    if s.display_name.lower() == spell.strip().lower()
-                ),
-                None,
-            )
-            if cs is None:
-                await interaction.response.send_message(
-                    f"You don't know a spell called **{spell.strip()}**.",
-                    ephemeral=True,
-                )
-                return
-            cs_id = cs.id
-        await _do_remove_spell(
-            interaction, user_id=user_id, cs_id=cs_id, edit_view=False
-        )
-
-    @spell_remove.autocomplete("spell")
-    async def _ac_spell_remove(self, interaction, current):
-        user_id = str(interaction.user.id)
-        with session_scope() as session:
-            char = _load_character(session, user_id)
-            names: list[str] = []
-            if char is not None:
-                names = sorted(
-                    {
-                        s.display_name
-                        for s in char.spells
-                        if current.lower() in s.display_name.lower()
-                    }
-                )
-        return [app_commands.Choice(name=n, value=n) for n in names[:25]]
 
     @character.command(
         name="show", description="View another player's character (read-only)"

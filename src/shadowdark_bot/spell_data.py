@@ -8,8 +8,10 @@ Sources:
 - Tier 3–5 spells (not in the quickstart) use condensed descriptions based on
   the community reference at https://anjours-arsenal.net/tools/shadowdark-spells.
   Verify against the Shadow Dark core rules for exact wording.
-
-Players can still track anything not listed here as a freeform character spell.
+- ALIGNMENT_SPELLS are alignment-gated wizard spells (Druids = Neutral,
+  Mages = Lawful, Sorcerers = Chaotic) from the alignment wizard-spells
+  supplement, condensed. Their `alignment` is 'N'/'L'/'C'; standard spells
+  have alignment = None.
 """
 
 from sqlalchemy import select
@@ -472,11 +474,301 @@ SPELLS: tuple[tuple[str, int, tuple[str, ...], str, str, str], ...] = (
 )
 
 
+# Alignment-gated wizard spells: (name, tier, classes, duration, range, desc, alignment)
+ALIGNMENT_SPELLS: tuple[
+    tuple[str, int, tuple[str, ...], str, str, str, str], ...
+] = (
+    # ---- Druids (Neutral wizards) ----
+    (
+        "Breath", 1, WIZARD, "10 rounds", "Self",
+        "You can hold your breath for the spell's duration.", "N",
+    ),
+    (
+        "Instill", 1, WIZARD, "5 rounds", "Self",
+        "One weapon you wield is imbued with life force, becoming a +1 weapon "
+        "for the duration. If it's a staff, it deals d6 damage instead of d4.",
+        "N",
+    ),
+    (
+        "Oxidize", 1, WIZARD, "Instant", "Close",
+        "One inanimate object you touch, the size of a door or less, ages d100 "
+        "years.", "N",
+    ),
+    (
+        "Whisperwind", 1, WIZARD, "Instant", "Far",
+        "You send a brief, whispered message that reaches any creature in "
+        "range.", "N",
+    ),
+    (
+        "Barkskin", 2, WIZARD, "1 day", "Self",
+        "Your skin hardens into tree bark; your AC becomes 15 (18 on a critical "
+        "spellcasting check) for the duration. You take double damage from fire "
+        "while it lasts.", "N",
+    ),
+    (
+        "Befriend", 2, WIZARD, "5 rounds", "Close",
+        "A tiny natural creature you touch regards you as a friend. You may give "
+        "it one command it tries to complete even after the spell ends; if the "
+        "command would directly harm it, it abandons the task.", "N",
+    ),
+    (
+        "Magnetize", 2, WIZARD, "5 rounds", "Close",
+        "One object you touch, up to horse-sized, becomes powerfully magnetized, "
+        "attracting smaller magnetic objects within near and being pulled toward "
+        "larger ones. A metal creature resists with a STR check.", "N",
+    ),
+    (
+        "Truespeech", 2, WIZARD, "Instant", "Close",
+        "A natural creature you touch can communicate with you in the true "
+        "language of animals. Ask it one yes/no question, answered truthfully. "
+        "Recasting on it within 24 hours turns a failure into a critical fail.",
+        "N",
+    ),
+    (
+        "Alchemy", 3, WIZARD, "Instant", "Close",
+        "One inanimate object of human size or less you touch turns into another "
+        "material of equal or lesser value.", "N",
+    ),
+    (
+        "Anima", 3, WIZARD, "Focus", "Close",
+        "You animate the life force of one natural object you touch (horse-sized "
+        "or less). It becomes a loyal creature of your level for the duration, "
+        "acting on your turn and obeying your commands.", "N",
+    ),
+    (
+        "Locusts", 3, WIZARD, "Focus", "Near",
+        "A cloud of biting locusts fills an area out to near, moving with you "
+        "(you're unaffected). Creatures inside take 1d10 damage at the start of "
+        "their turn and must pass a CON check vs. your check or can't move.",
+        "N",
+    ),
+    (
+        "Treeshape", 3, WIZARD, "10 rounds", "Self",
+        "You and your gear become a treant (AC 14, HP 38) for the duration. You "
+        "can't cast spells while transformed and keep your INT, WIS, and CHA.",
+        "N",
+    ),
+    (
+        "Mycelium", 4, WIZARD, "Instant", "Self",
+        "You connect with the earth's fungi network. Ask the GM one question of "
+        "up to 15 words, answered truthfully in up to 15 words. Recasting within "
+        "24 hours turns a failure into a critical fail.", "N",
+    ),
+    (
+        "Summon Storm", 4, WIZARD, "10 rounds", "1 mile",
+        "You summon a violent storm out to one mile (darkened skies, severe "
+        "wind, driving rain). For the duration you can cast control water and "
+        "lightning bolt even if you don't know them.", "N",
+    ),
+    (
+        "Earthquake", 5, WIZARD, "Instant", "Double near",
+        "The earth shakes and splits open. All creatures on the ground within "
+        "double near take 4d6 damage; each of LV 9 or less must pass a DEX check "
+        "equal to the damage or be swallowed by the earth.", "N",
+    ),
+    (
+        "Naming", 5, WIZARD, "Instant", "Close",
+        "You learn the True Name of one creature you touch. If it's willing, you "
+        "may give it a new True Name (only changeable once in its lifetime); "
+        "doing so changes its alignment to yours.", "N",
+    ),
+    # ---- Mages (Lawful wizards) ----
+    (
+        "Cleanse", 1, WIZARD, "Instant", "Close",
+        "You expunge natural toxins from one creature you touch, ending the "
+        "effects of one poison currently affecting it.", "L",
+    ),
+    (
+        "Flare", 1, WIZARD, "1 round", "Near",
+        "A flash of blinding white light bursts from you. All enemies in range "
+        "who see it are blinded for the duration.", "L",
+    ),
+    (
+        "Reveal", 1, WIZARD, "Instant", "Near",
+        "End all invisibility out to near, and become aware of the location of "
+        "any hiding creatures within range.", "L",
+    ),
+    (
+        "Ward", 1, WIZARD, "10 rounds", "Self",
+        "You ward yourself against ambush: for the duration you can't be "
+        "surprised (you roll initiative in surprise rounds and are treated as "
+        "aware of all enemies).", "L",
+    ),
+    (
+        "Absorb", 2, WIZARD, "5 rounds", "Self",
+        "You create an absorptive barrier of force around you. Halve all damage "
+        "you take for the duration (round down).", "L",
+    ),
+    (
+        "Meld", 2, WIZARD, "5 rounds", "Self",
+        "You merge slightly with the ethereal plane, ignoring any effect that "
+        "would impact your movement for the duration.", "L",
+    ),
+    (
+        "Pacify", 2, WIZARD, "Instant", "Near",
+        "Choose one creature within range of LV 3 or less. It must make a morale "
+        "check (creatures immune to morale checks are unaffected).", "L",
+    ),
+    (
+        "Push/Pull", 2, WIZARD, "Instant", "Near",
+        "You move one human-sized object or a creature of LV 4 or less a near "
+        "distance. If the target is anchored against free movement, the DC to "
+        "cast is 18.", "L",
+    ),
+    (
+        "Banish", 3, WIZARD, "Instant", "Near",
+        "With a word of power, you send one extraplanar creature of LV 6 or less "
+        "who hears you back to its dimension of origin.", "L",
+    ),
+    (
+        "Forbid", 3, WIZARD, "10 rounds", "Self",
+        "Creatures cannot teleport into, out of, or within an area extending to "
+        "double near from you. The area moves with you.", "L",
+    ),
+    (
+        "Identify", 3, WIZARD, "Instant", "Touch",
+        "You learn all the magical properties of one item you touch. You can't "
+        "cast this spell again until you complete a rest.", "L",
+    ),
+    (
+        "Speak With Object", 3, WIZARD, "Instant", "Close",
+        "An object you touch mentally answers up to three yes/no questions (its "
+        "wit matches the rarity of its materials). Recasting within 24 hours "
+        "turns a failure into a critical fail.", "L",
+    ),
+    (
+        "Glyph", 4, WIZARD, "1 week", "Close",
+        "You draw an arcane symbol on an object with one effect: Bind (reader of "
+        "LV 6 or less paralyzed 1 hour), Harm (reader takes 3d6), Message (a "
+        "brief mental message), or Teleportation Sigil. It vanishes once used.",
+        "L",
+    ),
+    (
+        "Stasis", 4, WIZARD, "Indefinite", "Close",
+        "A willing creature you touch is suspended in time (unwilling target "
+        "must be LV 5 or less). It falls unconscious and doesn't age but stays "
+        "alive. You may end it any time or on a preset condition.", "L",
+    ),
+    (
+        "Abjure", 5, WIZARD, "Instant", "Close",
+        "You and one creature you touch both die.", "L",
+    ),
+    (
+        "Permanence", 5, WIZARD, "1 year", "Close",
+        "Sprinkle a powdered diamond on the target. Choose one object in range "
+        "under a spell you've cast; that spell's duration becomes 1 year. You "
+        "can no longer alter the original spell's effects.", "L",
+    ),
+    # ---- Sorcerers (Chaotic wizards) ----
+    (
+        "Blight", 1, WIZARD, "5 rounds", "Self",
+        "A close-sized patch of earth around you crumbles into lifeless ash. You "
+        "gain +1 to your spellcasting checks for the duration.", "C",
+    ),
+    (
+        "Eyebite", 1, WIZARD, "Instant", "Near",
+        "One creature you target takes 1d4 damage and can't see you until the "
+        "end of its next turn.", "C",
+    ),
+    (
+        "Mischief", 1, WIZARD, "5 rounds", "Near",
+        "You beguile one humanoid of level 2 or less within near, compelling it "
+        "to commit harmful mischief against its nearest ally each round. Ends if "
+        "you or your allies hurt it and it notices.", "C",
+    ),
+    (
+        "Protection From Good", 1, WIZARD, "Focus", "Close",
+        "For the duration, lawful beings have disadvantage on attack rolls and "
+        "hostile spellcasting checks against the target and can't possess, "
+        "compel, or beguile it. A possessing entity is expelled on a failed CHA "
+        "check.", "C",
+    ),
+    (
+        "Envenom", 2, WIZARD, "Instant", "Close",
+        "You turn one cup or vial of potable liquid into a toxic poison that "
+        "still appears original. A living creature of LV 10 or less who drinks "
+        "it must pass a DC 15 CON check or go to 0 HP.", "C",
+    ),
+    (
+        "Phantoms", 2, WIZARD, "Instant", "Near",
+        "You conjure a terrifying illusion in the mind of one target of LV 3 or "
+        "less in range. The target must immediately make a morale check.", "C",
+    ),
+    (
+        "Wither", 2, WIZARD, "Instant", "Close",
+        "Your touch drains one target in range for 1d6 damage. It takes double "
+        "damage from the next attack or damage-dealing spell that strikes it.",
+        "C",
+    ),
+    (
+        "Wrack", 2, WIZARD, "Focus", "Far",
+        "A creature you can see of LV 5 or less is overcome by agonizing pain. "
+        "Each turn it must pass a CON check vs. your last check or it can't move "
+        "or act.", "C",
+    ),
+    (
+        "Betrayal", 3, WIZARD, "Focus", "Near",
+        "One creature of LV 7 or less you can see turns on its allies, regarding "
+        "them as hostile enemies for the duration.", "C",
+    ),
+    (
+        "Defile", 3, WIZARD, "5 rounds", "Self",
+        "A near-sized circle of earth around you turns to infertile ash. For the "
+        "duration, treat all tier 1–3 spells you successfully cast as critical "
+        "successes. You can't cast this while under its effects.", "C",
+    ),
+    (
+        "Mazzim's Mesmerism", 3, WIZARD, "Focus", "Near",
+        "A mind-numbing miasma surrounds your targets. At the start of their "
+        "turn, humanoids of LV 5 or less in range must pass a CHA check vs. your "
+        "last check; those who fail stand motionless and agape.", "C",
+    ),
+    (
+        "Unlife", 3, WIZARD, "1 day", "Close",
+        "A humanoid skull you touch animates with red witchlight and converses "
+        "in Common, retaining its memories (spotty if long dead). It crumbles to "
+        "dust when the spell ends.", "C",
+    ),
+    (
+        "Dismember", 4, WIZARD, "Focus", "Near",
+        "One creature of LV 9 or less in range loses a limb (rolled randomly), "
+        "taking 1d8 damage, and loses a new limb each round. With none left it "
+        "is beheaded and dies.", "C",
+    ),
+    (
+        "Dominate", 4, WIZARD, "Focus", "Near",
+        "You subjugate the will of one creature of LV 9 or less you can see. It "
+        "can act only to follow your commands for the duration; you direct its "
+        "actions and movement on your turn.", "C",
+    ),
+    (
+        "Feeblemind", 5, WIZARD, "1d8 days", "Near",
+        "One creature of LV 10 or less within range has its INT and CHA reduced "
+        "to 1 for the duration and can't cast spells.", "C",
+    ),
+    (
+        "Subjugate", 5, WIZARD, "1 year", "Close",
+        "Sprinkle a powdered diamond on the target. Choose one creature under a "
+        "dominate, feeblemind, or polymorph spell you've cast; that spell's "
+        "duration becomes 1 year.", "C",
+    ),
+)
+
+
+def _all_spell_records():
+    """Yield (name, tier, classes, duration, range, description, alignment) for
+    every seedable spell — standard spells have alignment None."""
+    for name, tier, classes, duration, spell_range, description in SPELLS:
+        yield name, tier, classes, duration, spell_range, description, None
+    yield from ALIGNMENT_SPELLS
+
+
 def seed_spells() -> None:
     """Idempotently upsert the reference spells by name. Safe to run on every
     startup — new spells are inserted and existing ones refreshed."""
     with session_scope() as session:
-        for name, tier, classes, duration, spell_range, description in SPELLS:
+        for record in _all_spell_records():
+            name, tier, classes, duration, spell_range, description, alignment = record
             classes_str = ",".join(sorted(classes))
             existing = session.scalar(select(Spell).where(Spell.name == name))
             if existing is None:
@@ -488,6 +780,7 @@ def seed_spells() -> None:
                         duration=duration,
                         range_=spell_range,
                         description=description,
+                        alignment=alignment,
                     )
                 )
             else:
@@ -496,3 +789,4 @@ def seed_spells() -> None:
                 existing.duration = duration
                 existing.range_ = spell_range
                 existing.description = description
+                existing.alignment = alignment

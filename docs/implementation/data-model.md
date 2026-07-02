@@ -126,19 +126,20 @@ Seeded at startup by `spell_data.seed_spells()` (idempotent upsert by name). Cov
 | `tier` | INTEGER NOT NULL | `CHECK (tier >= 1)` |
 | `classes` | TEXT NOT NULL | Comma-joined subset of `{priest, wizard}` (some spells, e.g. Light, are both) |
 | `duration`, `range`, `description` | TEXT NULL | Reference text shown in the spell detail view |
+| `alignment` | TEXT NULL | `'L'`/`'N'`/`'C'` for alignment-gated wizard spells (Mages/Druids/Sorcerers); NULL for standard spells |
 
 ### `character_spells` (a character's known spells — hybrid reference/freeform)
 | Column | Type | Notes |
 |---|---|---|
 | `id` | INTEGER PK | |
 | `character_id` | INTEGER FK player_characters | |
-| `spell_id` | INTEGER FK spells NULL | Set → **reference-linked** (detail view shows duration/range/description). NULL → **freeform** (e.g. a Tier 3+ spell not in the quickstart) |
-| `name` | TEXT NULL | Freeform spell name (used only when `spell_id` IS NULL) |
-| `tier` | INTEGER NULL | Freeform tier (used only when `spell_id` IS NULL) |
+| `spell_id` | INTEGER FK spells NULL | Reference-linked spell. The `name`/`tier` columns remain for legacy freeform rows, but the UI now only adds reference spells (no custom spells) |
+| `name` | TEXT NULL | Legacy freeform spell name (no longer written by the UI) |
+| `tier` | INTEGER NULL | Legacy freeform tier (no longer written by the UI) |
 | `added_at` | TIMESTAMP | |
-| | | `UNIQUE (character_id, spell_id)` — one row per reference spell; freeform rows de-duped by name in code |
+| | | `UNIQUE (character_id, spell_id)` — one row per reference spell |
 
-`CharacterSpell.display_name` / `display_tier` / `is_reference` resolve the split. Spells-known limits are not enforced (tracker, not rules engine).
+`CharacterSpell.display_name` / `display_tier` / `is_reference` resolve the split. **Adding a spell is class-gated**: the character's spell class comes from `spell_ability` (`int` → wizard, `wis` → priest), and only reference spells whose `classes` include it can be added — enforced in `_do_add_spell`. Spells-known limits are not enforced (tracker, not rules engine).
 
 ### `audit_log` (schema reserved; not yet written to)
 | Column | Type | Notes |
@@ -190,7 +191,8 @@ Alembic. All migrations apply automatically at bot startup (before connecting to
 | `0006_item_type` | Replaces `items.is_magical BOOLEAN` with `items.item_type TEXT` ∈ {`common`, `magical`, `crafted`, `scroll`, `potion`, `weapon`, `armor`, `loot`}. Backfill: `is_magical=1 → 'magical'`, else `'common'`. |
 | `0007_widen_item_type` | Drops and recreates the `ck_items_item_type` constraint to ensure it lists all 8 values. Needed for databases where 0006 was deployed with an earlier, narrower value list; no-op-equivalent on fresh installs. |
 | `0008_player_characters` | Adds the `player_characters` (one per user) and `character_items` (hybrid catalog/freeform carried stacks) tables. |
-| `0009_spells` | Adds the `spells` reference table (seeded from the quickstart at startup) and `character_spells` (hybrid reference/freeform known spells). |
+| `0009_spells` | Adds the `spells` reference table (seeded at startup) and `character_spells` (known spells). |
+| `0010_spell_alignment` | Adds `spells.alignment` for alignment-gated wizard spells. |
 
 Future slices (e.g., role-based permissions, audit-log writes) will add new revisions. Each one uses `op.batch_alter_table` so SQLite can recreate tables transparently when needed.
 

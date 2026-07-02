@@ -255,6 +255,8 @@ def _format_treasury_line(entry: TreasuryEntry, borrow_row: Borrow | None) -> st
 
 CHARACTER_COLOR = discord.Color.dark_teal()
 
+_ALIGNMENT_NAMES = {"L": "Lawful", "N": "Neutral", "C": "Chaotic"}
+
 
 def _ability_table(char: PlayerCharacter) -> str:
     """A two-column code block of scores and modifiers (STR/DEX/CON | INT/WIS/CHA)."""
@@ -303,7 +305,10 @@ def build_spell_embed(spell: Spell) -> discord.Embed:
     """Reference detail for one spell (from the built-in list)."""
     classes = " / ".join(c.capitalize() for c in spell.class_list)
     embed = discord.Embed(title=spell.name, color=CHARACTER_COLOR)
-    lines = [f"**Tier {spell.tier}** · {classes}"]
+    header = f"**Tier {spell.tier}** · {classes}"
+    if spell.alignment:
+        header += f" · {_ALIGNMENT_NAMES.get(spell.alignment, spell.alignment)}"
+    lines = [header]
     if spell.duration:
         lines.append(f"**Duration:** {spell.duration}")
     if spell.range_:
