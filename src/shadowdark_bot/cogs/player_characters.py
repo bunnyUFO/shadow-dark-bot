@@ -24,6 +24,7 @@ from shadowdark_bot.embeds import (
     build_character_spells_embed,
     build_combat_embed,
     build_inventory_tab_embed,
+    build_item_embed,
     build_roleplaying_embed,
     build_spell_embed,
     fmt_slots,
@@ -179,21 +180,32 @@ def _build_inventory_payload(
 
 
 def _item_detail_embed(ci: CharacterItem) -> discord.Embed:
-    """Detail embed for one carried stack (shared by owner + read-only views)."""
-    embed = discord.Embed(title=ci.display_name, color=CHARACTER_COLOR)
+    """Detail embed for one carried stack (shared by owner + read-only views).
+
+    Catalog items reuse the `/items info` renderer (description, gear slots,
+    type, value, type color); freeform items show their typed description. Both
+    then get a Carrying field with the stack's quantity and slot cost.
+    """
+    if ci.is_catalog and ci.item is not None:
+        embed = build_item_embed(ci.item)
+    else:
+        embed = discord.Embed(title=ci.display_name, color=CHARACTER_COLOR)
+        if ci.notes:
+            embed.description = ci.notes
+
     per = fmt_slots(ci.effective_gear_slots)
     cost = f"{fmt_slots(ci.slot_cost)} ({per} each"
     if ci.effective_bundle_size > 1:
         cost += f", {ci.effective_bundle_size}/slot"
     cost += ")"
-    lines = [
+    carry_lines = [
         f"**Quantity:** {ci.quantity}",
         f"**Slot cost:** {cost}",
         f"**Source:** {'Catalog' if ci.is_catalog else 'Freeform'}",
     ]
-    if ci.notes:
-        lines.append(f"_{ci.notes}_")
-    embed.description = "\n".join(lines)
+    if ci.is_catalog and ci.notes:
+        carry_lines.append(f"_{ci.notes}_")
+    embed.add_field(name="Carrying", value="\n".join(carry_lines), inline=False)
     return embed
 
 
