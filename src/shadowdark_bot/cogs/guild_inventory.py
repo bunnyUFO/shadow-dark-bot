@@ -313,6 +313,27 @@ class GuildInventory(commands.Cog):
 VIEW_TIMEOUT_SECONDS = 300
 
 
+class _SafeView(discord.ui.View):
+    """A view whose component errors surface as an ephemeral message instead of
+    a silent "This interaction failed"."""
+
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+        item: discord.ui.Item,
+    ) -> None:
+        log.exception("Inventory interaction failed on %r", item, exc_info=error)
+        message = f"Something went wrong handling that: {error}"[:1900]
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass
+
+
 def _build_summary_payload() -> tuple[discord.Embed, "InventoryListView"] | None:
     """Build the (embed, view) pair for the all-locations summary.
     Returns None if there are no inventory locations."""
@@ -431,7 +452,7 @@ class LocationSelect(discord.ui.Select):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
-class InventoryListView(discord.ui.View):
+class InventoryListView(_SafeView):
     """Summary embed with a dropdown to drill into a location plus a share button."""
 
     def __init__(self, location_names: list[str]) -> None:
@@ -469,7 +490,7 @@ class LocationItemSelect(discord.ui.Select):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
-class LocationDetailView(discord.ui.View):
+class LocationDetailView(_SafeView):
     """Detail embed: item-picker dropdown (if stocked) + back + share. Adding
     new items goes through `/inventory add`."""
 
@@ -500,7 +521,7 @@ class LocationDetailView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
-class ItemDetailView(discord.ui.View):
+class ItemDetailView(_SafeView):
     """Item-info embed shown in the context of a location. Has Add-more / Take
     quick-action buttons (Take is disabled for empty stacks) plus Back to the
     location detail view. Adding an item that isn't already at the location

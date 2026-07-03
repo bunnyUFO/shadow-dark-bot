@@ -103,6 +103,27 @@ def build_location_summary_embed(
     return embed
 
 
+def _fit_lines(header: list[str], items: list[str], limit: int = 1024) -> str:
+    """Join header + item lines into a string that stays within Discord's field
+    limit, replacing the tail that doesn't fit with a '…and N more' note.
+
+    Discord rejects embed fields over 1024 chars with a 400 (surfacing to the
+    user as a silent "interaction failed"), so any list rendered into a field
+    must be bounded here rather than assumed short."""
+    out = list(header)
+    length = len("\n".join(out))
+    for i, line in enumerate(items):
+        remaining = len(items) - i
+        footer = f"…and {remaining} more"
+        # Reserve room for the footer in case the rest won't fit.
+        if length + len(line) + 1 > limit - (len(footer) + 1):
+            out.append(footer)
+            break
+        out.append(line)
+        length += len(line) + 1
+    return "\n".join(out)
+
+
 def build_location_detail_embed(
     location: Location,
     stacks: list[InventoryEntry],
@@ -122,14 +143,12 @@ def build_location_detail_embed(
         embed.add_field(name="Contents", value=f"{capacity_line}\n\n_(empty)_", inline=False)
         return embed
 
-    lines = [capacity_line, ""]
-    visible = stacks[:25]
-    for stack in visible:
-        lines.append(f"• {stack.quantity}× {stack.item.name}")
-    if len(stacks) > 25:
-        lines.append(f"…and {len(stacks) - 25} more")
-
-    embed.add_field(name="Contents", value="\n".join(lines), inline=False)
+    item_lines = [
+        f"• {stack.quantity}× {stack.item.name if stack.item else '(unknown item)'}"
+        for stack in stacks
+    ]
+    value = _fit_lines([capacity_line, ""], item_lines)
+    embed.add_field(name="Contents", value=value, inline=False)
     return embed
 
 
