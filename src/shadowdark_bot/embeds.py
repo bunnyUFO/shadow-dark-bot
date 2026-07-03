@@ -13,7 +13,6 @@ from shadowdark_bot.models import (
     ITEM_TYPE_SCROLL,
     ITEM_TYPE_WEAPON,
     Borrow,
-    CharacterItem,
     CharacterSpell,
     InventoryEntry,
     Item,
@@ -25,7 +24,6 @@ from shadowdark_bot.models import (
 from shadowdark_bot.rules import (
     ABILITIES,
     ability_modifier,
-    carry_capacity,
     format_modifier,
     spellcasting_modifier,
 )
@@ -144,8 +142,7 @@ def build_location_detail_embed(
         return embed
 
     item_lines = [
-        f"• {stack.quantity}× {stack.item.name if stack.item else '(unknown item)'}"
-        for stack in stacks
+        f"• {stack.quantity}× {stack.display_name}" for stack in stacks
     ]
     value = _fit_lines([capacity_line, ""], item_lines)
     embed.add_field(name="Contents", value=value, inline=False)
@@ -400,35 +397,45 @@ def build_combat_embed(
     return embed
 
 
-def _items_block(items: list[CharacterItem]) -> str:
-    if not items:
-        return "_(carrying nothing)_"
-    lines = []
-    for ci in items[:25]:
-        tag = "catalog" if ci.is_catalog else "freeform"
-        lines.append(
-            f"• {ci.quantity}× {ci.display_name} "
-            f"— {fmt_slots(ci.slot_cost)} slots _[{tag}]_"
-        )
-    if len(items) > 25:
-        lines.append(f"…and {len(items) - 25} more")
-    return "\n".join(lines)
+def _items_block(entries: list[InventoryEntry], empty: str) -> str:
+    if not entries:
+        return empty
+    lines = [
+        f"• {e.quantity}× {e.display_name} "
+        f"— {fmt_slots(e.slot_cost)} slots _[{'catalog' if e.is_catalog else 'freeform'}]_"
+        for e in entries
+    ]
+    return _fit_lines([], lines)
 
 
 def build_inventory_tab_embed(
-    char: PlayerCharacter, items: list[CharacterItem]
+    char: PlayerCharacter,
+    held_entries: list[InventoryEntry],
+    held_cap: float,
+    stash_entries: list[InventoryEntry] | None = None,
+    stash_cap: float = 10.0,
+    *,
+    include_stash: bool = True,
 ) -> discord.Embed:
-    """Inventory tab: carried items and gold."""
+    """Inventory tab: gold, held items, and (on the owner's sheet) the stash."""
     title, subtitle = _character_header(char)
     embed = discord.Embed(title=title, description=subtitle, color=CHARACTER_COLOR)
-    used = sum(ci.slot_cost for ci in items)
-    free = carry_capacity(char.str_score)
     embed.add_field(name="Gold", value=format_cp(char.gold_cp) or "0cp", inline=False)
+
+    held_used = sum(e.slot_cost for e in held_entries)
     embed.add_field(
-        name=f"Items — {fmt_slots(used)}/{free} gear slots",
-        value=_items_block(items),
+        name=f"Held — {fmt_slots(held_used)}/{fmt_slots(held_cap)} gear slots",
+        value=_items_block(held_entries, "_(carrying nothing)_"),
         inline=False,
     )
+    if include_stash:
+        stash_entries = stash_entries or []
+        stash_used = sum(e.slot_cost for e in stash_entries)
+        embed.add_field(
+            name=f"Stash — {fmt_slots(stash_used)}/{fmt_slots(stash_cap)} gear slots",
+            value=_items_block(stash_entries, "_(empty)_"),
+            inline=False,
+        )
     return embed
 
 
@@ -448,30 +455,25 @@ def build_roleplaying_embed(char: PlayerCharacter) -> discord.Embed:
     return embed
 
 
-def build_character_inventory_embed(
-    char: PlayerCharacter, items: list[CharacterItem]
+def build_character_location_embed(
+    location: Location, entries: list[InventoryEntry]
 ) -> discord.Embed:
-    used = sum(ci.slot_cost for ci in items)
-    free = carry_capacity(char.str_score)
-    embed = discord.Embed(
-        title=f"{char.name} — Inventory", color=CHARACTER_COLOR
+    """Manage-view embed for one character-owned location (held or stash)."""
+    used = sum(e.slot_cost for e in entries)
+    embed = discord.Embed(title=location.name, color=CHARACTER_COLOR)
+    capacity_line = (
+        f"**Capacity:** {fmt_slots(used)}/{fmt_slots(location.max_gear_slots)} "
+        "gear slots used"
     )
-    capacity_line = f"**Capacity:** {fmt_slots(used)}/{free} gear slots used"
-
-    if not items:
-        embed.description = f"{capacity_line}\n\n_(carrying nothing)_"
+    if not entries:
+        embed.description = f"{capacity_line}\n\n_(empty)_"
         return embed
-
-    lines = [capacity_line, ""]
-    for ci in items[:25]:
-        tag = "catalog" if ci.is_catalog else "freeform"
-        lines.append(
-            f"• {ci.quantity}× {ci.display_name} "
-            f"— {fmt_slots(ci.slot_cost)} slots _[{tag}]_"
-        )
-    if len(items) > 25:
-        lines.append(f"…and {len(items) - 25} more")
-    embed.description = "\n".join(lines)
+    item_lines = [
+        f"• {e.quantity}× {e.display_name} "
+        f"— {fmt_slots(e.slot_cost)} slots _[{'catalog' if e.is_catalog else 'freeform'}]_"
+        for e in entries
+    ]
+    embed.description = _fit_lines([capacity_line, ""], item_lines)
     return embed
 
 
