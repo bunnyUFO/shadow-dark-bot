@@ -131,7 +131,7 @@ For guild-owned magical items. They are **never given away** — they're borrowe
 
 Unlike the four guild-shared systems above, a **character belongs to one player** (keyed by Discord user). Each player has **one** character with lean Shadow Dark stats and a carried inventory. You edit **your own** character through an ephemeral, interactive sheet; you can **view** anyone else's read-only.
 
-Stats covered: name, **ancestry**, **background**, class, **alignment**, level, **max HP**, AC, the six ability scores (with an auto-computed modifier table — Shadow Dark's `floor((score−10)/2)` clamped to ±4), gold (entered gp/sp/cp, stored as copper), **known languages**, **proficiencies**, a free-text **Talents** section, an optional **spellcasting** modifier (governing stat INT or WIS plus a manual spell-check bonus for talent-granted bonuses), and a **known spells** list.
+Stats covered: name, **ancestry**, **background**, class, **title**, **alignment**, level, **max HP**, AC, the six ability scores (with an auto-computed modifier table — Shadow Dark's `floor((score−10)/2)` clamped to ±4), gold (entered gp/sp/cp, stored as copper), **known languages**, **proficiencies**, a free-text **Talents** section, an optional **spellcasting** modifier (governing stat INT or WIS plus a manual spell-check bonus for talent-granted bonuses), and a **known spells** list.
 
 Inventory is **hybrid**: a carried item either links to the shared `/items` catalog (reusing its gear-slot / bundle data) or is a **freeform** typed name with its own per-item slot cost. Carry capacity is the Shadow Dark limit: **max(10, STR)** gear slots, using the same bundle-aware ceiling math as guild inventory.
 
@@ -143,9 +143,9 @@ Inventory is **hybrid**: a carried item either links to the shared `/items` cata
 
 The three tabs keep each view short:
 
-- **Combat** (home) — ability scores + modifiers, with **HP** and **AC** shown beneath the table in the same section. AC is your entered **base AC** (from armor, or 10 unarmored) **plus your DEX modifier**, shown with the breakdown, e.g. `AC 11 (10 + DEX)`. Also spellcasting, proficiencies, and known spells. Buttons: **Edit Details** (name/class/level/max HP/base AC), **Edit Abilities** (six scores), **Edit Casting** (spellcasting stat + bonus), **Edit Proficiencies**, and **Manage Spells**.
+- **Combat** (home) — a **Stats** section: the six scores + modifiers, with **HP** and **AC** shown beneath the table. AC is your entered **base AC** (from armor, or 10 unarmored) **plus your DEX modifier**, shown with the breakdown, e.g. `AC 11 (10 + DEX)`. Also spellcasting, proficiencies, and known spells. Buttons: **Edit Stats** (six scores, level, max HP, base AC, spell check bonus), **Edit Casting** (spellcasting stat), **Edit Proficiencies**, and **Manage Spells**.
 - **Inventory** — gold and carried items (with capacity). Buttons: **Manage Inventory** and **Edit Gold**.
-- **Roleplaying** — background, languages, talents. Buttons: **Edit Identity** (ancestry/background/alignment/languages), **Edit Talents**, and **Delete character**.
+- **Roleplaying** — background, languages, talents. Buttons: **Edit Identity** (name, class, title, ancestry, alignment), **Edit Roleplaying** (background, languages, talents), and **Delete character**.
 
 Deleting a character is a **Delete character** button on `/character sheet` (there's no delete command). It swaps to an "Are you sure you want to delete **&lt;name&gt;**?" confirmation embed with **Delete** / **Cancel**; Cancel returns to the sheet.
 

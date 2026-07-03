@@ -337,6 +337,8 @@ def _character_header(char: PlayerCharacter) -> tuple[str, str]:
         subtitle += f" {char.char_class}"
     if char.alignment:
         subtitle += f" · {char.alignment}"
+    if char.title:
+        subtitle += f" · {char.title}"
     return char.name, subtitle
 
 
@@ -356,7 +358,7 @@ def build_combat_embed(
     else:
         ac = "—"
     embed.add_field(
-        name="Ability Scores",
+        name="Stats",
         value=f"{_ability_table(char)}\n**HP** {hp}  •  **AC** {ac}",
         inline=False,
     )

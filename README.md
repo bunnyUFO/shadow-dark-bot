@@ -53,7 +53,8 @@ shadow-dark-bot/
 │       ├── 0010_spell_alignment.py     ← adds spells.alignment for alignment-gated spells
 │       ├── 0011_character_identity.py  ← adds ancestry/alignment/languages to characters
 │       ├── 0012_character_background.py ← adds background to characters
-│       └── 0013_character_proficiencies.py ← adds proficiencies to characters
+│       ├── 0013_character_proficiencies.py ← adds proficiencies to characters
+│       └── 0014_character_title.py       ← adds title to characters
 │
 ├── data/                         ← runtime data — gitignored
 │   └── shadowdark.db             ← the SQLite database file (auto-created on first run)
