@@ -93,6 +93,7 @@ Unlike everything above, this is **per-player**, not guild-shared. Keyed by `use
 | `ancestry` | TEXT NULL | e.g. Elf, Dwarf |
 | `background` | TEXT NULL | e.g. Urchin, Noble |
 | `char_class` | TEXT NULL | |
+| `title` | TEXT NULL | e.g. Squire, Apprentice; shown in the sheet subtitle |
 | `alignment` | TEXT NULL | Lawful / Neutral / Chaotic (display only; not used to gate spells) |
 | `languages` | TEXT NULL | Free text (comma-separated known languages) |
 | `level` | INTEGER NOT NULL DEFAULT 1 | `CHECK (level >= 1)` |
@@ -201,6 +202,7 @@ Alembic. All migrations apply automatically at bot startup (before connecting to
 | `0011_character_identity` | Adds `player_characters.ancestry`, `alignment`, and `languages`. |
 | `0012_character_background` | Adds `player_characters.background`. |
 | `0013_character_proficiencies` | Adds `player_characters.proficiencies`. |
+| `0014_character_title` | Adds `player_characters.title`. |
 
 Future slices (e.g., role-based permissions, audit-log writes) will add new revisions. Each one uses `op.batch_alter_table` so SQLite can recreate tables transparently when needed.
 

@@ -1,10 +1,11 @@
-"""`/spells browse` — read-only browser for the built-in Shadow Dark spell
-reference, with class / tier / alignment filters.
+"""`/spells` — read-only reference for the built-in Shadow Dark spell list.
 
-Independent of characters: anyone can look up spells. Mirrors the `/items
-browse` pattern — a paginated list embed, an "Inspect a spell…" dropdown, and
-a Share button. (Learning spells for a character lives in the `/character`
-Manage Spells flow, not here.)
+- `/spells browse` — a paginated, filterable list (class / tier / alignment /
+  name), with an "Inspect a spell…" dropdown and a Share button.
+- `/spells info` — jump straight to one spell by name (autocomplete).
+
+Independent of characters. Learning spells for a character lives in the
+`/character` Manage Spells flow, not here.
 """
 
 import discord
@@ -15,7 +16,7 @@ from sqlalchemy import select
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import CHARACTER_COLOR, build_spell_embed
 from shadowdark_bot.models import Spell
-from shadowdark_bot.sharing import ShareButton
+from shadowdark_bot.sharing import ShareableView, ShareButton
 
 PAGE_SIZE = 25  # Discord caps a string-select at 25 options
 VIEW_TIMEOUT_SECONDS = 300
@@ -23,7 +24,9 @@ VIEW_TIMEOUT_SECONDS = 300
 _ALIGNMENT_NAMES = {"L": "Lawful", "N": "Neutral", "C": "Chaotic"}
 
 
-def _filter_stmt(spell_class: str | None, tier: int | None, alignment: str | None):
+def _filter_stmt(
+    spell_class: str | None, tier: int | None, alignment: str | None, name: str | None
+):
     stmt = select(Spell)
     if spell_class is not None:
         stmt = stmt.where(Spell.classes.contains(spell_class))
@@ -31,16 +34,22 @@ def _filter_stmt(spell_class: str | None, tier: int | None, alignment: str | Non
         stmt = stmt.where(Spell.tier == tier)
     if alignment is not None:
         stmt = stmt.where(Spell.alignment == alignment)
+    if name:
+        stmt = stmt.where(Spell.name.ilike(f"%{name}%"))
     return stmt.order_by(Spell.tier, Spell.name)
 
 
-def _filter_summary(spell_class: str | None, tier: int | None, alignment: str | None) -> str:
+def _filter_summary(
+    spell_class: str | None, tier: int | None, alignment: str | None, name: str | None
+) -> str:
     parts = [
         spell_class.capitalize() if spell_class else "All classes",
         f"Tier {tier}" if tier is not None else "All tiers",
     ]
     if alignment is not None:
         parts.append(_ALIGNMENT_NAMES.get(alignment, alignment))
+    if name:
+        parts.append(f'"{name}"')
     return " · ".join(parts)
 
 
@@ -54,11 +63,14 @@ def _build_list_payload(
     spell_class: str | None,
     tier: int | None,
     alignment: str | None,
+    name: str | None = None,
     page: int = 0,
 ) -> tuple[discord.Embed, "SpellBrowseView"] | None:
     """(embed, view) for the filtered spell list, page-sliced. None if empty."""
     with session_scope() as session:
-        all_spells = list(session.scalars(_filter_stmt(spell_class, tier, alignment)).all())
+        all_spells = list(
+            session.scalars(_filter_stmt(spell_class, tier, alignment, name)).all()
+        )
         if not all_spells:
             return None
         total = len(all_spells)
@@ -67,29 +79,30 @@ def _build_list_payload(
         page_spells = all_spells[page * PAGE_SIZE : page * PAGE_SIZE + PAGE_SIZE]
 
         embed = discord.Embed(
-            title=f"Spells — {_filter_summary(spell_class, tier, alignment)} ({total})",
+            title=f"Spells — {_filter_summary(spell_class, tier, alignment, name)} ({total})",
             description="\n".join(_spell_line(sp) for sp in page_spells),
             color=CHARACTER_COLOR,
         )
         if total_pages > 1:
             embed.set_footer(text=f"Page {page + 1}/{total_pages}")
         names = [sp.name for sp in page_spells]
-    return embed, SpellBrowseView(spell_class, tier, alignment, names, page, total_pages)
+    return embed, SpellBrowseView(spell_class, tier, alignment, name, names, page, total_pages)
 
 
 def _build_detail_payload(
-    name: str,
+    spell_name: str,
     spell_class: str | None,
     tier: int | None,
     alignment: str | None,
+    name: str | None,
     page: int,
 ) -> tuple[discord.Embed, "SpellRefDetailView"] | None:
     with session_scope() as session:
-        sp = session.scalar(select(Spell).where(Spell.name == name))
+        sp = session.scalar(select(Spell).where(Spell.name == spell_name))
         if sp is None:
             return None
         embed = build_spell_embed(sp)
-    return embed, SpellRefDetailView(spell_class, tier, alignment, page)
+    return embed, SpellRefDetailView(spell_class, tier, alignment, name, page)
 
 
 class SpellBrowseSelect(discord.ui.Select):
@@ -98,6 +111,7 @@ class SpellBrowseSelect(discord.ui.Select):
         spell_class: str | None,
         tier: int | None,
         alignment: str | None,
+        name: str | None,
         names: list[str],
     ) -> None:
         options = [
@@ -113,11 +127,12 @@ class SpellBrowseSelect(discord.ui.Select):
         self.spell_class = spell_class
         self.tier = tier
         self.alignment = alignment
+        self.name = name
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view: SpellBrowseView = self.view  # type: ignore[assignment]
         payload = _build_detail_payload(
-            self.values[0], self.spell_class, self.tier, self.alignment, view.page
+            self.values[0], self.spell_class, self.tier, self.alignment, self.name, view.page
         )
         if payload is None:
             await interaction.response.send_message(
@@ -138,7 +153,7 @@ class _SpellPageButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction) -> None:
         view: SpellBrowseView = self.view  # type: ignore[assignment]
         payload = _build_list_payload(
-            view.spell_class, view.tier, view.alignment, page=view.page + self.delta
+            view.spell_class, view.tier, view.alignment, view.name, page=view.page + self.delta
         )
         if payload is None:
             await interaction.response.edit_message(
@@ -155,6 +170,7 @@ class SpellBrowseView(discord.ui.View):
         spell_class: str | None,
         tier: int | None,
         alignment: str | None,
+        name: str | None,
         names: list[str],
         page: int,
         total_pages: int,
@@ -163,10 +179,11 @@ class SpellBrowseView(discord.ui.View):
         self.spell_class = spell_class
         self.tier = tier
         self.alignment = alignment
+        self.name = name
         self.page = page
         self.total_pages = total_pages
         if names:
-            self.add_item(SpellBrowseSelect(spell_class, tier, alignment, names))
+            self.add_item(SpellBrowseSelect(spell_class, tier, alignment, name, names))
         if total_pages > 1:
             self.add_item(
                 _SpellPageButton(label="← Prev", delta=-1, disabled=(page == 0))
@@ -185,12 +202,14 @@ class SpellRefDetailView(discord.ui.View):
         spell_class: str | None,
         tier: int | None,
         alignment: str | None,
+        name: str | None,
         page: int,
     ) -> None:
         super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
         self.spell_class = spell_class
         self.tier = tier
         self.alignment = alignment
+        self.name = name
         self.page = page
         self.add_item(ShareButton(row=4))
 
@@ -201,7 +220,7 @@ class SpellRefDetailView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         payload = _build_list_payload(
-            self.spell_class, self.tier, self.alignment, page=self.page
+            self.spell_class, self.tier, self.alignment, self.name, page=self.page
         )
         if payload is None:
             await interaction.response.edit_message(
@@ -212,11 +231,24 @@ class SpellRefDetailView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
+_CLASS_CHOICES = [
+    app_commands.Choice(name="Wizard", value="wizard"),
+    app_commands.Choice(name="Priest", value="priest"),
+]
+_TIER_CHOICES = [app_commands.Choice(name=f"Tier {t}", value=t) for t in range(1, 6)]
+_ALIGNMENT_CHOICES = [
+    app_commands.Choice(name="All", value="all"),
+    app_commands.Choice(name="Neutral", value="N"),
+    app_commands.Choice(name="Lawful", value="L"),
+    app_commands.Choice(name="Chaotic", value="C"),
+]
+
+
 class SpellReference(commands.Cog):
     """Read-only browser for the built-in spell reference."""
 
     spells = app_commands.Group(
-        name="spells", description="Browse the Shadow Dark spell reference"
+        name="spells", description="Look up the Shadow Dark spell reference"
     )
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -227,25 +259,10 @@ class SpellReference(commands.Cog):
         spell_class="Filter by class",
         tier="Filter by tier",
         alignment="Filter by alignment (alignment-gated wizard spells)",
+        name="Filter by name (substring)",
     )
     @app_commands.choices(
-        spell_class=[
-            app_commands.Choice(name="Wizard", value="wizard"),
-            app_commands.Choice(name="Priest", value="priest"),
-        ],
-        tier=[
-            app_commands.Choice(name="Tier 1", value=1),
-            app_commands.Choice(name="Tier 2", value=2),
-            app_commands.Choice(name="Tier 3", value=3),
-            app_commands.Choice(name="Tier 4", value=4),
-            app_commands.Choice(name="Tier 5", value=5),
-        ],
-        alignment=[
-            app_commands.Choice(name="All", value="all"),
-            app_commands.Choice(name="Neutral", value="N"),
-            app_commands.Choice(name="Lawful", value="L"),
-            app_commands.Choice(name="Chaotic", value="C"),
-        ],
+        spell_class=_CLASS_CHOICES, tier=_TIER_CHOICES, alignment=_ALIGNMENT_CHOICES
     )
     async def browse(
         self,
@@ -253,17 +270,62 @@ class SpellReference(commands.Cog):
         spell_class: str | None = None,
         tier: int | None = None,
         alignment: str | None = None,
+        name: str | None = None,
     ) -> None:
         align = None if alignment in (None, "all") else alignment
-        payload = _build_list_payload(spell_class, tier, align, page=0)
+        clean_name = name.strip() if name else None
+        payload = _build_list_payload(spell_class, tier, align, clean_name, page=0)
         if payload is None:
             await interaction.response.send_message(
-                f"No spells match ({_filter_summary(spell_class, tier, align)}).",
+                f"No spells match ({_filter_summary(spell_class, tier, align, clean_name)}).",
                 ephemeral=True,
             )
             return
         embed, view = payload
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @spells.command(name="info", description="Look up a specific spell by name")
+    @app_commands.describe(spell="Spell name")
+    async def info(self, interaction: discord.Interaction, spell: str) -> None:
+        query = spell.strip()
+        with session_scope() as session:
+            sp = session.scalar(select(Spell).where(Spell.name.ilike(query)))
+            if sp is None:  # fall back to the first partial match
+                sp = session.scalar(
+                    select(Spell)
+                    .where(Spell.name.ilike(f"%{query}%"))
+                    .order_by(Spell.tier, Spell.name)
+                )
+            if sp is None:
+                await interaction.response.send_message(
+                    f"No spell matching **{query}** found. Try `/spells browse`.",
+                    ephemeral=True,
+                )
+                return
+            embed = build_spell_embed(sp)
+        await interaction.response.send_message(
+            embed=embed, view=ShareableView(), ephemeral=True
+        )
+
+    @info.autocomplete("spell")
+    async def _ac_info(self, interaction, current):
+        with session_scope() as session:
+            rows = list(
+                session.scalars(
+                    select(Spell)
+                    .where(Spell.name.ilike(f"%{current}%"))
+                    .order_by(Spell.tier, Spell.name)
+                    .limit(25)
+                ).all()
+            )
+            choices = [
+                app_commands.Choice(
+                    name=f"{s.name} — T{s.tier} {'/'.join(s.class_list)}"[:100],
+                    value=s.name,
+                )
+                for s in rows
+            ]
+        return choices
 
 
 async def setup(bot: commands.Bot) -> None:
