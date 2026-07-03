@@ -230,9 +230,8 @@ def _build_item_detail_payload(
         if ci is None:
             return None
         embed = _item_detail_embed(ci)
-        qty = ci.quantity
         name = ci.display_name
-    return embed, CharacterItemDetailView(user_id, ci_id, qty, name)
+    return embed, CharacterItemDetailView(user_id, ci_id, name)
 
 
 def _build_show_payload(
@@ -552,53 +551,6 @@ async def _do_add_more(
 
     confirmation = (
         f"Added {quantity}× **{display}**. Carrying {fmt_slots(new_used)}/{free} slots."
-    )
-    await _respond(interaction, confirmation, user_id, edit_view=True)
-
-
-async def _do_take(
-    interaction: discord.Interaction,
-    *,
-    user_id: str,
-    ci_id: int,
-    quantity: int,
-) -> None:
-    failure = "**Failed to take.**"
-    if quantity < 1:
-        await interaction.response.send_message(
-            f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
-        )
-        return
-    with session_scope() as session:
-        char = _load_character(session, user_id)
-        if char is None:
-            await interaction.response.send_message(
-                f"{failure}\nCharacter not found.", ephemeral=True
-            )
-            return
-        ci = next((c for c in char.items if c.id == ci_id), None)
-        if ci is None:
-            await interaction.response.send_message(
-                f"{failure}\nThat item is no longer in your inventory.", ephemeral=True
-            )
-            return
-        if quantity > ci.quantity:
-            await interaction.response.send_message(
-                f"{failure}\nYou only have {ci.quantity}× **{ci.display_name}**.",
-                ephemeral=True,
-            )
-            return
-        display = ci.display_name
-        ci.quantity -= quantity
-        emptied = ci.quantity == 0
-        if emptied:
-            session.delete(ci)
-        _touch(char)
-
-    confirmation = (
-        f"Dropped the last {quantity}× **{display}**."
-        if emptied
-        else f"Dropped {quantity}× **{display}**."
     )
     await _respond(interaction, confirmation, user_id, edit_view=True)
 
@@ -1202,13 +1154,12 @@ class AddItemModal(discord.ui.Modal):
 
 
 class _QuantityModal(discord.ui.Modal):
-    """Shared single-quantity modal for the item detail Add-more / Take buttons."""
+    """Single-quantity modal for the item detail Add-more button."""
 
-    def __init__(self, title: str, user_id: str, ci_id: int, *, action: str) -> None:
+    def __init__(self, title: str, user_id: str, ci_id: int) -> None:
         super().__init__(title=title[:45])
         self.user_id = user_id
         self.ci_id = ci_id
-        self.action = action
         self._qty = discord.ui.TextInput(
             label="Quantity", required=True, default="1", max_length=8
         )
@@ -1222,14 +1173,9 @@ class _QuantityModal(discord.ui.Modal):
                 "Quantity must be a whole number.", ephemeral=True
             )
             return
-        if self.action == "add":
-            await _do_add_more(
-                interaction, user_id=self.user_id, ci_id=self.ci_id, quantity=quantity
-            )
-        else:
-            await _do_take(
-                interaction, user_id=self.user_id, ci_id=self.ci_id, quantity=quantity
-            )
+        await _do_add_more(
+            interaction, user_id=self.user_id, ci_id=self.ci_id, quantity=quantity
+        )
 
 
 # ---------- Views ----------
@@ -1456,35 +1402,15 @@ class _AddMoreButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(
-            _QuantityModal(
-                f"Add more {self.item_name}", self.user_id, self.ci_id, action="add"
-            )
-        )
-
-
-class _TakeButton(discord.ui.Button):
-    def __init__(self, user_id: str, ci_id: int, item_name: str, qty: int) -> None:
-        super().__init__(
-            label="− Take", style=discord.ButtonStyle.danger, row=0, disabled=qty <= 0
-        )
-        self.user_id = user_id
-        self.ci_id = ci_id
-        self.item_name = item_name
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_modal(
-            _QuantityModal(
-                f"Take {self.item_name}", self.user_id, self.ci_id, action="take"
-            )
+            _QuantityModal(f"Add more {self.item_name}", self.user_id, self.ci_id)
         )
 
 
 class CharacterItemDetailView(_OwnerView):
-    def __init__(self, user_id: str, ci_id: int, qty: int, item_name: str) -> None:
+    def __init__(self, user_id: str, ci_id: int, item_name: str) -> None:
         super().__init__(user_id)
         self.ci_id = ci_id
         self.add_item(_AddMoreButton(user_id, ci_id, item_name))
-        self.add_item(_TakeButton(user_id, ci_id, item_name, qty))
         self.add_item(ShareButton(row=4))
 
     @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger, row=0)
