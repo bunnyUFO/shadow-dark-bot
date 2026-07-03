@@ -30,11 +30,13 @@ from shadowdark_bot.embeds import (
     fmt_slots,
 )
 from shadowdark_bot.models import (
+    Borrow,
     CharacterItem,
     CharacterSpell,
     Item,
     PlayerCharacter,
     Spell,
+    TreasuryEntry,
 )
 from shadowdark_bot.rules import (
     ABILITIES,
@@ -555,6 +557,35 @@ async def _do_add_more(
     await _respond(interaction, confirmation, user_id, edit_view=True)
 
 
+def _return_open_borrows(session: Session, user_id: str, item_id: int) -> list[int]:
+    """Close this user's open treasury borrows of a catalog item and mark the
+    entries available again. Returns the affected treasury entry ids.
+
+    Used when a borrowed item is removed from a character's inventory — dropping
+    it from your pack returns it to the treasury. Inventory isn't adjusted here
+    (the caller is deleting the stack outright)."""
+    open_borrows = list(
+        session.scalars(
+            select(Borrow)
+            .join(TreasuryEntry, Borrow.treasury_entry_id == TreasuryEntry.id)
+            .where(
+                Borrow.borrower_id == user_id,
+                Borrow.returned_at.is_(None),
+                TreasuryEntry.item_id == item_id,
+            )
+        ).all()
+    )
+    now = datetime.now(UTC).replace(tzinfo=None)
+    returned: list[int] = []
+    for borrow in open_borrows:
+        borrow.returned_at = now
+        entry = session.get(TreasuryEntry, borrow.treasury_entry_id)
+        if entry is not None:
+            entry.status = "available"
+        returned.append(borrow.treasury_entry_id)
+    return returned
+
+
 async def _do_remove(
     interaction: discord.Interaction, *, user_id: str, ci_id: int
 ) -> None:
@@ -572,12 +603,23 @@ async def _do_remove(
             )
             return
         display = ci.display_name
+        item_id = ci.item_id
         session.delete(ci)
+        # A borrowed treasury item removed from your pack is returned to the
+        # treasury. Freeform items (no item_id) have no treasury link.
+        returned = (
+            _return_open_borrows(session, user_id, item_id)
+            if item_id is not None
+            else []
+        )
         _touch(char)
 
-    await _respond(
-        interaction, f"Removed **{display}** from your inventory.", user_id, edit_view=True
-    )
+    confirmation = f"Removed **{display}** from your inventory."
+    if returned:
+        ids = ", ".join(f"#{eid}" for eid in returned)
+        noun = "it" if len(returned) == 1 else "them"
+        confirmation += f" Returned {noun} to the treasury ({ids})."
+    await _respond(interaction, confirmation, user_id, edit_view=True)
 
 
 async def _respond(
