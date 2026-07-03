@@ -178,6 +178,35 @@ def _build_inventory_payload(
     return embed, CharacterInventoryView(user_id, choices)
 
 
+def _item_detail_embed(ci: CharacterItem) -> discord.Embed:
+    """Detail embed for one carried stack (shared by owner + read-only views)."""
+    embed = discord.Embed(title=ci.display_name, color=CHARACTER_COLOR)
+    per = fmt_slots(ci.effective_gear_slots)
+    cost = f"{fmt_slots(ci.slot_cost)} ({per} each"
+    if ci.effective_bundle_size > 1:
+        cost += f", {ci.effective_bundle_size}/slot"
+    cost += ")"
+    lines = [
+        f"**Quantity:** {ci.quantity}",
+        f"**Slot cost:** {cost}",
+        f"**Source:** {'Catalog' if ci.is_catalog else 'Freeform'}",
+    ]
+    if ci.notes:
+        lines.append(f"_{ci.notes}_")
+    embed.description = "\n".join(lines)
+    return embed
+
+
+def _char_spell_detail_embed(cs: CharacterSpell) -> discord.Embed:
+    """Detail embed for one known spell (shared by owner + read-only views)."""
+    if cs.is_reference and cs.spell is not None:
+        return build_spell_embed(cs.spell)
+    embed = discord.Embed(title=cs.display_name, color=CHARACTER_COLOR)
+    tier = cs.display_tier
+    embed.description = (f"**Tier {tier}**\n" if tier else "") + "_(no reference text)_"
+    return embed
+
+
 def _build_item_detail_payload(
     user_id: str, ci_id: int
 ) -> tuple[discord.Embed, "CharacterItemDetailView"] | None:
@@ -188,20 +217,7 @@ def _build_item_detail_payload(
         ci = next((c for c in char.items if c.id == ci_id), None)
         if ci is None:
             return None
-        embed = discord.Embed(title=ci.display_name, color=CHARACTER_COLOR)
-        per = fmt_slots(ci.effective_gear_slots)
-        cost = f"{fmt_slots(ci.slot_cost)} ({per} each"
-        if ci.effective_bundle_size > 1:
-            cost += f", {ci.effective_bundle_size}/slot"
-        cost += ")"
-        lines = [
-            f"**Quantity:** {ci.quantity}",
-            f"**Slot cost:** {cost}",
-            f"**Source:** {'Catalog' if ci.is_catalog else 'Freeform'}",
-        ]
-        if ci.notes:
-            lines.append(f"_{ci.notes}_")
-        embed.description = "\n".join(lines)
+        embed = _item_detail_embed(ci)
         qty = ci.quantity
         name = ci.display_name
     return embed, CharacterItemDetailView(user_id, ci_id, qty, name)
@@ -215,7 +231,51 @@ def _build_show_payload(
         if char is None:
             return None
         embed = _build_tab_embed(char, tab)
-    return embed, CharacterShowView(target_id, tab)
+        spell_choices: list[tuple[int, str]] = []
+        item_choices: list[tuple[int, str]] = []
+        if tab == "combat":
+            spell_choices = [
+                (
+                    cs.id,
+                    cs.display_name
+                    + (f" (T{cs.display_tier})" if cs.display_tier else ""),
+                )
+                for cs in _sorted_spells(char)
+            ]
+        elif tab == "inventory":
+            item_choices = [
+                (ci.id, f"{ci.quantity}× {ci.display_name}")
+                for ci in _sorted_items(char)
+            ]
+    return embed, CharacterShowView(target_id, tab, spell_choices, item_choices)
+
+
+def _build_show_spell_detail_payload(
+    target_id: str, cs_id: int
+) -> tuple[discord.Embed, "CharacterShowDetailView"] | None:
+    with session_scope() as session:
+        char = _load_character(session, target_id)
+        if char is None:
+            return None
+        cs = next((s for s in char.spells if s.id == cs_id), None)
+        if cs is None:
+            return None
+        embed = _char_spell_detail_embed(cs)
+    return embed, CharacterShowDetailView(target_id, "combat")
+
+
+def _build_show_item_detail_payload(
+    target_id: str, ci_id: int
+) -> tuple[discord.Embed, "CharacterShowDetailView"] | None:
+    with session_scope() as session:
+        char = _load_character(session, target_id)
+        if char is None:
+            return None
+        ci = next((c for c in char.items if c.id == ci_id), None)
+        if ci is None:
+            return None
+        embed = _item_detail_embed(ci)
+    return embed, CharacterShowDetailView(target_id, "inventory")
 
 
 # ---------- Spell management (bespoke, class-limited) ----------
@@ -250,12 +310,7 @@ def _build_char_spell_detail_payload(
         cs = next((s for s in char.spells if s.id == cs_id), None)
         if cs is None:
             return None
-        if cs.is_reference and cs.spell is not None:
-            embed = build_spell_embed(cs.spell)
-        else:
-            embed = discord.Embed(title=cs.display_name, color=CHARACTER_COLOR)
-            tier = cs.display_tier
-            embed.description = (f"**Tier {tier}**\n" if tier else "") + "_(no reference text)_"
+        embed = _char_spell_detail_embed(cs)
         name = cs.display_name
     return embed, CharacterSpellDetailView(user_id, cs_id, name)
 
@@ -338,6 +393,7 @@ async def _do_carry(
     item_name: str,
     quantity: int,
     freeform_slots: float = 1.0,
+    notes: str | None = None,
     edit_view: bool = False,
 ) -> None:
     clean_item = item_name.strip()
@@ -421,6 +477,7 @@ async def _do_carry(
                     quantity=quantity,
                     slots_each=freeform_slots,
                     bundle_size=1,
+                    notes=(notes or None),
                 )
             session.add(stack)
         else:
@@ -597,7 +654,7 @@ async def _do_learn_spell(
         if cls is None:
             await interaction.response.send_message(
                 f"{failure}\nYour character isn't a spellcaster — set a "
-                "spellcasting stat (INT or WIS) via **Edit Talents & Casting**.",
+                "spellcasting stat (INT or WIS) via **Edit Stats**.",
                 ephemeral=True,
             )
             return
@@ -678,7 +735,7 @@ def _modal_tab(modal: discord.ui.Modal, default: str) -> str:
 
 class EditStatsModal(discord.ui.Modal):
     """Combat-tab stats: the six ability scores, level, max HP, base AC, and the
-    spellcasting check bonus."""
+    spellcasting stat (INT / WIS / none)."""
 
     def __init__(
         self,
@@ -688,7 +745,7 @@ class EditStatsModal(discord.ui.Modal):
         level: str = "1",
         max_hp: str = "",
         ac: str = "",
-        spell_bonus: str = "0",
+        spell_stat: str = "",
     ) -> None:
         super().__init__(title="Stats")
         self.user_id = user_id
@@ -710,18 +767,18 @@ class EditStatsModal(discord.ui.Modal):
             default=ac,
             max_length=3,
         )
-        self._spell_bonus = discord.ui.TextInput(
-            label="Spell check bonus (from talents)",
+        self._spell_stat = discord.ui.TextInput(
+            label="Spellcasting stat (INT / WIS / none)",
             required=False,
-            default=spell_bonus,
-            max_length=3,
+            default=spell_stat,
+            max_length=4,
         )
         for field in (
             self._scores,
             self._level,
             self._hp,
             self._ac,
-            self._spell_bonus,
+            self._spell_stat,
         ):
             self.add_item(field)
 
@@ -734,7 +791,7 @@ class EditStatsModal(discord.ui.Modal):
             level=str(char.level),
             max_hp=str(char.max_hp) if char.max_hp is not None else "",
             ac=str(char.armor_class) if char.armor_class is not None else "",
-            spell_bonus=str(char.spell_check_bonus),
+            spell_stat=char.spell_ability.upper() if char.spell_ability else "",
         )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
@@ -763,11 +820,14 @@ class EditStatsModal(discord.ui.Modal):
                 ephemeral=True,
             )
             return
-        try:
-            bonus = _parse_optional_int(str(self._spell_bonus.value)) or 0
-        except ValueError:
+        raw_stat = str(self._spell_stat.value).strip().lower()
+        if raw_stat in ("", "none", "-"):
+            spell_ability: str | None = None
+        elif raw_stat in SPELL_ABILITIES:
+            spell_ability = raw_stat
+        else:
             await interaction.response.send_message(
-                "**Failed to save.**\nSpell check bonus must be a whole number.",
+                "**Failed to save.**\nSpellcasting stat must be INT, WIS, or none.",
                 ephemeral=True,
             )
             return
@@ -787,7 +847,7 @@ class EditStatsModal(discord.ui.Modal):
             char.level = level
             char.max_hp = max_hp
             char.armor_class = armor_class
-            char.spell_check_bonus = bonus
+            char.spell_ability = spell_ability
             _touch(char)
             session.flush()
         await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "combat"))
@@ -834,33 +894,30 @@ class EditGoldModal(discord.ui.Modal):
 
 
 class EditCastingModal(discord.ui.Modal):
-    def __init__(self, user_id: str, *, spell_stat: str = "") -> None:
+    """Casting extras: the spell check bonus from talents (the casting stat
+    itself lives on the Stats form)."""
+
+    def __init__(self, user_id: str, *, spell_bonus: str = "0") -> None:
         super().__init__(title="Spellcasting")
         self.user_id = user_id
-        self._spell_stat = discord.ui.TextInput(
-            label="Spellcasting stat (INT / WIS / none)",
+        self._spell_bonus = discord.ui.TextInput(
+            label="Spell check bonus (from talents)",
             required=False,
-            default=spell_stat,
-            max_length=4,
+            default=spell_bonus,
+            max_length=3,
         )
-        self.add_item(self._spell_stat)
+        self.add_item(self._spell_bonus)
 
     @classmethod
     def from_char(cls, char: PlayerCharacter) -> "EditCastingModal":
-        return cls(
-            char.user_id,
-            spell_stat=char.spell_ability.upper() if char.spell_ability else "",
-        )
+        return cls(char.user_id, spell_bonus=str(char.spell_check_bonus))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        raw_stat = str(self._spell_stat.value).strip().lower()
-        if raw_stat in ("", "none", "-"):
-            spell_ability: str | None = None
-        elif raw_stat in SPELL_ABILITIES:
-            spell_ability = raw_stat
-        else:
+        try:
+            bonus = _parse_optional_int(str(self._spell_bonus.value)) or 0
+        except ValueError:
             await interaction.response.send_message(
-                "**Failed to save.**\nSpellcasting stat must be INT, WIS, or none.",
+                "**Failed to save.**\nSpell check bonus must be a whole number.",
                 ephemeral=True,
             )
             return
@@ -874,7 +931,7 @@ class EditCastingModal(discord.ui.Modal):
                     ephemeral=True,
                 )
                 return
-            char.spell_ability = spell_ability
+            char.spell_check_bonus = bonus
             _touch(char)
             session.flush()
         await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "combat"))
@@ -1091,9 +1148,16 @@ class AddItemModal(discord.ui.Modal):
             required=False,
             max_length=10,
         )
+        self._description = discord.ui.TextInput(
+            label="Description (freeform; optional)",
+            required=False,
+            style=discord.TextStyle.paragraph,
+            max_length=500,
+        )
         self.add_item(self._name)
         self.add_item(self._qty)
         self.add_item(self._slots)
+        self.add_item(self._description)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
@@ -1120,6 +1184,7 @@ class AddItemModal(discord.ui.Modal):
             item_name=str(self._name.value),
             quantity=quantity,
             freeform_slots=freeform_slots,
+            notes=str(self._description.value).strip() or None,
             edit_view=True,
         )
 
@@ -1477,7 +1542,7 @@ class CharacterSpellsView(_OwnerView):
         if not self.is_caster:
             await interaction.response.send_message(
                 "Your character isn't a spellcaster — set a spellcasting stat "
-                "(INT or WIS) via **Edit Talents & Casting** first.",
+                "(INT or WIS) via **Edit Stats** first.",
                 ephemeral=True,
             )
             return
@@ -1692,11 +1757,74 @@ class _ShowTabButton(discord.ui.Button):
         await interaction.response.edit_message(embed=embed, view=new_view)
 
 
+class ShowSpellSelect(discord.ui.Select):
+    """Read-only spell inspector on another player's Combat tab."""
+
+    def __init__(self, target_id: str, choices: list[tuple[int, str]]) -> None:
+        options = [
+            discord.SelectOption(label=label[:100], value=str(cid))
+            for cid, label in choices[:25]
+        ]
+        super().__init__(
+            placeholder="View a known spell…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=1,
+        )
+        self.target_id = target_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        payload = _build_show_spell_detail_payload(self.target_id, int(self.values[0]))
+        if payload is None:
+            await interaction.response.send_message(
+                "That spell is no longer known.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class ShowItemSelect(discord.ui.Select):
+    """Read-only item inspector on another player's Inventory tab."""
+
+    def __init__(self, target_id: str, choices: list[tuple[int, str]]) -> None:
+        options = [
+            discord.SelectOption(label=label[:100], value=str(cid))
+            for cid, label in choices[:25]
+        ]
+        super().__init__(
+            placeholder="Inspect a carried item…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=1,
+        )
+        self.target_id = target_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        payload = _build_show_item_detail_payload(self.target_id, int(self.values[0]))
+        if payload is None:
+            await interaction.response.send_message(
+                "That item is no longer carried.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
 class CharacterShowView(discord.ui.View):
     """Read-only view of another player's sheet — Combat / Inventory /
-    Roleplaying tabs + share. No edit controls."""
+    Roleplaying tabs + share. Combat and Inventory tabs offer a read-only
+    dropdown to inspect a spell or item in place. No edit controls."""
 
-    def __init__(self, target_id: str, tab: str = "combat") -> None:
+    def __init__(
+        self,
+        target_id: str,
+        tab: str = "combat",
+        spell_choices: list[tuple[int, str]] | None = None,
+        item_choices: list[tuple[int, str]] | None = None,
+    ) -> None:
         super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
         self.target_id = target_id
         self.tab = tab
@@ -1705,7 +1833,35 @@ class CharacterShowView(discord.ui.View):
         self.add_item(
             _ShowTabButton("Roleplaying", "roleplaying", tab == "roleplaying")
         )
+        if tab == "combat" and spell_choices:
+            self.add_item(ShowSpellSelect(target_id, spell_choices))
+        elif tab == "inventory" and item_choices:
+            self.add_item(ShowItemSelect(target_id, item_choices))
         self.add_item(ShareButton(row=4))
+
+
+class CharacterShowDetailView(discord.ui.View):
+    """Read-only spell/item detail reached from a /character show dropdown,
+    with a Back button that returns to the originating tab."""
+
+    def __init__(self, target_id: str, tab: str) -> None:
+        super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
+        self.target_id = target_id
+        self.tab = tab
+        self.add_item(ShareButton(row=4))
+
+    @discord.ui.button(label="← Back", style=discord.ButtonStyle.primary, row=1)
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_show_payload(self.target_id, self.tab)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="That character no longer exists.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
 class DeleteConfirmView(_OwnerView):
