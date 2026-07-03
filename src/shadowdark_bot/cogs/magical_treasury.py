@@ -13,7 +13,15 @@ from shadowdark_bot.embeds import (
     build_treasury_instance_embed,
     build_treasury_list_embed,
 )
-from shadowdark_bot.models import ITEM_TYPE_MAGICAL, Borrow, Item, Location, TreasuryEntry
+from shadowdark_bot.models import (
+    ITEM_TYPE_MAGICAL,
+    Borrow,
+    CharacterItem,
+    Item,
+    Location,
+    PlayerCharacter,
+    TreasuryEntry,
+)
 from shadowdark_bot.sharing import ShareButton, ShareableView
 
 log = logging.getLogger("shadowdark_bot.treasury")
@@ -297,6 +305,61 @@ def _build_entry_detail_payload(
     return embed, TreasuryEntryDetailView(entry_id, status)
 
 
+def _naive_utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _add_borrowed_to_inventory(
+    session: Session, borrower_id: str, item_id: int
+) -> None:
+    """If the borrower has a character, add one of the borrowed catalog item to
+    their carried inventory (merging into an existing stack). No-op otherwise —
+    the borrow is still recorded in the ledger either way."""
+    char = session.scalar(
+        select(PlayerCharacter).where(PlayerCharacter.user_id == borrower_id)
+    )
+    if char is None:
+        return
+    stack = session.scalar(
+        select(CharacterItem).where(
+            CharacterItem.character_id == char.id,
+            CharacterItem.item_id == item_id,
+        )
+    )
+    if stack is None:
+        session.add(
+            CharacterItem(character_id=char.id, item_id=item_id, quantity=1)
+        )
+    else:
+        stack.quantity += 1
+    char.updated_at = _naive_utcnow()
+
+
+def _remove_borrowed_from_inventory(
+    session: Session, borrower_id: str, item_id: int
+) -> None:
+    """If the borrower has a character carrying the returned catalog item, drop
+    one from their inventory (removing the stack when it empties)."""
+    char = session.scalar(
+        select(PlayerCharacter).where(PlayerCharacter.user_id == borrower_id)
+    )
+    if char is None:
+        return
+    stack = session.scalar(
+        select(CharacterItem).where(
+            CharacterItem.character_id == char.id,
+            CharacterItem.item_id == item_id,
+        )
+    )
+    if stack is None:
+        return
+    if stack.quantity <= 1:
+        session.delete(stack)
+    else:
+        stack.quantity -= 1
+    char.updated_at = _naive_utcnow()
+
+
 async def _do_borrow(
     interaction: discord.Interaction,
     entry_id: int,
@@ -335,6 +398,9 @@ async def _do_borrow(
                 borrower_id=str(borrower.id),
             )
         )
+        # If the borrower has a character, mirror the item into their carried
+        # inventory. Either way the borrow is recorded above.
+        _add_borrowed_to_inventory(session, str(borrower.id), entry.item_id)
         session.flush()
 
     detail = _build_entry_detail_payload(entry_id)
@@ -370,9 +436,10 @@ async def _do_return(interaction: discord.Interaction, entry_id: int) -> None:
             )
             return
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        open_borrow.returned_at = now
+        open_borrow.returned_at = _naive_utcnow()
         entry.status = STATUS_AVAILABLE
+        # Mirror the return into the borrower's character inventory, if any.
+        _remove_borrowed_from_inventory(session, open_borrow.borrower_id, entry.item_id)
 
     detail = _build_entry_detail_payload(entry_id)
     if detail is not None:
