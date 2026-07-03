@@ -233,7 +233,8 @@ def _build_item_detail_payload(
             return None
         embed = _item_detail_embed(ci)
         name = ci.display_name
-    return embed, CharacterItemDetailView(user_id, ci_id, name)
+        qty = ci.quantity
+    return embed, CharacterItemDetailView(user_id, ci_id, name, qty)
 
 
 def _build_show_payload(
@@ -557,13 +558,16 @@ async def _do_add_more(
     await _respond(interaction, confirmation, user_id, edit_view=True)
 
 
-def _return_open_borrows(session: Session, user_id: str, item_id: int) -> list[int]:
-    """Close this user's open treasury borrows of a catalog item and mark the
-    entries available again. Returns the affected treasury entry ids.
+def _return_open_borrows(
+    session: Session, user_id: str, item_id: int, limit: int | None = None
+) -> list[int]:
+    """Close up to `limit` of this user's open treasury borrows of a catalog
+    item (oldest first) and mark those entries available again. Returns the
+    affected treasury entry ids.
 
     Used when a borrowed item is removed from a character's inventory — dropping
-    it from your pack returns it to the treasury. Inventory isn't adjusted here
-    (the caller is deleting the stack outright)."""
+    it from your pack returns it to the treasury, one borrow per copy removed.
+    Inventory isn't adjusted here (the caller has already dropped the copies)."""
     open_borrows = list(
         session.scalars(
             select(Borrow)
@@ -573,8 +577,11 @@ def _return_open_borrows(session: Session, user_id: str, item_id: int) -> list[i
                 Borrow.returned_at.is_(None),
                 TreasuryEntry.item_id == item_id,
             )
+            .order_by(Borrow.borrowed_at)
         ).all()
     )
+    if limit is not None:
+        open_borrows = open_borrows[:limit]
     now = datetime.now(UTC).replace(tzinfo=None)
     returned: list[int] = []
     for borrow in open_borrows:
@@ -587,34 +594,58 @@ def _return_open_borrows(session: Session, user_id: str, item_id: int) -> list[i
 
 
 async def _do_remove(
-    interaction: discord.Interaction, *, user_id: str, ci_id: int
+    interaction: discord.Interaction,
+    *,
+    user_id: str,
+    ci_id: int,
+    quantity: int | None = None,
 ) -> None:
+    """Remove a carried stack. `quantity=None` drops the whole stack; a value
+    drops that many copies (deleting the stack if it empties)."""
+    failure = "**Failed to remove.**"
+    if quantity is not None and quantity < 1:
+        await interaction.response.send_message(
+            f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
+        )
+        return
     with session_scope() as session:
         char = _load_character(session, user_id)
         if char is None:
             await interaction.response.send_message(
-                "**Failed to remove.**\nCharacter not found.", ephemeral=True
+                f"{failure}\nCharacter not found.", ephemeral=True
             )
             return
         ci = next((c for c in char.items if c.id == ci_id), None)
         if ci is None:
             await interaction.response.send_message(
-                "**Failed to remove.**\nThat item is already gone.", ephemeral=True
+                f"{failure}\nThat item is already gone.", ephemeral=True
+            )
+            return
+        if quantity is not None and quantity > ci.quantity:
+            await interaction.response.send_message(
+                f"{failure}\nYou only have {ci.quantity}× **{ci.display_name}**.",
+                ephemeral=True,
             )
             return
         display = ci.display_name
         item_id = ci.item_id
-        session.delete(ci)
-        # A borrowed treasury item removed from your pack is returned to the
-        # treasury. Freeform items (no item_id) have no treasury link.
+        removed = ci.quantity if quantity is None else quantity
+        ci.quantity -= removed
+        if ci.quantity == 0:
+            session.delete(ci)
+        # Borrowed treasury copies removed from your pack are returned to the
+        # treasury, one per copy dropped. Freeform items have no treasury link.
         returned = (
-            _return_open_borrows(session, user_id, item_id)
+            _return_open_borrows(session, user_id, item_id, limit=removed)
             if item_id is not None
             else []
         )
         _touch(char)
 
-    confirmation = f"Removed **{display}** from your inventory."
+    if quantity is None:
+        confirmation = f"Removed **{display}** from your inventory."
+    else:
+        confirmation = f"Removed {removed}× **{display}** from your inventory."
     if returned:
         ids = ", ".join(f"#{eid}" for eid in returned)
         noun = "it" if len(returned) == 1 else "them"
@@ -1196,12 +1227,15 @@ class AddItemModal(discord.ui.Modal):
 
 
 class _QuantityModal(discord.ui.Modal):
-    """Single-quantity modal for the item detail Add-more button."""
+    """Single-quantity modal for the item detail Add-more / Remove buttons."""
 
-    def __init__(self, title: str, user_id: str, ci_id: int) -> None:
+    def __init__(
+        self, title: str, user_id: str, ci_id: int, *, action: str = "add"
+    ) -> None:
         super().__init__(title=title[:45])
         self.user_id = user_id
         self.ci_id = ci_id
+        self.action = action
         self._qty = discord.ui.TextInput(
             label="Quantity", required=True, default="1", max_length=8
         )
@@ -1215,9 +1249,14 @@ class _QuantityModal(discord.ui.Modal):
                 "Quantity must be a whole number.", ephemeral=True
             )
             return
-        await _do_add_more(
-            interaction, user_id=self.user_id, ci_id=self.ci_id, quantity=quantity
-        )
+        if self.action == "remove":
+            await _do_remove(
+                interaction, user_id=self.user_id, ci_id=self.ci_id, quantity=quantity
+            )
+        else:
+            await _do_add_more(
+                interaction, user_id=self.user_id, ci_id=self.ci_id, quantity=quantity
+            )
 
 
 # ---------- Views ----------
@@ -1448,18 +1487,38 @@ class _AddMoreButton(discord.ui.Button):
         )
 
 
+class _RemoveButton(discord.ui.Button):
+    """Remove a carried stack. With more than one copy, prompt for how many to
+    drop; with a single copy, remove it outright."""
+
+    def __init__(self, user_id: str, ci_id: int, item_name: str, qty: int) -> None:
+        super().__init__(label="Remove", style=discord.ButtonStyle.danger, row=0)
+        self.user_id = user_id
+        self.ci_id = ci_id
+        self.item_name = item_name
+        self.qty = qty
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.qty > 1:
+            await interaction.response.send_modal(
+                _QuantityModal(
+                    f"Remove {self.item_name}",
+                    self.user_id,
+                    self.ci_id,
+                    action="remove",
+                )
+            )
+        else:
+            await _do_remove(interaction, user_id=self.user_id, ci_id=self.ci_id)
+
+
 class CharacterItemDetailView(_OwnerView):
-    def __init__(self, user_id: str, ci_id: int, item_name: str) -> None:
+    def __init__(self, user_id: str, ci_id: int, item_name: str, qty: int) -> None:
         super().__init__(user_id)
         self.ci_id = ci_id
         self.add_item(_AddMoreButton(user_id, ci_id, item_name))
+        self.add_item(_RemoveButton(user_id, ci_id, item_name, qty))
         self.add_item(ShareButton(row=4))
-
-    @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger, row=0)
-    async def remove(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await _do_remove(interaction, user_id=self.user_id, ci_id=self.ci_id)
 
     @discord.ui.button(
         label="← Back to inventory", style=discord.ButtonStyle.primary, row=1
