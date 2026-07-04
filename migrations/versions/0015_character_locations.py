@@ -27,6 +27,16 @@ _NAMING = {"uq": "uq_%(table_name)s_%(column_0_name)s"}
 
 
 def upgrade() -> None:
+    # `locations` is referenced by inventory_entries/treasury_entries, and the
+    # bot enables PRAGMA foreign_keys. Batch table-recreation does DROP TABLE
+    # locations, which fails the FK check when child rows exist (and, being
+    # non-transactional, leaves an _alembic_tmp_locations table behind on a
+    # failed run). Turn FKs off for the rebuild and clear any leftover temp
+    # tables so a previously-failed run can recover.
+    op.execute("PRAGMA foreign_keys=OFF")
+    op.execute("DROP TABLE IF EXISTS _alembic_tmp_locations")
+    op.execute("DROP TABLE IF EXISTS _alembic_tmp_inventory_entries")
+
     # 1. locations: add ownership, drop the global unique on name, add a role
     #    check, then a partial unique index scoped to guild (unowned) rows.
     with op.batch_alter_table(
@@ -108,6 +118,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Same FK caveat as upgrade(): the table rebuilds below drop referenced
+    # tables, so disable FKs and clear any leftover temp tables first.
+    op.execute("PRAGMA foreign_keys=OFF")
+    op.execute("DROP TABLE IF EXISTS _alembic_tmp_locations")
+    op.execute("DROP TABLE IF EXISTS _alembic_tmp_inventory_entries")
+
     # Recreate character_items and move each held location's stacks back.
     op.create_table(
         "character_items",
