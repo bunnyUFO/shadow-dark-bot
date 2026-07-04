@@ -288,6 +288,7 @@ class PlayerCharacter(Base):
     )
     proficiencies: Mapped[str | None] = mapped_column(Text)
     talents: Mapped[str | None] = mapped_column(Text)
+    additional_info: Mapped[str | None] = mapped_column(Text)
     spell_ability: Mapped[str | None] = mapped_column(String)
     spell_check_bonus: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"

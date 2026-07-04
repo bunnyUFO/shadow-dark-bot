@@ -8,6 +8,7 @@ item. Carry capacity is the Shadow Dark limit, max(10, STR).
 """
 
 import logging
+import re
 from datetime import UTC, datetime
 
 import discord
@@ -956,9 +957,38 @@ def _modal_tab(modal: discord.ui.Modal, default: str) -> str:
     return getattr(modal, "refresh_tab", default)
 
 
+def _parse_spellcasting(raw: str) -> tuple[str | None, int]:
+    """Parse the combined spellcasting field into (ability, talent bonus).
+
+    Accepts "INT", "WIS +1", "int-1", "none"/blank. The ability picks the spell
+    list; the optional signed number is the talent spell-check bonus."""
+    raw = raw.strip()
+    if raw.lower() in ("", "none", "-"):
+        return None, 0
+    match = re.fullmatch(r"([A-Za-z]+)\s*([+-]?\d+)?", raw)
+    if match is None:
+        raise ValueError(
+            "Spellcasting must look like INT, WIS +1, or none."
+        )
+    ability = match.group(1).lower()
+    if ability not in SPELL_ABILITIES:
+        raise ValueError("Spellcasting stat must be INT, WIS, or none.")
+    bonus = int(match.group(2)) if match.group(2) else 0
+    return ability, bonus
+
+
+def _format_spellcasting(char: PlayerCharacter) -> str:
+    if char.spell_ability is None:
+        return ""
+    text = char.spell_ability.upper()
+    if char.spell_check_bonus:
+        text += f" {char.spell_check_bonus:+d}"
+    return text
+
+
 class EditStatsModal(discord.ui.Modal):
     """Combat-tab stats: the six ability scores, level, max HP, base AC, and the
-    spellcasting stat (INT / WIS / none)."""
+    spellcasting stat + talent bonus (e.g. INT, WIS +1, or none)."""
 
     def __init__(
         self,
@@ -991,10 +1021,10 @@ class EditStatsModal(discord.ui.Modal):
             max_length=3,
         )
         self._spell_stat = discord.ui.TextInput(
-            label="Spellcasting stat (INT / WIS / none)",
+            label="Spellcasting: INT / WIS +bonus / none",
             required=False,
             default=spell_stat,
-            max_length=4,
+            max_length=10,
         )
         for field in (
             self._scores,
@@ -1014,7 +1044,7 @@ class EditStatsModal(discord.ui.Modal):
             level=str(char.level),
             max_hp=str(char.max_hp) if char.max_hp is not None else "",
             ac=str(char.armor_class) if char.armor_class is not None else "",
-            spell_stat=char.spell_ability.upper() if char.spell_ability else "",
+            spell_stat=_format_spellcasting(char),
         )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
@@ -1043,15 +1073,11 @@ class EditStatsModal(discord.ui.Modal):
                 ephemeral=True,
             )
             return
-        raw_stat = str(self._spell_stat.value).strip().lower()
-        if raw_stat in ("", "none", "-"):
-            spell_ability: str | None = None
-        elif raw_stat in SPELL_ABILITIES:
-            spell_ability = raw_stat
-        else:
+        try:
+            spell_ability, spell_bonus = _parse_spellcasting(str(self._spell_stat.value))
+        except ValueError as err:
             await interaction.response.send_message(
-                "**Failed to save.**\nSpellcasting stat must be INT, WIS, or none.",
-                ephemeral=True,
+                f"**Failed to save.**\n{err}", ephemeral=True
             )
             return
 
@@ -1071,6 +1097,7 @@ class EditStatsModal(discord.ui.Modal):
             char.max_hp = max_hp
             char.armor_class = armor_class
             char.spell_ability = spell_ability
+            char.spell_check_bonus = spell_bonus
             _touch(char)
             session.flush()
             # STR drives held-inventory capacity — keep the held location in sync.
@@ -1118,50 +1145,6 @@ class EditGoldModal(discord.ui.Modal):
         await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "inventory"))
 
 
-class EditCastingModal(discord.ui.Modal):
-    """Casting extras: the spell check bonus from talents (the casting stat
-    itself lives on the Stats form)."""
-
-    def __init__(self, user_id: str, *, spell_bonus: str = "0") -> None:
-        super().__init__(title="Spellcasting")
-        self.user_id = user_id
-        self._spell_bonus = discord.ui.TextInput(
-            label="Spell check bonus (from talents)",
-            required=False,
-            default=spell_bonus,
-            max_length=3,
-        )
-        self.add_item(self._spell_bonus)
-
-    @classmethod
-    def from_char(cls, char: PlayerCharacter) -> "EditCastingModal":
-        return cls(char.user_id, spell_bonus=str(char.spell_check_bonus))
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        try:
-            bonus = _parse_optional_int(str(self._spell_bonus.value)) or 0
-        except ValueError:
-            await interaction.response.send_message(
-                "**Failed to save.**\nSpell check bonus must be a whole number.",
-                ephemeral=True,
-            )
-            return
-        with session_scope() as session:
-            char = session.scalar(
-                select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
-            )
-            if char is None:
-                await interaction.response.send_message(
-                    "Character not found — run `/character sheet` first.",
-                    ephemeral=True,
-                )
-                return
-            char.spell_check_bonus = bonus
-            _touch(char)
-            session.flush()
-        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "combat"))
-
-
 class EditProficienciesModal(discord.ui.Modal):
     def __init__(self, user_id: str, *, proficiencies: str = "") -> None:
         super().__init__(title="Proficiencies")
@@ -1196,22 +1179,19 @@ class EditProficienciesModal(discord.ui.Modal):
         await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "combat"))
 
 
-class EditRoleplayingModal(discord.ui.Modal):
-    """Roleplaying-tab prose: background, known languages, and talents."""
+class EditSkillsKnowledgeModal(discord.ui.Modal):
+    """Roleplaying-tab prose: known languages, talents, and additional info."""
 
     def __init__(
         self,
         user_id: str,
         *,
-        background: str = "",
         languages: str = "",
         talents: str = "",
+        additional_info: str = "",
     ) -> None:
-        super().__init__(title="Roleplaying")
+        super().__init__(title="Skills & Knowledge")
         self.user_id = user_id
-        self._background = discord.ui.TextInput(
-            label="Background", required=False, default=background, max_length=100
-        )
         self._languages = discord.ui.TextInput(
             label="Known languages (comma-separated)",
             required=False,
@@ -1226,17 +1206,24 @@ class EditRoleplayingModal(discord.ui.Modal):
             style=discord.TextStyle.paragraph,
             max_length=1000,
         )
-        self.add_item(self._background)
+        self._additional_info = discord.ui.TextInput(
+            label="Additional info",
+            required=False,
+            default=additional_info,
+            style=discord.TextStyle.paragraph,
+            max_length=1000,
+        )
         self.add_item(self._languages)
         self.add_item(self._talents)
+        self.add_item(self._additional_info)
 
     @classmethod
-    def from_char(cls, char: PlayerCharacter) -> "EditRoleplayingModal":
+    def from_char(cls, char: PlayerCharacter) -> "EditSkillsKnowledgeModal":
         return cls(
             char.user_id,
-            background=char.background or "",
             languages=char.languages or "",
             talents=char.talents or "",
+            additional_info=char.additional_info or "",
         )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
@@ -1250,9 +1237,9 @@ class EditRoleplayingModal(discord.ui.Modal):
                     ephemeral=True,
                 )
                 return
-            char.background = str(self._background.value).strip() or None
             char.languages = str(self._languages.value).strip() or None
             char.talents = str(self._talents.value).strip() or None
+            char.additional_info = str(self._additional_info.value).strip() or None
             _touch(char)
             session.flush()
         await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "roleplaying"))
@@ -1262,29 +1249,29 @@ _ALIGNMENTS = {"lawful": "Lawful", "neutral": "Neutral", "chaotic": "Chaotic"}
 
 
 class EditIdentityModal(discord.ui.Modal):
-    """Identity: name, class, title, ancestry, alignment. Upserts — this is
-    also the character-creation form (Name required)."""
+    """Identity: name, class/title, ancestry, alignment, background. Upserts —
+    this is also the character-creation form (Name required)."""
 
     def __init__(
         self,
         user_id: str,
         *,
         name: str = "",
-        char_class: str = "",
-        title: str = "",
+        class_title: str = "",
         ancestry: str = "",
         alignment: str = "",
+        background: str = "",
     ) -> None:
         super().__init__(title="Identity")
         self.user_id = user_id
         self._name = discord.ui.TextInput(
             label="Name", required=True, default=name, max_length=100
         )
-        self._class = discord.ui.TextInput(
-            label="Class", required=False, default=char_class, max_length=50
-        )
-        self._title = discord.ui.TextInput(
-            label="Title", required=False, default=title, max_length=50
+        self._class_title = discord.ui.TextInput(
+            label="Class & title (e.g. Wizard, Channeler)",
+            required=False,
+            default=class_title,
+            max_length=100,
         )
         self._ancestry = discord.ui.TextInput(
             label="Ancestry", required=False, default=ancestry, max_length=50
@@ -1295,24 +1282,34 @@ class EditIdentityModal(discord.ui.Modal):
             default=alignment,
             max_length=10,
         )
+        self._background = discord.ui.TextInput(
+            label="Background",
+            required=False,
+            default=background,
+            style=discord.TextStyle.paragraph,
+            max_length=300,
+        )
         for field in (
             self._name,
-            self._class,
-            self._title,
+            self._class_title,
             self._ancestry,
             self._alignment,
+            self._background,
         ):
             self.add_item(field)
 
     @classmethod
     def from_char(cls, char: PlayerCharacter) -> "EditIdentityModal":
+        class_title = char.char_class or ""
+        if char.title:
+            class_title = f"{class_title}, {char.title}" if class_title else char.title
         return cls(
             char.user_id,
             name=char.name,
-            char_class=char.char_class or "",
-            title=char.title or "",
+            class_title=class_title,
             ancestry=char.ancestry or "",
             alignment=char.alignment or "",
+            background=char.background or "",
         )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
@@ -1335,6 +1332,17 @@ class EditIdentityModal(discord.ui.Modal):
             )
             return
 
+        # "Class & title" is one field: everything before the first comma is the
+        # class, the remainder is the title.
+        raw_ct = str(self._class_title.value).strip()
+        if "," in raw_ct:
+            class_part, title_part = raw_ct.split(",", 1)
+            char_class = class_part.strip() or None
+            title = title_part.strip() or None
+        else:
+            char_class = raw_ct or None
+            title = None
+
         with session_scope() as session:
             char = session.scalar(
                 select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
@@ -1343,10 +1351,11 @@ class EditIdentityModal(discord.ui.Modal):
                 char = PlayerCharacter(user_id=self.user_id, name=name)
                 session.add(char)
             char.name = name
-            char.char_class = str(self._class.value).strip() or None
-            char.title = str(self._title.value).strip() or None
+            char.char_class = char_class
+            char.title = title
             char.ancestry = str(self._ancestry.value).strip() or None
             char.alignment = alignment
+            char.background = str(self._background.value).strip() or None
             _touch(char)
             session.flush()
             # Create (on first save) or rename this character's storage locations.
@@ -1607,7 +1616,6 @@ class CharacterSheetView(_OwnerView):
 
         if tab == "combat":
             self.add_item(_EditButton("Edit Stats", EditStatsModal.from_char, 1))
-            self.add_item(_EditButton("Edit Casting", EditCastingModal.from_char, 1))
             self.add_item(
                 _EditButton("Edit Proficiencies", EditProficienciesModal.from_char, 1)
             )
@@ -1621,7 +1629,11 @@ class CharacterSheetView(_OwnerView):
         else:  # roleplaying
             self.add_item(_EditButton("Edit Identity", EditIdentityModal.from_char, 1))
             self.add_item(
-                _EditButton("Edit Roleplaying", EditRoleplayingModal.from_char, 1)
+                _EditButton(
+                    "Edit Skills & Knowledge",
+                    EditSkillsKnowledgeModal.from_char,
+                    1,
+                )
             )
             self.add_item(_DeleteButton(2))
 

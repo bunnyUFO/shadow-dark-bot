@@ -4,12 +4,16 @@ Discord interaction."""
 
 import asyncio
 
+from sqlalchemy import select
+
 from shadowdark_bot import storage
+from shadowdark_bot.cogs import guild_inventory as gi
 from shadowdark_bot.cogs import magical_treasury as mt
 from shadowdark_bot.cogs import player_characters as pc
 from shadowdark_bot.models import (
     ITEM_TYPE_COMMON,
     ITEM_TYPE_MAGICAL,
+    InventoryEntry,
     Item,
     Location,
     PlayerCharacter,
@@ -246,3 +250,59 @@ def test_borrow_and_remove_roundtrip_through_treasury(dbsession):
         assert s.get(TreasuryEntry, te_id).status == "available"
         held = storage.held_location(s, "u1")
         assert storage.find_catalog_stack(s, held.id, amulet_id) is None
+
+
+def test_inventory_take_withdraws_into_character_held(dbsession):
+    with dbsession() as s:
+        _make_char(s, "u1", "Bob", 15)
+        rations = Item(
+            name="Rations", gear_slots=1, bundle_size=3, item_type=ITEM_TYPE_COMMON
+        )
+        armory = Location(name="Armory", kind="inventory", max_gear_slots=50)
+        s.add_all([rations, armory])
+        s.flush()
+        rations_id = rations.id
+        s.add(InventoryEntry(location_id=armory.id, item_id=rations.id, quantity=5))
+        s.commit()
+    i = FakeInteraction("u1")
+    run(
+        gi._do_take(
+            i, location_name="Armory", item_name="Rations", quantity=5, edit_view=True
+        )
+    )
+    assert i.error is None
+    with dbsession() as s:
+        # gone from the guild location...
+        armory = s.scalar(select(Location).where(Location.name == "Armory"))
+        assert storage.find_catalog_stack(s, armory.id, rations_id) is None
+        # ...and now in the taker's held inventory
+        held = storage.held_location(s, "u1")
+        stack = storage.find_catalog_stack(s, held.id, rations_id)
+        assert stack is not None and stack.quantity == 5
+
+
+def test_inventory_take_blocks_when_held_is_full(dbsession):
+    with dbsession() as s:
+        _make_char(s, "u1", "Bob", 10)  # held cap 10
+        widget = Item(
+            name="Widget", gear_slots=1, bundle_size=1, item_type=ITEM_TYPE_COMMON
+        )
+        armory = Location(name="Armory", kind="inventory", max_gear_slots=50)
+        s.add_all([widget, armory])
+        s.flush()
+        s.add(InventoryEntry(location_id=armory.id, item_id=widget.id, quantity=20))
+        s.commit()
+    # 20 widgets = 20 slots > held cap 10 -> take fails, nothing moves
+    i = FakeInteraction("u1")
+    run(
+        gi._do_take(
+            i, location_name="Armory", item_name="Widget", quantity=20, edit_view=True
+        )
+    )
+    assert i.error is not None and "held items hold" in i.error
+    with dbsession() as s:
+        armory = s.scalar(select(Location).where(Location.name == "Armory"))
+        stack = s.scalar(
+            select(InventoryEntry).where(InventoryEntry.location_id == armory.id)
+        )
+        assert stack.quantity == 20  # unchanged
