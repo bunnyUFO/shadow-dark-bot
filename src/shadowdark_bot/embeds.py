@@ -440,7 +440,7 @@ def build_inventory_tab_embed(
 
 
 def build_roleplaying_embed(char: PlayerCharacter) -> discord.Embed:
-    """Roleplaying tab: background, languages, talents."""
+    """Roleplaying tab: background, languages, talents, additional info."""
     title, subtitle = _character_header(char)
     embed = discord.Embed(title=title, description=subtitle, color=CHARACTER_COLOR)
     embed.add_field(
@@ -451,6 +451,11 @@ def build_roleplaying_embed(char: PlayerCharacter) -> discord.Embed:
     )
     embed.add_field(
         name="Talents", value=(char.talents or "_(none)_")[:1024], inline=False
+    )
+    embed.add_field(
+        name="Additional Info",
+        value=(char.additional_info or "_(none)_")[:1024],
+        inline=False,
     )
     return embed
 

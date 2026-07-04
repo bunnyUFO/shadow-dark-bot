@@ -14,7 +14,13 @@ from shadowdark_bot.embeds import (
     build_location_summary_embed,
     fmt_slots,
 )
-from shadowdark_bot.models import ITEM_TYPE_MAGICAL, InventoryEntry, Item, Location
+from shadowdark_bot.models import (
+    ITEM_TYPE_MAGICAL,
+    InventoryEntry,
+    Item,
+    Location,
+    PlayerCharacter,
+)
 from shadowdark_bot.rules import stack_slots
 from shadowdark_bot.sharing import ShareableView, ShareButton
 
@@ -729,7 +735,9 @@ async def _do_add(
     with session_scope() as session:
         loc = session.scalar(
             select(Location).where(
-                Location.name == clean_location, Location.kind == "inventory"
+                Location.name == clean_location,
+                Location.kind == "inventory",
+                Location.owner_user_id.is_(None),
             )
         )
         if loc is None:
@@ -832,7 +840,9 @@ async def _do_take(
     with session_scope() as session:
         loc = session.scalar(
             select(Location).where(
-                Location.name == clean_location, Location.kind == "inventory"
+                Location.name == clean_location,
+                Location.kind == "inventory",
+                Location.owner_user_id.is_(None),
             )
         )
         if loc is None:
@@ -868,24 +878,64 @@ async def _do_take(
             )
             return
 
+        # Withdraw into the taker's character (held items), if they have one.
+        taker_id = str(interaction.user.id)
+        char = session.scalar(
+            select(PlayerCharacter).where(PlayerCharacter.user_id == taker_id)
+        )
+        added_to_char = False
+        if char is not None:
+            held, _stash = storage.ensure_character_locations(session, char)
+            existing = storage.find_catalog_stack(session, held.id, cat_item.id)
+            current = existing.quantity if existing else 0
+            delta = stack_slots(
+                current + quantity, cat_item.gear_slots, cat_item.bundle_size
+            ) - stack_slots(current, cat_item.gear_slots, cat_item.bundle_size)
+            used = storage.used_slots(storage.location_entries(session, held.id))
+            if used + delta > held.max_gear_slots:
+                await interaction.response.send_message(
+                    f"{failure}\nYour held items hold "
+                    f"{fmt_slots(used)}/{fmt_slots(held.max_gear_slots)} slots; "
+                    f"this would need {fmt_slots(delta)} more. "
+                    "Drop something or raise STR.",
+                    ephemeral=True,
+                )
+                return
+            storage.add_stack(session, held, quantity=quantity, item=cat_item)
+            added_to_char = True
+
         stack.quantity -= quantity
         emptied = stack.quantity == 0
+        remaining = 0 if emptied else stack.quantity
         if emptied:
             session.delete(stack)
 
+    dest = " into your character" if added_to_char else ""
     if emptied:
         confirmation = (
-            f"Took the last {quantity}× **{clean_item}** from **{clean_location}**. "
-            "Stack removed."
+            f"Took the last {quantity}× **{clean_item}** from "
+            f"**{clean_location}**{dest}. Stack removed."
         )
     else:
         confirmation = (
-            f"Took {quantity}× **{clean_item}** from **{clean_location}**. "
-            f"{stack.quantity} remaining."
+            f"Took {quantity}× **{clean_item}** from **{clean_location}**{dest}. "
+            f"{remaining} remaining."
         )
-    await _respond(
-        interaction, confirmation, clean_location, clean_item, edit_view
-    )
+    # After a take, return to the location's detail view (with updated items).
+    if edit_view:
+        payload = _build_detail_payload(clean_location)
+        if payload is not None:
+            embed, view = payload
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await interaction.response.defer()
+        await interaction.followup.send(
+            confirmation, view=ShareableView(), ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            confirmation, view=ShareableView(), ephemeral=True
+        )
 
 
 async def _respond(
