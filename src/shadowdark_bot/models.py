@@ -5,11 +5,13 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -69,25 +71,58 @@ class Item(Base):
     )
 
 
+# Character-owned location roles. A character gets one 'held' location (its
+# carried inventory, capacity = max(10, STR)) and one 'stash' location (10 slots).
+LOCATION_ROLE_HELD = "held"
+LOCATION_ROLE_STASH = "stash"
+
+
 class Location(Base):
     __tablename__ = "locations"
     __table_args__ = (
         CheckConstraint("kind IN ('inventory', 'treasury')", name="ck_locations_kind"),
+        CheckConstraint("role IN ('held', 'stash')", name="ck_locations_role"),
+        # Guild locations (no owner) keep globally-unique names; character-owned
+        # locations are looked up by (owner_user_id, role) so their display names
+        # may repeat (two characters can both be named "Bob").
+        Index(
+            "uq_locations_guild_name",
+            "name",
+            unique=True,
+            sqlite_where=text("owner_user_id IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
     kind: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     max_gear_slots: Mapped[float] = mapped_column(
         Float, nullable=False, default=0, server_default="0"
     )
+    # Set for character-owned locations: the owning Discord user id and the role
+    # ('held' or 'stash'). NULL/NULL for shared guild locations.
+    owner_user_id: Mapped[str | None] = mapped_column(String)
+    role: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()
     )
 
+    @property
+    def is_character_owned(self) -> bool:
+        return self.owner_user_id is not None
+
 
 class InventoryEntry(Base):
+    """A stack of items at a location.
+
+    Hybrid, like the old CharacterItem: `item_id` links the shared catalog
+    (reusing its gear_slots / bundle_size), or is NULL for a freeform typed item
+    whose `name`, `slots_each`, and `bundle_size` live on this row. Freeform rows
+    (item_id NULL) are exempt from the unique constraint — SQLite treats NULLs as
+    distinct — and are de-duped by name in code.
+    """
+
     __tablename__ = "inventory_entries"
     __table_args__ = (
         CheckConstraint("quantity > 0", name="ck_inventory_quantity_positive"),
@@ -96,8 +131,11 @@ class InventoryEntry(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     location_id: Mapped[int] = mapped_column(ForeignKey("locations.id"), nullable=False)
-    item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), nullable=False)
+    item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id"))
+    name: Mapped[str | None] = mapped_column(String)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    slots_each: Mapped[float | None] = mapped_column(Float)
+    bundle_size: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
     added_by: Mapped[str | None] = mapped_column(String)
     added_at: Mapped[datetime] = mapped_column(
@@ -105,7 +143,36 @@ class InventoryEntry(Base):
     )
 
     location: Mapped[Location] = relationship()
-    item: Mapped[Item] = relationship()
+    item: Mapped[Item | None] = relationship()
+
+    @property
+    def is_catalog(self) -> bool:
+        return self.item_id is not None
+
+    @property
+    def display_name(self) -> str:
+        if self.item_id is not None and self.item is not None:
+            return self.item.name
+        return self.name or "(unnamed)"
+
+    @property
+    def effective_gear_slots(self) -> float:
+        if self.item_id is not None and self.item is not None:
+            return self.item.gear_slots
+        return self.slots_each if self.slots_each is not None else 1.0
+
+    @property
+    def effective_bundle_size(self) -> int:
+        if self.item_id is not None and self.item is not None:
+            return self.item.bundle_size
+        return self.bundle_size if self.bundle_size is not None else 1
+
+    @property
+    def slot_cost(self) -> float:
+        """Bundle-aware gear-slot cost of this stack."""
+        return stack_slots(
+            self.quantity, self.effective_gear_slots, self.effective_bundle_size
+        )
 
 
 class TreasuryEntry(Base):
@@ -232,75 +299,9 @@ class PlayerCharacter(Base):
         DateTime, nullable=False, server_default=func.current_timestamp()
     )
 
-    items: Mapped[list["CharacterItem"]] = relationship(
-        back_populates="character", cascade="all, delete-orphan"
-    )
     spells: Mapped[list["CharacterSpell"]] = relationship(
         back_populates="character", cascade="all, delete-orphan"
     )
-
-
-class CharacterItem(Base):
-    """A stack of items a character is carrying.
-
-    Hybrid: `item_id` links to the shared catalog (reusing its gear_slots /
-    bundle_size), or is NULL for a freeform typed item whose `name`,
-    `slots_each`, and `bundle_size` live on this row.
-    """
-
-    __tablename__ = "character_items"
-    __table_args__ = (
-        CheckConstraint("quantity > 0", name="ck_character_items_quantity_positive"),
-        # One stack per catalog item. Freeform rows (item_id NULL) are exempt —
-        # SQLite treats NULLs as distinct — and are de-duped by name in code.
-        UniqueConstraint("character_id", "item_id", name="uq_character_item"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    character_id: Mapped[int] = mapped_column(
-        ForeignKey("player_characters.id"), nullable=False
-    )
-    item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id"))
-    name: Mapped[str | None] = mapped_column(String)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    slots_each: Mapped[float | None] = mapped_column(Float)
-    bundle_size: Mapped[int | None] = mapped_column(Integer)
-    notes: Mapped[str | None] = mapped_column(Text)
-    added_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.current_timestamp()
-    )
-
-    character: Mapped[PlayerCharacter] = relationship(back_populates="items")
-    item: Mapped[Item | None] = relationship()
-
-    @property
-    def is_catalog(self) -> bool:
-        return self.item_id is not None
-
-    @property
-    def display_name(self) -> str:
-        if self.item_id is not None and self.item is not None:
-            return self.item.name
-        return self.name or "(unnamed)"
-
-    @property
-    def effective_gear_slots(self) -> float:
-        if self.item_id is not None and self.item is not None:
-            return self.item.gear_slots
-        return self.slots_each if self.slots_each is not None else 1.0
-
-    @property
-    def effective_bundle_size(self) -> int:
-        if self.item_id is not None and self.item is not None:
-            return self.item.bundle_size
-        return self.bundle_size if self.bundle_size is not None else 1
-
-    @property
-    def slot_cost(self) -> float:
-        """Bundle-aware gear-slot cost of this stack."""
-        return stack_slots(
-            self.quantity, self.effective_gear_slots, self.effective_bundle_size
-        )
 
 
 class Spell(Base):

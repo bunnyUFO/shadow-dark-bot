@@ -16,29 +16,36 @@ from discord.ext import commands
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from shadowdark_bot import storage
 from shadowdark_bot.currency import format_cp, parse_value_string
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import (
     CHARACTER_COLOR,
-    build_character_inventory_embed,
+    build_character_location_embed,
     build_character_spells_embed,
     build_combat_embed,
     build_inventory_tab_embed,
+    build_item_embed,
     build_roleplaying_embed,
     build_spell_embed,
     fmt_slots,
 )
 from shadowdark_bot.models import (
-    CharacterItem,
+    ITEM_TYPE_MAGICAL,
+    LOCATION_ROLE_HELD,
+    LOCATION_ROLE_STASH,
+    Borrow,
     CharacterSpell,
+    InventoryEntry,
     Item,
+    Location,
     PlayerCharacter,
     Spell,
+    TreasuryEntry,
 )
 from shadowdark_bot.rules import (
     ABILITIES,
     SPELL_ABILITIES,
-    carry_capacity,
     stack_slots,
 )
 from shadowdark_bot.sharing import ShareableView, ShareButton
@@ -52,22 +59,19 @@ VIEW_TIMEOUT_SECONDS = 300
 
 
 def _load_character(session: Session, user_id: str) -> PlayerCharacter | None:
-    """Load a character with its items and spells (and their reference rows).
-
-    Uses selectinload for the two collections so they don't cross-join.
-    """
+    """Load a character with its spells (and their reference rows). Carried items
+    now live in the character's held/stash locations — see the storage helpers."""
     return session.scalars(
         select(PlayerCharacter)
         .options(
-            selectinload(PlayerCharacter.items).joinedload(CharacterItem.item),
             selectinload(PlayerCharacter.spells).joinedload(CharacterSpell.spell),
         )
         .where(PlayerCharacter.user_id == user_id)
     ).first()
 
 
-def _sorted_items(char: PlayerCharacter) -> list[CharacterItem]:
-    return sorted(char.items, key=lambda c: c.display_name.lower())
+def _location_by_role(session: Session, user_id: str, role: str) -> Location | None:
+    return storage.character_location(session, user_id, role)
 
 
 def _sorted_spells(char: PlayerCharacter) -> list[CharacterSpell]:
@@ -146,9 +150,23 @@ def _parse_optional_int(raw: str, *, minimum: int | None = None) -> int | None:
 SHEET_TABS = ("combat", "inventory", "roleplaying")
 
 
-def _build_tab_embed(char: PlayerCharacter, tab: str) -> discord.Embed:
+def _build_tab_embed(
+    session: Session, char: PlayerCharacter, tab: str, *, include_stash: bool = True
+) -> discord.Embed:
     if tab == "inventory":
-        return build_inventory_tab_embed(char, _sorted_items(char))
+        held, stash = storage.ensure_character_locations(session, char)
+        held_entries = storage.location_entries(session, held.id)
+        stash_entries = (
+            storage.location_entries(session, stash.id) if include_stash else None
+        )
+        return build_inventory_tab_embed(
+            char,
+            held_entries,
+            held.max_gear_slots,
+            stash_entries,
+            stash.max_gear_slots,
+            include_stash=include_stash,
+        )
     if tab == "roleplaying":
         return build_roleplaying_embed(char)
     return build_combat_embed(char, _sorted_spells(char))
@@ -161,39 +179,52 @@ def _build_sheet_payload(
         char = _load_character(session, user_id)
         if char is None:
             return None
-        embed = _build_tab_embed(char, tab)
+        embed = _build_tab_embed(session, char, tab)
     return embed, CharacterSheetView(user_id, tab)
 
 
-def _build_inventory_payload(
-    user_id: str,
-) -> tuple[discord.Embed, "CharacterInventoryView"] | None:
+def _build_manage_location_payload(
+    user_id: str, role: str
+) -> tuple[discord.Embed, "CharacterLocationView"] | None:
     with session_scope() as session:
         char = _load_character(session, user_id)
         if char is None:
             return None
-        items = _sorted_items(char)
-        embed = build_character_inventory_embed(char, items)
-        choices = [(ci.id, f"{ci.quantity}× {ci.display_name}") for ci in items]
-    return embed, CharacterInventoryView(user_id, choices)
+        held, stash = storage.ensure_character_locations(session, char)
+        loc = held if role == LOCATION_ROLE_HELD else stash
+        entries = storage.location_entries(session, loc.id)
+        embed = build_character_location_embed(loc, entries)
+        choices = [(e.id, f"{e.quantity}× {e.display_name}") for e in entries]
+    return embed, CharacterLocationView(user_id, role, choices)
 
 
-def _item_detail_embed(ci: CharacterItem) -> discord.Embed:
-    """Detail embed for one carried stack (shared by owner + read-only views)."""
-    embed = discord.Embed(title=ci.display_name, color=CHARACTER_COLOR)
+def _item_detail_embed(ci: InventoryEntry) -> discord.Embed:
+    """Detail embed for one carried stack (shared by owner + read-only views).
+
+    Catalog items reuse the `/items info` renderer (description, gear slots,
+    type, value, type color); freeform items show their typed description. Both
+    then get a Carrying field with the stack's quantity and slot cost.
+    """
+    if ci.is_catalog and ci.item is not None:
+        embed = build_item_embed(ci.item)
+    else:
+        embed = discord.Embed(title=ci.display_name, color=CHARACTER_COLOR)
+        if ci.notes:
+            embed.description = ci.notes
+
     per = fmt_slots(ci.effective_gear_slots)
     cost = f"{fmt_slots(ci.slot_cost)} ({per} each"
     if ci.effective_bundle_size > 1:
         cost += f", {ci.effective_bundle_size}/slot"
     cost += ")"
-    lines = [
+    carry_lines = [
         f"**Quantity:** {ci.quantity}",
         f"**Slot cost:** {cost}",
         f"**Source:** {'Catalog' if ci.is_catalog else 'Freeform'}",
     ]
-    if ci.notes:
-        lines.append(f"_{ci.notes}_")
-    embed.description = "\n".join(lines)
+    if ci.is_catalog and ci.notes:
+        carry_lines.append(f"_{ci.notes}_")
+    embed.add_field(name="Carrying", value="\n".join(carry_lines), inline=False)
     return embed
 
 
@@ -208,19 +239,19 @@ def _char_spell_detail_embed(cs: CharacterSpell) -> discord.Embed:
 
 
 def _build_item_detail_payload(
-    user_id: str, ci_id: int
+    user_id: str, role: str, entry_id: int
 ) -> tuple[discord.Embed, "CharacterItemDetailView"] | None:
     with session_scope() as session:
-        char = _load_character(session, user_id)
-        if char is None:
+        loc = _location_by_role(session, user_id, role)
+        if loc is None:
             return None
-        ci = next((c for c in char.items if c.id == ci_id), None)
-        if ci is None:
+        entry = session.get(InventoryEntry, entry_id)
+        if entry is None or entry.location_id != loc.id:
             return None
-        embed = _item_detail_embed(ci)
-        qty = ci.quantity
-        name = ci.display_name
-    return embed, CharacterItemDetailView(user_id, ci_id, qty, name)
+        embed = _item_detail_embed(entry)
+        name = entry.display_name
+        qty = entry.quantity
+    return embed, CharacterItemDetailView(user_id, role, entry_id, name, qty)
 
 
 def _build_show_payload(
@@ -230,7 +261,8 @@ def _build_show_payload(
         char = _load_character(session, target_id)
         if char is None:
             return None
-        embed = _build_tab_embed(char, tab)
+        # Show never exposes the stash — held items only.
+        embed = _build_tab_embed(session, char, tab, include_stash=False)
         spell_choices: list[tuple[int, str]] = []
         item_choices: list[tuple[int, str]] = []
         if tab == "combat":
@@ -243,10 +275,12 @@ def _build_show_payload(
                 for cs in _sorted_spells(char)
             ]
         elif tab == "inventory":
-            item_choices = [
-                (ci.id, f"{ci.quantity}× {ci.display_name}")
-                for ci in _sorted_items(char)
-            ]
+            held = _location_by_role(session, target_id, LOCATION_ROLE_HELD)
+            if held is not None:
+                item_choices = [
+                    (e.id, f"{e.quantity}× {e.display_name}")
+                    for e in storage.location_entries(session, held.id)
+                ]
     return embed, CharacterShowView(target_id, tab, spell_choices, item_choices)
 
 
@@ -265,16 +299,16 @@ def _build_show_spell_detail_payload(
 
 
 def _build_show_item_detail_payload(
-    target_id: str, ci_id: int
+    target_id: str, entry_id: int
 ) -> tuple[discord.Embed, "CharacterShowDetailView"] | None:
     with session_scope() as session:
-        char = _load_character(session, target_id)
-        if char is None:
+        held = _location_by_role(session, target_id, LOCATION_ROLE_HELD)
+        if held is None:
             return None
-        ci = next((c for c in char.items if c.id == ci_id), None)
-        if ci is None:
+        entry = session.get(InventoryEntry, entry_id)
+        if entry is None or entry.location_id != held.id:
             return None
-        embed = _item_detail_embed(ci)
+        embed = _item_detail_embed(entry)
     return embed, CharacterShowDetailView(target_id, "inventory")
 
 
@@ -386,10 +420,15 @@ async def _refresh_sheet(
 # ---------- Write logic (carry / add-more / take / remove) ----------
 
 
+def _role_label(role: str) -> str:
+    return "held items" if role == LOCATION_ROLE_HELD else "stash"
+
+
 async def _do_carry(
     interaction: discord.Interaction,
     *,
     user_id: str,
+    role: str = LOCATION_ROLE_HELD,
     item_name: str,
     quantity: int,
     freeform_slots: float = 1.0,
@@ -422,82 +461,65 @@ async def _do_carry(
                 ephemeral=True,
             )
             return
+        held, stash = storage.ensure_character_locations(session, char)
+        loc = held if role == LOCATION_ROLE_HELD else stash
 
         cat_item = session.scalar(select(Item).where(Item.name == clean_item))
-
-        stack: CharacterItem | None = None
         if cat_item is not None:
-            stack = next(
-                (c for c in char.items if c.item_id == cat_item.id), None
-            )
-        else:
-            stack = next(
-                (
-                    c
-                    for c in char.items
-                    if c.item_id is None
-                    and (c.name or "").lower() == clean_item.lower()
-                ),
-                None,
-            )
-
-        if cat_item is not None:
+            existing = storage.find_catalog_stack(session, loc.id, cat_item.id)
             gear_slots, bundle = cat_item.gear_slots, cat_item.bundle_size
-        elif stack is not None:
-            gear_slots, bundle = stack.effective_gear_slots, stack.effective_bundle_size
         else:
-            gear_slots, bundle = freeform_slots, 1
+            existing = storage.find_freeform_stack(session, loc.id, clean_item)
+            if existing is not None:
+                gear_slots = existing.effective_gear_slots
+                bundle = existing.effective_bundle_size
+            else:
+                gear_slots, bundle = freeform_slots, 1
 
-        current_qty = stack.quantity if stack else 0
-        new_qty = current_qty + quantity
-        delta = stack_slots(new_qty, gear_slots, bundle) - stack_slots(
+        current_qty = existing.quantity if existing else 0
+        delta = stack_slots(current_qty + quantity, gear_slots, bundle) - stack_slots(
             current_qty, gear_slots, bundle
         )
-        used = sum(c.slot_cost for c in char.items)
-        free = carry_capacity(char.str_score)
+        used = storage.used_slots(storage.location_entries(session, loc.id))
+        cap = loc.max_gear_slots
         new_used = used + delta
-        if new_used > free:
+        if new_used > cap:
             await interaction.response.send_message(
-                f"{failure}\nYou're carrying {fmt_slots(used)}/{free} slots; "
-                f"this would need {fmt_slots(delta)} more ({fmt_slots(new_used)} total). "
-                "Drop something or raise STR.",
+                f"{failure}\nYour {_role_label(role)} holds "
+                f"{fmt_slots(used)}/{fmt_slots(cap)} slots; this would need "
+                f"{fmt_slots(delta)} more ({fmt_slots(new_used)} total).",
                 ephemeral=True,
             )
             return
 
-        if stack is None:
-            if cat_item is not None:
-                stack = CharacterItem(
-                    character_id=char.id, item_id=cat_item.id, quantity=quantity
-                )
-            else:
-                stack = CharacterItem(
-                    character_id=char.id,
-                    name=clean_item,
-                    quantity=quantity,
-                    slots_each=freeform_slots,
-                    bundle_size=1,
-                    notes=(notes or None),
-                )
-            session.add(stack)
-        else:
-            stack.quantity = new_qty
+        stack = storage.add_stack(
+            session,
+            loc,
+            quantity=quantity,
+            item=cat_item,
+            freeform_name=None if cat_item is not None else clean_item,
+            slots_each=freeform_slots,
+            bundle_size=1,
+            notes=None if cat_item is not None else notes,
+        )
         _touch(char)
         session.flush()
         display = stack.display_name
+        loc_name = loc.name
 
     confirmation = (
-        f"Added {quantity}× **{display}** to your inventory. "
-        f"Carrying {fmt_slots(new_used)}/{free} slots."
+        f"Added {quantity}× **{display}** to **{loc_name}**. "
+        f"{fmt_slots(new_used)}/{fmt_slots(cap)} slots used."
     )
-    await _respond(interaction, confirmation, user_id, edit_view)
+    await _respond(interaction, confirmation, user_id, role, edit_view)
 
 
 async def _do_add_more(
     interaction: discord.Interaction,
     *,
     user_id: str,
-    ci_id: int,
+    role: str,
+    entry_id: int,
     quantity: int,
 ) -> None:
     failure = "**Failed to add more.**"
@@ -508,121 +530,322 @@ async def _do_add_more(
         return
     with session_scope() as session:
         char = _load_character(session, user_id)
-        if char is None:
+        loc = _location_by_role(session, user_id, role)
+        entry = session.get(InventoryEntry, entry_id)
+        if loc is None or entry is None or entry.location_id != loc.id:
             await interaction.response.send_message(
-                f"{failure}\nCharacter not found.", ephemeral=True
+                f"{failure}\nThat item is no longer there.", ephemeral=True
             )
             return
-        ci = next((c for c in char.items if c.id == ci_id), None)
-        if ci is None:
-            await interaction.response.send_message(
-                f"{failure}\nThat item is no longer in your inventory.", ephemeral=True
-            )
-            return
-        gear_slots, bundle = ci.effective_gear_slots, ci.effective_bundle_size
-        delta = stack_slots(ci.quantity + quantity, gear_slots, bundle) - stack_slots(
-            ci.quantity, gear_slots, bundle
-        )
-        used = sum(c.slot_cost for c in char.items)
-        free = carry_capacity(char.str_score)
+        gear_slots, bundle = entry.effective_gear_slots, entry.effective_bundle_size
+        delta = stack_slots(
+            entry.quantity + quantity, gear_slots, bundle
+        ) - stack_slots(entry.quantity, gear_slots, bundle)
+        used = storage.used_slots(storage.location_entries(session, loc.id))
+        cap = loc.max_gear_slots
         new_used = used + delta
-        if new_used > free:
+        if new_used > cap:
             await interaction.response.send_message(
-                f"{failure}\nYou're carrying {fmt_slots(used)}/{free} slots; "
-                f"this would need {fmt_slots(delta)} more.",
+                f"{failure}\nYour {_role_label(role)} holds "
+                f"{fmt_slots(used)}/{fmt_slots(cap)} slots; this would need "
+                f"{fmt_slots(delta)} more.",
                 ephemeral=True,
             )
             return
-        ci.quantity += quantity
-        _touch(char)
+        entry.quantity += quantity
+        if char is not None:
+            _touch(char)
         session.flush()
-        display = ci.display_name
+        display = entry.display_name
 
     confirmation = (
-        f"Added {quantity}× **{display}**. Carrying {fmt_slots(new_used)}/{free} slots."
+        f"Added {quantity}× **{display}**. {fmt_slots(new_used)}/{fmt_slots(cap)} "
+        "slots used."
     )
-    await _respond(interaction, confirmation, user_id, edit_view=True)
+    await _respond(interaction, confirmation, user_id, role, edit_view=True)
 
 
-async def _do_take(
+def _return_open_borrows(
+    session: Session, user_id: str, item_id: int, limit: int | None = None
+) -> list[int]:
+    """Close up to `limit` of this user's open treasury borrows of a catalog
+    item (oldest first) and mark those entries available again. Returns the
+    affected treasury entry ids.
+
+    Used when a borrowed item is removed from a character's inventory — dropping
+    it from your pack returns it to the treasury, one borrow per copy removed.
+    Inventory isn't adjusted here (the caller has already dropped the copies)."""
+    open_borrows = list(
+        session.scalars(
+            select(Borrow)
+            .join(TreasuryEntry, Borrow.treasury_entry_id == TreasuryEntry.id)
+            .where(
+                Borrow.borrower_id == user_id,
+                Borrow.returned_at.is_(None),
+                TreasuryEntry.item_id == item_id,
+            )
+            .order_by(Borrow.borrowed_at)
+        ).all()
+    )
+    if limit is not None:
+        open_borrows = open_borrows[:limit]
+    now = datetime.now(UTC).replace(tzinfo=None)
+    returned: list[int] = []
+    for borrow in open_borrows:
+        borrow.returned_at = now
+        entry = session.get(TreasuryEntry, borrow.treasury_entry_id)
+        if entry is not None:
+            entry.status = "available"
+        returned.append(borrow.treasury_entry_id)
+    return returned
+
+
+async def _do_remove(
     interaction: discord.Interaction,
     *,
     user_id: str,
-    ci_id: int,
-    quantity: int,
+    role: str,
+    entry_id: int,
+    quantity: int | None = None,
 ) -> None:
-    failure = "**Failed to take.**"
-    if quantity < 1:
+    """Remove a stack from a character location. `quantity=None` drops the whole
+    stack; a value drops that many copies (deleting the stack if it empties)."""
+    failure = "**Failed to remove.**"
+    if quantity is not None and quantity < 1:
         await interaction.response.send_message(
             f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
         )
         return
     with session_scope() as session:
         char = _load_character(session, user_id)
-        if char is None:
+        loc = _location_by_role(session, user_id, role)
+        entry = session.get(InventoryEntry, entry_id)
+        if loc is None or entry is None or entry.location_id != loc.id:
             await interaction.response.send_message(
-                f"{failure}\nCharacter not found.", ephemeral=True
+                f"{failure}\nThat item is already gone.", ephemeral=True
             )
             return
-        ci = next((c for c in char.items if c.id == ci_id), None)
-        if ci is None:
+        if quantity is not None and quantity > entry.quantity:
             await interaction.response.send_message(
-                f"{failure}\nThat item is no longer in your inventory.", ephemeral=True
-            )
-            return
-        if quantity > ci.quantity:
-            await interaction.response.send_message(
-                f"{failure}\nYou only have {ci.quantity}× **{ci.display_name}**.",
+                f"{failure}\nYou only have {entry.quantity}× **{entry.display_name}**.",
                 ephemeral=True,
             )
             return
-        display = ci.display_name
-        ci.quantity -= quantity
-        emptied = ci.quantity == 0
-        if emptied:
-            session.delete(ci)
-        _touch(char)
+        display = entry.display_name
+        item_id = entry.item_id
+        removed = entry.quantity if quantity is None else quantity
+        entry.quantity -= removed
+        if entry.quantity == 0:
+            session.delete(entry)
+        # Borrowed treasury copies removed from your pack are returned to the
+        # treasury, one per copy dropped. Freeform items have no treasury link.
+        returned = (
+            _return_open_borrows(session, user_id, item_id, limit=removed)
+            if item_id is not None
+            else []
+        )
+        if char is not None:
+            _touch(char)
 
-    confirmation = (
-        f"Dropped the last {quantity}× **{display}**."
-        if emptied
-        else f"Dropped {quantity}× **{display}**."
-    )
-    await _respond(interaction, confirmation, user_id, edit_view=True)
+    if quantity is None:
+        confirmation = f"Removed **{display}**."
+    else:
+        confirmation = f"Removed {removed}× **{display}**."
+    if returned:
+        ids = ", ".join(f"#{eid}" for eid in returned)
+        noun = "it" if len(returned) == 1 else "them"
+        confirmation += f" Returned {noun} to the treasury ({ids})."
+    await _respond(interaction, confirmation, user_id, role, edit_view=True)
 
 
-async def _do_remove(
-    interaction: discord.Interaction, *, user_id: str, ci_id: int
+# ---------- Give ----------
+
+
+def _give_targets(
+    session: Session, user_id: str, source: Location
+) -> list[tuple[int, str]]:
+    """Valid give destinations: guild inventory locations, your own other
+    location, and other characters' held locations (not their stashes)."""
+    locs = session.scalars(
+        select(Location)
+        .where(Location.kind == "inventory")
+        .order_by(Location.owner_user_id.is_(None).desc(), Location.name)
+    ).all()
+    targets: list[tuple[int, str]] = []
+    for loc in locs:
+        if loc.id == source.id:
+            continue
+        if loc.owner_user_id is None:
+            label = f"📦 {loc.name}"
+        elif loc.owner_user_id == user_id:
+            label = (
+                "🧍 Your held items"
+                if loc.role == LOCATION_ROLE_HELD
+                else "🎒 Your stash"
+            )
+        else:
+            if loc.role == LOCATION_ROLE_STASH:
+                continue  # another character's stash is private
+            label = f"🧑 {loc.name} (held)"
+        targets.append((loc.id, label))
+    return targets[:25]
+
+
+def _validate_give_target(
+    user_id: str, source: Location, target: Location | None, entry: InventoryEntry
+) -> str | None:
+    """Return an error string if the target is invalid, else None."""
+    if target is None:
+        return "That destination no longer exists."
+    if target.kind != "inventory":
+        return "You can only give into inventory locations."
+    if target.id == source.id:
+        return "That's where the item already is."
+    if (
+        target.owner_user_id is not None
+        and target.owner_user_id != user_id
+        and target.role == LOCATION_ROLE_STASH
+    ):
+        return "You can't give into another character's stash."
+    if target.owner_user_id is None:
+        if not entry.is_catalog:
+            return (
+                "Freeform items can only be given to another character, not "
+                "guild inventory."
+            )
+        if entry.item is not None and entry.item.item_type == ITEM_TYPE_MAGICAL:
+            return (
+                "Magical items can't go into guild inventory — they belong in "
+                "the treasury."
+            )
+    return None
+
+
+def _build_give_payload(
+    user_id: str, role: str, entry_id: int
+) -> tuple[discord.Embed, "GiveTargetView"] | None:
+    with session_scope() as session:
+        source = _location_by_role(session, user_id, role)
+        if source is None:
+            return None
+        entry = session.get(InventoryEntry, entry_id)
+        if entry is None or entry.location_id != source.id:
+            return None
+        targets = _give_targets(session, user_id, source)
+        name = entry.display_name
+        qty = entry.quantity
+        embed = discord.Embed(title=f"Give {name}", color=CHARACTER_COLOR)
+        if targets:
+            embed.description = (
+                f"You have {qty}× **{name}**. Choose where to give it."
+            )
+        else:
+            embed.description = "There's nowhere valid to give this right now."
+    return embed, GiveTargetView(user_id, role, entry_id, name, qty, targets)
+
+
+async def _do_give(
+    interaction: discord.Interaction,
+    *,
+    user_id: str,
+    role: str,
+    entry_id: int,
+    target_location_id: int,
+    quantity: int | None = None,
 ) -> None:
+    failure = "**Failed to give.**"
+    if quantity is not None and quantity < 1:
+        await interaction.response.send_message(
+            f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
+        )
+        return
     with session_scope() as session:
         char = _load_character(session, user_id)
-        if char is None:
+        source = _location_by_role(session, user_id, role)
+        entry = session.get(InventoryEntry, entry_id)
+        if source is None or entry is None or entry.location_id != source.id:
             await interaction.response.send_message(
-                "**Failed to remove.**\nCharacter not found.", ephemeral=True
+                f"{failure}\nThat item is no longer there.", ephemeral=True
             )
             return
-        ci = next((c for c in char.items if c.id == ci_id), None)
-        if ci is None:
+        target = session.get(Location, target_location_id)
+        error = _validate_give_target(user_id, source, target, entry)
+        if error is not None:
             await interaction.response.send_message(
-                "**Failed to remove.**\nThat item is already gone.", ephemeral=True
+                f"{failure}\n{error}", ephemeral=True
             )
             return
-        display = ci.display_name
-        session.delete(ci)
-        _touch(char)
+        give_qty = entry.quantity if quantity is None else quantity
+        if give_qty > entry.quantity:
+            await interaction.response.send_message(
+                f"{failure}\nYou only have {entry.quantity}× **{entry.display_name}**.",
+                ephemeral=True,
+            )
+            return
 
-    await _respond(
-        interaction, f"Removed **{display}** from your inventory.", user_id, edit_view=True
-    )
+        # Capacity check on the target.
+        gear_slots, bundle = entry.effective_gear_slots, entry.effective_bundle_size
+        if entry.item_id is not None:
+            tstack = storage.find_catalog_stack(session, target.id, entry.item_id)
+        else:
+            tstack = storage.find_freeform_stack(
+                session, target.id, entry.display_name
+            )
+        texisting = tstack.quantity if tstack else 0
+        delta = stack_slots(texisting + give_qty, gear_slots, bundle) - stack_slots(
+            texisting, gear_slots, bundle
+        )
+        tused = storage.used_slots(storage.location_entries(session, target.id))
+        if tused + delta > target.max_gear_slots:
+            await interaction.response.send_message(
+                f"{failure}\n**{target.name}** holds "
+                f"{fmt_slots(tused)}/{fmt_slots(target.max_gear_slots)} slots; "
+                f"this would need {fmt_slots(delta)} more.",
+                ephemeral=True,
+            )
+            return
+
+        # Snapshot the source stack before mutating it.
+        src_item = entry.item
+        src_name = entry.name
+        src_slots = entry.slots_each if entry.slots_each is not None else 1.0
+        src_bundle = entry.bundle_size if entry.bundle_size is not None else 1
+        src_notes = entry.notes
+        display = entry.display_name
+        target_name = target.name
+
+        entry.quantity -= give_qty
+        if entry.quantity == 0:
+            session.delete(entry)
+        storage.add_stack(
+            session,
+            target,
+            quantity=give_qty,
+            item=src_item,
+            freeform_name=None if src_item is not None else src_name,
+            slots_each=src_slots,
+            bundle_size=src_bundle,
+            notes=None if src_item is not None else src_notes,
+        )
+        if char is not None:
+            _touch(char)
+        session.flush()
+
+    confirmation = f"Gave {give_qty}× **{display}** to **{target_name}**."
+    await _respond(interaction, confirmation, user_id, role, edit_view=True)
 
 
 async def _respond(
-    interaction: discord.Interaction, confirmation: str, user_id: str, edit_view: bool
+    interaction: discord.Interaction,
+    confirmation: str,
+    user_id: str,
+    role: str,
+    edit_view: bool,
 ) -> None:
-    """For interactive (edit_view) actions, refresh the inventory view in place
-    and follow up with an ephemeral confirmation; otherwise reply directly."""
+    """For interactive (edit_view) actions, refresh the managed location view in
+    place and follow up with an ephemeral confirmation; otherwise reply directly."""
     if edit_view:
-        payload = _build_inventory_payload(user_id)
+        payload = _build_manage_location_payload(user_id, role)
         if payload is not None:
             embed, view = payload
             await interaction.response.edit_message(embed=embed, view=view)
@@ -850,6 +1073,8 @@ class EditStatsModal(discord.ui.Modal):
             char.spell_ability = spell_ability
             _touch(char)
             session.flush()
+            # STR drives held-inventory capacity — keep the held location in sync.
+            storage.ensure_character_locations(session, char)
         await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "combat"))
 
 
@@ -1124,17 +1349,21 @@ class EditIdentityModal(discord.ui.Modal):
             char.alignment = alignment
             _touch(char)
             session.flush()
+            # Create (on first save) or rename this character's storage locations.
+            storage.ensure_character_locations(session, char)
 
         await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "roleplaying"))
 
 
 class AddItemModal(discord.ui.Modal):
-    """Add a carried item by name. A name matching the catalog links to it;
-    otherwise a freeform stack is created with the given per-item slot cost."""
+    """Add an item by name to a character location (held or stash). A name
+    matching the catalog links to it; otherwise a freeform stack is created with
+    the given per-item slot cost."""
 
-    def __init__(self, user_id: str) -> None:
+    def __init__(self, user_id: str, role: str = LOCATION_ROLE_HELD) -> None:
         super().__init__(title="Add an item")
         self.user_id = user_id
+        self.role = role
         self._name = discord.ui.TextInput(
             label="Item name (catalog name links it)",
             required=True,
@@ -1181,6 +1410,7 @@ class AddItemModal(discord.ui.Modal):
         await _do_carry(
             interaction,
             user_id=self.user_id,
+            role=self.role,
             item_name=str(self._name.value),
             quantity=quantity,
             freeform_slots=freeform_slots,
@@ -1190,13 +1420,25 @@ class AddItemModal(discord.ui.Modal):
 
 
 class _QuantityModal(discord.ui.Modal):
-    """Shared single-quantity modal for the item detail Add-more / Take buttons."""
+    """Single-quantity modal for the item detail Add-more / Remove / Give
+    buttons. `target_id` is only used by the Give action."""
 
-    def __init__(self, title: str, user_id: str, ci_id: int, *, action: str) -> None:
+    def __init__(
+        self,
+        title: str,
+        user_id: str,
+        role: str,
+        entry_id: int,
+        *,
+        action: str = "add",
+        target_id: int | None = None,
+    ) -> None:
         super().__init__(title=title[:45])
         self.user_id = user_id
-        self.ci_id = ci_id
+        self.role = role
+        self.entry_id = entry_id
         self.action = action
+        self.target_id = target_id
         self._qty = discord.ui.TextInput(
             label="Quantity", required=True, default="1", max_length=8
         )
@@ -1210,13 +1452,30 @@ class _QuantityModal(discord.ui.Modal):
                 "Quantity must be a whole number.", ephemeral=True
             )
             return
-        if self.action == "add":
-            await _do_add_more(
-                interaction, user_id=self.user_id, ci_id=self.ci_id, quantity=quantity
+        if self.action == "remove":
+            await _do_remove(
+                interaction,
+                user_id=self.user_id,
+                role=self.role,
+                entry_id=self.entry_id,
+                quantity=quantity,
+            )
+        elif self.action == "give":
+            await _do_give(
+                interaction,
+                user_id=self.user_id,
+                role=self.role,
+                entry_id=self.entry_id,
+                target_location_id=self.target_id,
+                quantity=quantity,
             )
         else:
-            await _do_take(
-                interaction, user_id=self.user_id, ci_id=self.ci_id, quantity=quantity
+            await _do_add_more(
+                interaction,
+                user_id=self.user_id,
+                role=self.role,
+                entry_id=self.entry_id,
+                quantity=quantity,
             )
 
 
@@ -1298,7 +1557,7 @@ class _EditButton(discord.ui.Button):
 
 
 class _SubViewButton(discord.ui.Button):
-    """Swaps to a sub-view (Manage Inventory / Manage Spells)."""
+    """Swaps to a sub-view (Manage Spells)."""
 
     def __init__(self, label: str, builder, row: int) -> None:
         super().__init__(label=label, style=discord.ButtonStyle.success, row=row)
@@ -1307,6 +1566,25 @@ class _SubViewButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction) -> None:
         view: CharacterSheetView = self.view  # type: ignore[assignment]
         payload = self.builder(view.user_id)
+        if payload is None:
+            await interaction.response.send_message(
+                "Character not found.", ephemeral=True
+            )
+            return
+        embed, sub_view = payload
+        await interaction.response.edit_message(embed=embed, view=sub_view)
+
+
+class _ManageLocationButton(discord.ui.Button):
+    """Opens the manage view for one of the character's locations (held/stash)."""
+
+    def __init__(self, label: str, role: str, row: int) -> None:
+        super().__init__(label=label, style=discord.ButtonStyle.success, row=row)
+        self.role = role
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: CharacterSheetView = self.view  # type: ignore[assignment]
+        payload = _build_manage_location_payload(view.user_id, self.role)
         if payload is None:
             await interaction.response.send_message(
                 "Character not found.", ephemeral=True
@@ -1335,8 +1613,9 @@ class CharacterSheetView(_OwnerView):
             )
             self.add_item(_SubViewButton("Manage Spells", _build_spells_payload, 2))
         elif tab == "inventory":
+            self.add_item(_ManageLocationButton("Manage Held", LOCATION_ROLE_HELD, 1))
             self.add_item(
-                _SubViewButton("Manage Inventory", _build_inventory_payload, 1)
+                _ManageLocationButton("Manage Stash", LOCATION_ROLE_STASH, 1)
             )
             self.add_item(_EditButton("Edit Gold", EditGoldModal.from_char, 1))
         else:  # roleplaying
@@ -1365,13 +1644,19 @@ class _DeleteButton(discord.ui.Button):
                 )
                 return
             name = char.name
-            count = len(char.items)
+            held = _location_by_role(session, view.user_id, LOCATION_ROLE_HELD)
+            stash = _location_by_role(session, view.user_id, LOCATION_ROLE_STASH)
+            count = sum(
+                len(storage.location_entries(session, loc.id))
+                for loc in (held, stash)
+                if loc is not None
+            )
         embed = discord.Embed(
             title="Delete character?",
             description=(
                 f"Are you sure you want to delete **{name}**? "
-                f"This also drops its {count} carried stack(s) and all known "
-                "spells, and can't be undone."
+                f"This also drops its {count} stored stack(s) (held + stash) and "
+                "all known spells, and can't be undone."
             ),
             color=discord.Color.red(),
         )
@@ -1381,43 +1666,53 @@ class _DeleteButton(discord.ui.Button):
 
 
 class CharacterItemSelect(discord.ui.Select):
-    def __init__(self, user_id: str, choices: list[tuple[int, str]]) -> None:
+    def __init__(
+        self, user_id: str, role: str, choices: list[tuple[int, str]]
+    ) -> None:
         options = [
             discord.SelectOption(label=label[:100], value=str(cid))
             for cid, label in choices[:25]
         ]
         super().__init__(
-            placeholder="Inspect a carried item…",
+            placeholder="Inspect an item…",
             options=options,
             min_values=1,
             max_values=1,
             row=0,
         )
         self.user_id = user_id
+        self.role = role
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        payload = _build_item_detail_payload(self.user_id, int(self.values[0]))
+        payload = _build_item_detail_payload(
+            self.user_id, self.role, int(self.values[0])
+        )
         if payload is None:
             await interaction.response.send_message(
-                "That item is no longer in your inventory.", ephemeral=True
+                "That item is no longer there.", ephemeral=True
             )
             return
         embed, view = payload
         await interaction.response.edit_message(embed=embed, view=view)
 
 
-class CharacterInventoryView(_OwnerView):
-    def __init__(self, user_id: str, choices: list[tuple[int, str]]) -> None:
+class CharacterLocationView(_OwnerView):
+    """Manage one of the character's locations (held or stash)."""
+
+    def __init__(
+        self, user_id: str, role: str, choices: list[tuple[int, str]]
+    ) -> None:
         super().__init__(user_id)
+        self.role = role
         if choices:
-            self.add_item(CharacterItemSelect(user_id, choices))
+            self.add_item(CharacterItemSelect(user_id, role, choices))
         self.add_item(ShareButton(row=4))
 
     @discord.ui.button(label="Add item", style=discord.ButtonStyle.success, row=1)
     async def add_item_btn(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        await interaction.response.send_modal(AddItemModal(self.user_id))
+        await interaction.response.send_modal(AddItemModal(self.user_id, self.role))
 
     @discord.ui.button(
         label="← Back to sheet", style=discord.ButtonStyle.primary, row=1
@@ -1436,58 +1731,183 @@ class CharacterInventoryView(_OwnerView):
 
 
 class _AddMoreButton(discord.ui.Button):
-    def __init__(self, user_id: str, ci_id: int, item_name: str) -> None:
+    def __init__(self, user_id: str, role: str, entry_id: int, item_name: str) -> None:
         super().__init__(label="+ Add more", style=discord.ButtonStyle.success, row=0)
         self.user_id = user_id
-        self.ci_id = ci_id
+        self.role = role
+        self.entry_id = entry_id
         self.item_name = item_name
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(
             _QuantityModal(
-                f"Add more {self.item_name}", self.user_id, self.ci_id, action="add"
+                f"Add more {self.item_name}",
+                self.user_id,
+                self.role,
+                self.entry_id,
             )
         )
 
 
-class _TakeButton(discord.ui.Button):
-    def __init__(self, user_id: str, ci_id: int, item_name: str, qty: int) -> None:
-        super().__init__(
-            label="− Take", style=discord.ButtonStyle.danger, row=0, disabled=qty <= 0
-        )
+class _RemoveButton(discord.ui.Button):
+    """Remove a stack. With more than one copy, prompt for how many to drop;
+    with a single copy, remove it outright."""
+
+    def __init__(
+        self, user_id: str, role: str, entry_id: int, item_name: str, qty: int
+    ) -> None:
+        super().__init__(label="Remove", style=discord.ButtonStyle.danger, row=0)
         self.user_id = user_id
-        self.ci_id = ci_id
+        self.role = role
+        self.entry_id = entry_id
         self.item_name = item_name
+        self.qty = qty
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_modal(
-            _QuantityModal(
-                f"Take {self.item_name}", self.user_id, self.ci_id, action="take"
+        if self.qty > 1:
+            await interaction.response.send_modal(
+                _QuantityModal(
+                    f"Remove {self.item_name}",
+                    self.user_id,
+                    self.role,
+                    self.entry_id,
+                    action="remove",
+                )
             )
-        )
+        else:
+            await _do_remove(
+                interaction,
+                user_id=self.user_id,
+                role=self.role,
+                entry_id=self.entry_id,
+            )
+
+
+class _GiveButton(discord.ui.Button):
+    """Give this stack to another character or a storage location."""
+
+    def __init__(self, user_id: str, role: str, entry_id: int) -> None:
+        super().__init__(label="Give", style=discord.ButtonStyle.primary, row=0)
+        self.user_id = user_id
+        self.role = role
+        self.entry_id = entry_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        payload = _build_give_payload(self.user_id, self.role, self.entry_id)
+        if payload is None:
+            await interaction.response.send_message(
+                "That item is no longer there.", ephemeral=True
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
 
 
 class CharacterItemDetailView(_OwnerView):
-    def __init__(self, user_id: str, ci_id: int, qty: int, item_name: str) -> None:
+    def __init__(
+        self, user_id: str, role: str, entry_id: int, item_name: str, qty: int
+    ) -> None:
         super().__init__(user_id)
-        self.ci_id = ci_id
-        self.add_item(_AddMoreButton(user_id, ci_id, item_name))
-        self.add_item(_TakeButton(user_id, ci_id, item_name, qty))
+        self.role = role
+        self.entry_id = entry_id
+        self.add_item(_AddMoreButton(user_id, role, entry_id, item_name))
+        self.add_item(_RemoveButton(user_id, role, entry_id, item_name, qty))
+        self.add_item(_GiveButton(user_id, role, entry_id))
         self.add_item(ShareButton(row=4))
 
-    @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger, row=0)
-    async def remove(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await _do_remove(interaction, user_id=self.user_id, ci_id=self.ci_id)
-
     @discord.ui.button(
-        label="← Back to inventory", style=discord.ButtonStyle.primary, row=1
+        label="← Back", style=discord.ButtonStyle.primary, row=1
     )
     async def back(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        payload = _build_inventory_payload(self.user_id)
+        payload = _build_manage_location_payload(self.user_id, self.role)
+        if payload is None:
+            await interaction.response.edit_message(
+                content="Character not found.", embed=None, view=None
+            )
+            return
+        embed, view = payload
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class GiveTargetSelect(discord.ui.Select):
+    def __init__(
+        self,
+        user_id: str,
+        role: str,
+        entry_id: int,
+        item_name: str,
+        qty: int,
+        targets: list[tuple[int, str]],
+    ) -> None:
+        options = [
+            discord.SelectOption(label=label[:100], value=str(loc_id))
+            for loc_id, label in targets[:25]
+        ]
+        super().__init__(
+            placeholder="Give to…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+        self.user_id = user_id
+        self.role = role
+        self.entry_id = entry_id
+        self.item_name = item_name
+        self.qty = qty
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        target_id = int(self.values[0])
+        if self.qty > 1:
+            await interaction.response.send_modal(
+                _QuantityModal(
+                    f"Give {self.item_name}",
+                    self.user_id,
+                    self.role,
+                    self.entry_id,
+                    action="give",
+                    target_id=target_id,
+                )
+            )
+        else:
+            await _do_give(
+                interaction,
+                user_id=self.user_id,
+                role=self.role,
+                entry_id=self.entry_id,
+                target_location_id=target_id,
+                quantity=1,
+            )
+
+
+class GiveTargetView(_OwnerView):
+    def __init__(
+        self,
+        user_id: str,
+        role: str,
+        entry_id: int,
+        item_name: str,
+        qty: int,
+        targets: list[tuple[int, str]],
+    ) -> None:
+        super().__init__(user_id)
+        self.role = role
+        self.entry_id = entry_id
+        if targets:
+            self.add_item(
+                GiveTargetSelect(user_id, role, entry_id, item_name, qty, targets)
+            )
+        self.add_item(ShareButton(row=4))
+
+    @discord.ui.button(label="← Back", style=discord.ButtonStyle.primary, row=1)
+    async def back(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        payload = _build_item_detail_payload(self.user_id, self.role, self.entry_id)
+        if payload is None:
+            payload = _build_manage_location_payload(self.user_id, self.role)
         if payload is None:
             await interaction.response.edit_message(
                 content="Character not found.", embed=None, view=None
@@ -1874,6 +2294,7 @@ class DeleteConfirmView(_OwnerView):
                 select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
             )
             if char is not None:
+                storage.delete_character_locations(session, self.user_id)
                 session.delete(char)
         await interaction.response.edit_message(
             content="Your character has been deleted.", embed=None, view=None

@@ -6,6 +6,7 @@ from discord.ext import commands
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
+from shadowdark_bot import storage
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import (
     build_item_embed,
@@ -59,7 +60,12 @@ class GuildInventory(commands.Cog):
         cap = max_gear_slots if max_gear_slots is not None else 0.0
 
         with session_scope() as session:
-            existing = session.scalar(select(Location).where(Location.name == clean_name))
+            existing = session.scalar(
+                select(Location).where(
+                    Location.name == clean_name,
+                    Location.owner_user_id.is_(None),
+                )
+            )
             if existing is not None:
                 await interaction.response.send_message(
                     f"A location named **{clean_name}** already exists.", ephemeral=True
@@ -100,7 +106,9 @@ class GuildInventory(commands.Cog):
         with session_scope() as session:
             location = session.scalar(
                 select(Location).where(
-                    Location.name == clean_name, Location.kind == "inventory"
+                    Location.name == clean_name,
+                    Location.kind == "inventory",
+                    Location.owner_user_id.is_(None),
                 )
             )
             if location is None:
@@ -157,7 +165,9 @@ class GuildInventory(commands.Cog):
         with session_scope() as session:
             location = session.scalar(
                 select(Location).where(
-                    Location.name == clean_name, Location.kind == "inventory"
+                    Location.name == clean_name,
+                    Location.kind == "inventory",
+                    Location.owner_user_id.is_(None),
                 )
             )
             if location is None:
@@ -265,6 +275,7 @@ class GuildInventory(commands.Cog):
                 select(Location.name)
                 .where(
                     Location.kind == "inventory",
+                    Location.owner_user_id.is_(None),
                     Location.name.ilike(f"%{current}%"),
                 )
                 .order_by(Location.name)
@@ -313,6 +324,27 @@ class GuildInventory(commands.Cog):
 VIEW_TIMEOUT_SECONDS = 300
 
 
+class _SafeView(discord.ui.View):
+    """A view whose component errors surface as an ephemeral message instead of
+    a silent "This interaction failed"."""
+
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+        item: discord.ui.Item,
+    ) -> None:
+        log.exception("Inventory interaction failed on %r", item, exc_info=error)
+        message = f"Something went wrong handling that: {error}"[:1900]
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass
+
+
 def _build_summary_payload() -> tuple[discord.Embed, "InventoryListView"] | None:
     """Build the (embed, view) pair for the all-locations summary.
     Returns None if there are no inventory locations."""
@@ -320,7 +352,10 @@ def _build_summary_payload() -> tuple[discord.Embed, "InventoryListView"] | None
         locations = list(
             session.scalars(
                 select(Location)
-                .where(Location.kind == "inventory")
+                .where(
+                    Location.kind == "inventory",
+                    Location.owner_user_id.is_(None),
+                )
                 .order_by(Location.name)
             ).all()
         )
@@ -355,6 +390,7 @@ def _build_detail_payload(
             select(Location).where(
                 Location.name == location_name,
                 Location.kind == "inventory",
+                Location.owner_user_id.is_(None),
             )
         )
         if loc is None:
@@ -384,6 +420,7 @@ def _build_item_detail_payload(
             select(Location).where(
                 Location.name == location_name,
                 Location.kind == "inventory",
+                Location.owner_user_id.is_(None),
             )
         )
         if loc is None:
@@ -431,7 +468,7 @@ class LocationSelect(discord.ui.Select):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
-class InventoryListView(discord.ui.View):
+class InventoryListView(_SafeView):
     """Summary embed with a dropdown to drill into a location plus a share button."""
 
     def __init__(self, location_names: list[str]) -> None:
@@ -469,7 +506,7 @@ class LocationItemSelect(discord.ui.Select):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
-class LocationDetailView(discord.ui.View):
+class LocationDetailView(_SafeView):
     """Detail embed: item-picker dropdown (if stocked) + back + share. Adding
     new items goes through `/inventory add`."""
 
@@ -500,7 +537,7 @@ class LocationDetailView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
-class ItemDetailView(discord.ui.View):
+class ItemDetailView(_SafeView):
     """Item-info embed shown in the context of a location. Has Add-more / Take
     quick-action buttons (Take is disabled for empty stacks) plus Back to the
     location detail view. Adding an item that isn't already at the location
@@ -542,14 +579,9 @@ class ItemDetailView(discord.ui.View):
 
 
 def _used_slots(session: Session, location_id: int) -> float:
-    """Sum of stack_slots() across all stacks at a location.
-    Computed in Python so bundle ceiling rule applies per-stack."""
-    rows = session.execute(
-        select(InventoryEntry.quantity, Item.gear_slots, Item.bundle_size)
-        .join(Item, Item.id == InventoryEntry.item_id)
-        .where(InventoryEntry.location_id == location_id)
-    ).all()
-    return float(sum(stack_slots(q, g, b) for q, g, b in rows))
+    """Sum of each stack's bundle-aware slot cost at a location (catalog and
+    freeform)."""
+    return storage.used_slots(storage.location_entries(session, location_id))
 
 
 # ---------- Add-more / Take modals + buttons (item detail view only) ----------

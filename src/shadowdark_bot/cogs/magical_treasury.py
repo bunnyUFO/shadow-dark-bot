@@ -7,6 +7,7 @@ from discord.ext import commands
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from shadowdark_bot import storage
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import (
     build_treasury_info_embed,
@@ -16,13 +17,12 @@ from shadowdark_bot.embeds import (
 from shadowdark_bot.models import (
     ITEM_TYPE_MAGICAL,
     Borrow,
-    CharacterItem,
     Item,
     Location,
     PlayerCharacter,
     TreasuryEntry,
 )
-from shadowdark_bot.sharing import ShareButton, ShareableView
+from shadowdark_bot.sharing import ShareableView, ShareButton
 
 log = logging.getLogger("shadowdark_bot.treasury")
 
@@ -313,44 +313,35 @@ def _add_borrowed_to_inventory(
     session: Session, borrower_id: str, item_id: int
 ) -> None:
     """If the borrower has a character, add one of the borrowed catalog item to
-    their carried inventory (merging into an existing stack). No-op otherwise —
-    the borrow is still recorded in the ledger either way."""
+    their held location (merging into an existing stack). No-op otherwise — the
+    borrow is still recorded in the ledger either way."""
     char = session.scalar(
         select(PlayerCharacter).where(PlayerCharacter.user_id == borrower_id)
     )
     if char is None:
         return
-    stack = session.scalar(
-        select(CharacterItem).where(
-            CharacterItem.character_id == char.id,
-            CharacterItem.item_id == item_id,
-        )
-    )
-    if stack is None:
-        session.add(
-            CharacterItem(character_id=char.id, item_id=item_id, quantity=1)
-        )
-    else:
-        stack.quantity += 1
+    held, _stash = storage.ensure_character_locations(session, char)
+    item = session.get(Item, item_id)
+    if item is None:
+        return
+    storage.add_stack(session, held, quantity=1, item=item)
     char.updated_at = _naive_utcnow()
 
 
 def _remove_borrowed_from_inventory(
     session: Session, borrower_id: str, item_id: int
 ) -> None:
-    """If the borrower has a character carrying the returned catalog item, drop
-    one from their inventory (removing the stack when it empties)."""
+    """If the borrower's held location carries the returned catalog item, drop
+    one (removing the stack when it empties)."""
     char = session.scalar(
         select(PlayerCharacter).where(PlayerCharacter.user_id == borrower_id)
     )
     if char is None:
         return
-    stack = session.scalar(
-        select(CharacterItem).where(
-            CharacterItem.character_id == char.id,
-            CharacterItem.item_id == item_id,
-        )
-    )
+    held = storage.held_location(session, borrower_id)
+    if held is None:
+        return
+    stack = storage.find_catalog_stack(session, held.id, item_id)
     if stack is None:
         return
     if stack.quantity <= 1:
