@@ -71,8 +71,13 @@ shadow-dark-bot/
 │       ├── spell_data.py         ← Tier 1–5 + alignment spell reference + idempotent seeder
 │       ├── embeds.py             ← functions that build the pretty Discord embed cards
 │       ├── storage.py            ← character held/stash location helpers
-│       ├── services/             ← domain operations with no Discord code (shared with the planned web API)
+│       ├── services/             ← domain operations with no Discord code (shared by the cogs and web API)
 │       │   └── characters.py         ← character sheet: edits, carry/give/remove, spells, delete
+│       ├── web/                  ← optional web app (WEB_ENABLED=true): FastAPI on the bot's event loop
+│       │   ├── app.py                ← routes: Discord login exchange, sheet + reference endpoints
+│       │   ├── auth.py               ← OAuth code exchange, signed session tokens
+│       │   ├── schemas.py            ← JSON shapes for the sheet
+│       │   └── server.py             ← uvicorn embedding + guild-membership check
 │       └── cogs/                 ← "cog" = discord.py term for a group of related commands
 │           ├── __init__.py
 │           ├── items_database.py     ← /items add, info, edit, remove, browse

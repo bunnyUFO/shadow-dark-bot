@@ -44,18 +44,18 @@ This is the target shape. `/character` follows it: the cog parses interaction in
 
 ```
 Discord ─── gateway ─── shadowdark_bot (Python, single process)
-                                 │
-                                 └── /data/shadowdark.db (SQLite)
+                         ├── web app on :8080 (optional, WEB_ENABLED=true)
+                         └── /data/shadowdark.db (SQLite)
 ```
 
-Everything in one Docker container in one LXC on Proxmox. No external services. No web server. No queue. No cache.
+Everything in one Docker container in one LXC on Proxmox. No external services, no queue, no cache. The optional web app (character sheet / Discord Activity) is served by uvicorn on the bot's own event loop rather than a second process, so there is still one SQLite writer — see [discord-activity.md](discord-activity.md).
 
 ## Code layout
 
 ```
 src/shadowdark_bot/
   main.py           # bot bootstrap: run migrations, load cogs, sync commands, run
-  config.py         # pydantic-settings: DISCORD_TOKEN, DATABASE_URL
+  config.py         # pydantic-settings: DISCORD_TOKEN, DATABASE_URL, WEB_* / OAuth settings
   db.py             # engine, session_scope context manager, SQLite WAL/FK pragmas
   models.py         # SQLAlchemy ORM classes (Item, Location, InventoryEntry, TreasuryEntry, Borrow, AuditLog, Coffer)
   currency.py       # gp/sp/cp ↔ copper helpers (parse_to_cp, format_cp)
@@ -64,6 +64,11 @@ src/shadowdark_bot/
   storage.py        # character held/stash location helpers shared by the cogs
   services/
     characters.py   # character-sheet operations: identity/stats edits, carry/give/remove, spells, delete
+  web/
+    app.py          # FastAPI routes: login exchange, sheet + reference endpoints
+    auth.py         # Discord OAuth code exchange, signed session tokens
+    schemas.py      # JSON response shapes built from the ORM rows
+    server.py       # runs uvicorn inside the bot's event loop; guild-membership check
   cogs/
     items_database.py    # /items add, info, edit, remove, browse
     guild_inventory.py   # /inventory location-create/edit/delete, add, browse

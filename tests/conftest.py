@@ -12,6 +12,7 @@ os.environ.setdefault("DISCORD_TOKEN", "test")
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 import shadowdark_bot.db as db
 from shadowdark_bot.models import Base
@@ -19,7 +20,14 @@ from shadowdark_bot.models import Base
 
 @pytest.fixture
 def dbsession():
-    engine = create_engine("sqlite://", future=True)
+    # One shared connection (StaticPool) so code running in other threads —
+    # e.g. FastAPI's sync endpoints under TestClient — sees the same in-memory DB.
+    engine = create_engine(
+        "sqlite://",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     previous = db.SessionLocal
     db.SessionLocal = sessionmaker(

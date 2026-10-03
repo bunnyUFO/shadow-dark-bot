@@ -75,17 +75,31 @@ validates input and calls `interaction.response.send_message` in the same functi
 - `rules.py`, `storage.py` and the parse helpers (`_parse_scores`, `_parse_spellcasting`, …) are reused as-is.
 - Unit tests cover the services without discord.py — matching what `architecture.md` already claims.
 
-### Web API (sketch)
+### Web API
 
-| Method & path | Purpose |
-|---|---|
-| `POST /api/auth/exchange` | Exchange an OAuth `code` (from the SDK or the web redirect) for a Discord token, call `/users/@me`, return our own signed session token |
-| `GET /api/character` | Full sheet for the session user |
-| `PATCH /api/character/{identity,stats,gold,skills,proficiencies}` | Mirrors the edit modals |
-| `POST /api/character/items` · `DELETE …/items/{id}` · `POST …/items/{id}/give` | Carry / remove / give |
-| `POST /api/character/spells` · `DELETE …/spells/{id}` | Learn / forget |
-| `GET /api/spells`, `GET /api/items` | Reference data for pickers |
-| `GET /api/characters/{user_id}` | Read-only view (like `/character show`) |
+Code: `src/shadowdark_bot/web/` — `app.py` (routes), `auth.py` (OAuth exchange + session
+tokens), `schemas.py` (JSON shapes), `server.py` (uvicorn in the bot's loop + membership check).
+
+| Method & path | Status | Purpose |
+|---|---|---|
+| `GET /api/health` | ✅ | Liveness, no login |
+| `GET /api/auth/config` | ✅ | `client_id`, `redirect_uri`, scopes for the frontend to start a login |
+| `POST /api/auth/exchange` | ✅ | `{code, flow: "web" \| "activity"}` → exchanges the code with Discord, checks the guild allowlist, returns our session token (+ the Discord access token for the SDK on `activity`) |
+| `GET /api/me` | ✅ | Session user + whether they have a character |
+| `GET /api/character` | ✅ | Full sheet for the session user (404 if none) |
+| `GET /api/characters/{user_id}` | ✅ | Read-only view, held items only (like `/character show`) |
+| `GET /api/spells?class=&tier=` · `GET /api/items?q=` | ✅ | Reference data for pickers |
+| `PATCH /api/character/{identity,stats,gold,skills,proficiencies}` | Phase 5 | Mirrors the edit modals |
+| `POST /api/character/items` · `DELETE …/items/{id}` · `POST …/items/{id}/give` | Phase 5 | Carry / remove / give |
+| `POST /api/character/spells` · `DELETE …/spells/{id}` | Phase 5 | Learn / forget |
+
+Errors are `{"detail": "..."}`: 401 not logged in, 403 not in an allowed guild, 404 no character,
+400 a rule failed (the same reason text the bot shows). Interactive docs (`/docs`) are disabled.
+
+**Allowlist.** At login the bot checks whether the user is in any `ALLOWED_GUILD_IDS` guild
+(member cache, then a REST lookup — no members intent needed). The result is baked into the
+session; tokens expire after `SESSION_TTL_HOURS` (default 12), so removing someone from the server
+locks them out by the next login.
 
 Session token is sent as `Authorization: Bearer …` — **not a cookie**, because third-party-iframe
 cookies are frequently blocked.
@@ -129,15 +143,17 @@ Follows the existing homelab pattern (see `proxmox-bunnylink/reverse-proxy.md`):
 - App Testers → invite each player.
 - Keep Public Bot off and User Install off.
 
-New `.env` keys: `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `SESSION_SECRET`,
-`ALLOWED_GUILD_IDS`, `PUBLIC_BASE_URL`.
+New `.env` keys (see `.env.example`): `WEB_ENABLED`, `WEB_PORT`, `PUBLIC_BASE_URL`,
+`DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `SESSION_SECRET` (≥ 32 chars), `SESSION_TTL_HOURS`,
+`ALLOWED_GUILD_IDS`, `FORWARDED_ALLOW_IPS`. The web app is off by default; with
+`WEB_ENABLED=true` the bot refuses to start until the required ones are set.
 
 ## Phases
 
 Each phase is its own PR.
 
 1. ✅ **Services refactor** — `services/characters.py` extracted; the cog calls it; `tests/test_character_services.py` covers it without discord.py. No behavior change.
-2. **Web API + standalone login** — FastAPI in-process, `/api/auth/exchange`, read endpoints, guild allowlist.
+2. ✅ **Web API + login backend** — FastAPI in the bot's event loop, `/api/auth/exchange` for both login flows, read endpoints, guild allowlist, `tests/test_web_api.py`. (The login *pages* come with the frontend in Phase 4.)
 3. **Hosting** — static IP, DNS, cert, NPM host, compose port. Read-only sheet live at `shadowdark.bunnyufo.net`.
 4. **Frontend, read-only** — three tabs rendering the sheet; proves auth + hosting end to end.
 5. **Editing** — write endpoints + edit forms (identity, stats, gold, skills, items, spells, give).
