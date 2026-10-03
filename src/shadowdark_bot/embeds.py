@@ -24,6 +24,7 @@ from shadowdark_bot.models import (
 from shadowdark_bot.rules import (
     ABILITIES,
     ability_modifier,
+    fmt_slots,  # re-exported: cogs import it from here
     format_modifier,
     spellcasting_modifier,
 )
@@ -526,10 +527,6 @@ def build_coffer_change_embed(
 def _format_balance(cp: int) -> str:
     formatted = format_cp(cp)
     return formatted if formatted is not None else "0cp"
-
-
-def fmt_slots(n: float) -> str:
-    return f"{n:g}"
 
 
 def _fmt_number(n: float) -> str:

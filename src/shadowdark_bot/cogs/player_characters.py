@@ -8,14 +8,13 @@ item. Carry capacity is the Shadow Dark limit, max(10, STR).
 """
 
 import logging
-import re
-from datetime import UTC, datetime
+from collections.abc import Callable
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from shadowdark_bot import storage
 from shadowdark_bot.currency import format_cp, parse_value_string
@@ -32,23 +31,18 @@ from shadowdark_bot.embeds import (
     fmt_slots,
 )
 from shadowdark_bot.models import (
-    ITEM_TYPE_MAGICAL,
     LOCATION_ROLE_HELD,
     LOCATION_ROLE_STASH,
-    Borrow,
     CharacterSpell,
     InventoryEntry,
     Item,
     Location,
     PlayerCharacter,
     Spell,
-    TreasuryEntry,
 )
-from shadowdark_bot.rules import (
-    ABILITIES,
-    SPELL_ABILITIES,
-    stack_slots,
-)
+from shadowdark_bot.rules import ABILITIES
+from shadowdark_bot.services import characters
+from shadowdark_bot.services.characters import CharacterError, CharacterNotFound
 from shadowdark_bot.sharing import ShareableView, ShareButton
 
 log = logging.getLogger("shadowdark_bot.characters")
@@ -56,59 +50,10 @@ log = logging.getLogger("shadowdark_bot.characters")
 VIEW_TIMEOUT_SECONDS = 300
 
 
-# ---------- Load / parse helpers ----------
+# ---------- Display helpers ----------
 
 
-def _load_character(session: Session, user_id: str) -> PlayerCharacter | None:
-    """Load a character with its spells (and their reference rows). Carried items
-    now live in the character's held/stash locations — see the storage helpers."""
-    return session.scalars(
-        select(PlayerCharacter)
-        .options(
-            selectinload(PlayerCharacter.spells).joinedload(CharacterSpell.spell),
-        )
-        .where(PlayerCharacter.user_id == user_id)
-    ).first()
-
-
-def _location_by_role(session: Session, user_id: str, role: str) -> Location | None:
-    return storage.character_location(session, user_id, role)
-
-
-def _sorted_spells(char: PlayerCharacter) -> list[CharacterSpell]:
-    return sorted(
-        char.spells, key=lambda s: ((s.display_tier or 0), s.display_name.lower())
-    )
-
-
-def _touch(char: PlayerCharacter) -> None:
-    char.updated_at = datetime.now(UTC)
-
-
-# The spellcasting stat picks the spell list a character draws from:
-# Wizards cast with INT, Priests with WIS. (No alignment gating.)
-_SPELL_CLASS_BY_ABILITY = {"int": "wizard", "wis": "priest"}
 _ALIGNMENT_NAMES = {"L": "Lawful", "N": "Neutral", "C": "Chaotic"}
-
-
-def _spell_class_for(char: PlayerCharacter) -> str | None:
-    """The spell class a character can learn from, or None if they aren't a
-    caster (no spellcasting stat set)."""
-    return _SPELL_CLASS_BY_ABILITY.get(char.spell_ability or "")
-
-
-def _addable_spells(
-    session: Session, char: PlayerCharacter, cls: str, tier: int | None = None
-) -> list[Spell]:
-    """Reference spells of the character's class (and tier, if given) not already
-    known. Any tier is learnable — scrolls and the like can grant higher-tier
-    spells — so tiers are never gated by character level."""
-    known_ids = {s.spell_id for s in char.spells if s.spell_id is not None}
-    stmt = select(Spell).where(Spell.classes.contains(cls))
-    if tier is not None:
-        stmt = stmt.where(Spell.tier == tier)
-    stmt = stmt.order_by(Spell.tier, Spell.name)
-    return [sp for sp in session.scalars(stmt).all() if sp.id not in known_ids]
 
 
 def _spell_choice_label(spell: Spell) -> str:
@@ -116,33 +61,6 @@ def _spell_choice_label(spell: Spell) -> str:
     if spell.alignment:
         label += f" ({_ALIGNMENT_NAMES.get(spell.alignment, spell.alignment)})"
     return label
-
-
-def _parse_scores(raw: str) -> list[int]:
-    """Parse 'STR DEX CON INT WIS CHA' into six ints (space/comma separated)."""
-    parts = raw.replace(",", " ").split()
-    if len(parts) != 6:
-        raise ValueError("Enter exactly six scores, e.g. `14 12 13 10 8 15`.")
-    scores: list[int] = []
-    for p in parts:
-        try:
-            n = int(p)
-        except ValueError as err:
-            raise ValueError(f'"{p}" is not a whole number.') from err
-        if not 1 <= n <= 30:
-            raise ValueError(f"Score {n} is out of range (1–30).")
-        scores.append(n)
-    return scores
-
-
-def _parse_optional_int(raw: str, *, minimum: int | None = None) -> int | None:
-    raw = raw.strip()
-    if not raw:
-        return None
-    n = int(raw)
-    if minimum is not None and n < minimum:
-        raise ValueError(f"Must be ≥ {minimum}.")
-    return n
 
 
 # ---------- Payload builders ----------
@@ -170,14 +88,14 @@ def _build_tab_embed(
         )
     if tab == "roleplaying":
         return build_roleplaying_embed(char)
-    return build_combat_embed(char, _sorted_spells(char))
+    return build_combat_embed(char, characters.sorted_spells(char))
 
 
 def _build_sheet_payload(
     user_id: str, tab: str = "combat"
 ) -> tuple[discord.Embed, "CharacterSheetView"] | None:
     with session_scope() as session:
-        char = _load_character(session, user_id)
+        char = characters.load_character(session, user_id)
         if char is None:
             return None
         embed = _build_tab_embed(session, char, tab)
@@ -188,7 +106,7 @@ def _build_manage_location_payload(
     user_id: str, role: str
 ) -> tuple[discord.Embed, "CharacterLocationView"] | None:
     with session_scope() as session:
-        char = _load_character(session, user_id)
+        char = characters.load_character(session, user_id)
         if char is None:
             return None
         held, stash = storage.ensure_character_locations(session, char)
@@ -243,7 +161,7 @@ def _build_item_detail_payload(
     user_id: str, role: str, entry_id: int
 ) -> tuple[discord.Embed, "CharacterItemDetailView"] | None:
     with session_scope() as session:
-        loc = _location_by_role(session, user_id, role)
+        loc = storage.character_location(session, user_id, role)
         if loc is None:
             return None
         entry = session.get(InventoryEntry, entry_id)
@@ -259,7 +177,7 @@ def _build_show_payload(
     target_id: str, tab: str = "combat"
 ) -> tuple[discord.Embed, "CharacterShowView"] | None:
     with session_scope() as session:
-        char = _load_character(session, target_id)
+        char = characters.load_character(session, target_id)
         if char is None:
             return None
         # Show never exposes the stash — held items only.
@@ -273,10 +191,10 @@ def _build_show_payload(
                     cs.display_name
                     + (f" (T{cs.display_tier})" if cs.display_tier else ""),
                 )
-                for cs in _sorted_spells(char)
+                for cs in characters.sorted_spells(char)
             ]
         elif tab == "inventory":
-            held = _location_by_role(session, target_id, LOCATION_ROLE_HELD)
+            held = storage.character_location(session, target_id, LOCATION_ROLE_HELD)
             if held is not None:
                 item_choices = [
                     (e.id, f"{e.quantity}× {e.display_name}")
@@ -289,7 +207,7 @@ def _build_show_spell_detail_payload(
     target_id: str, cs_id: int
 ) -> tuple[discord.Embed, "CharacterShowDetailView"] | None:
     with session_scope() as session:
-        char = _load_character(session, target_id)
+        char = characters.load_character(session, target_id)
         if char is None:
             return None
         cs = next((s for s in char.spells if s.id == cs_id), None)
@@ -303,7 +221,7 @@ def _build_show_item_detail_payload(
     target_id: str, entry_id: int
 ) -> tuple[discord.Embed, "CharacterShowDetailView"] | None:
     with session_scope() as session:
-        held = _location_by_role(session, target_id, LOCATION_ROLE_HELD)
+        held = storage.character_location(session, target_id, LOCATION_ROLE_HELD)
         if held is None:
             return None
         entry = session.get(InventoryEntry, entry_id)
@@ -322,12 +240,12 @@ def _build_spells_payload(
     """Manage-spells landing: your known spells (with a Forget path) plus a
     Learn button."""
     with session_scope() as session:
-        char = _load_character(session, user_id)
+        char = characters.load_character(session, user_id)
         if char is None:
             return None
-        spells = _sorted_spells(char)
+        spells = characters.sorted_spells(char)
         embed = build_character_spells_embed(char, spells)
-        is_caster = _spell_class_for(char) is not None
+        is_caster = characters.spell_class_for(char) is not None
         choices = [
             (cs.id, cs.display_name + (f" (T{cs.display_tier})" if cs.display_tier else ""))
             for cs in spells
@@ -339,7 +257,7 @@ def _build_char_spell_detail_payload(
     user_id: str, cs_id: int
 ) -> tuple[discord.Embed, "CharacterSpellDetailView"] | None:
     with session_scope() as session:
-        char = _load_character(session, user_id)
+        char = characters.load_character(session, user_id)
         if char is None:
             return None
         cs = next((s for s in char.spells if s.id == cs_id), None)
@@ -354,13 +272,13 @@ def _build_learn_tier_payload(
     user_id: str,
 ) -> tuple[discord.Embed, "LearnTierView"] | None:
     with session_scope() as session:
-        char = _load_character(session, user_id)
+        char = characters.load_character(session, user_id)
         if char is None:
             return None
-        cls = _spell_class_for(char)
+        cls = characters.spell_class_for(char)
         if cls is None:
             return None
-        addable = _addable_spells(session, char, cls)
+        addable = characters.addable_spells(session, char, cls)
         tiers = sorted({sp.tier for sp in addable})
         embed = discord.Embed(title="Learn a spell — choose a tier", color=CHARACTER_COLOR)
         if tiers:
@@ -377,15 +295,15 @@ def _build_learn_pick_payload(
     user_id: str, tier: int
 ) -> tuple[discord.Embed, "LearnPickView"] | None:
     with session_scope() as session:
-        char = _load_character(session, user_id)
+        char = characters.load_character(session, user_id)
         if char is None:
             return None
-        cls = _spell_class_for(char)
+        cls = characters.spell_class_for(char)
         if cls is None:
             return None
         choices = [
             (sp.name, _spell_choice_label(sp))
-            for sp in _addable_spells(session, char, cls, tier)
+            for sp in characters.addable_spells(session, char, cls, tier)
         ]
         embed = discord.Embed(title=f"Tier {tier} {cls} spells", color=CHARACTER_COLOR)
         embed.description = (
@@ -418,11 +336,11 @@ async def _refresh_sheet(
     await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-# ---------- Write logic (carry / add-more / take / remove) ----------
+# ---------- Write actions (thin Discord wrappers over services.characters) ----------
 
 
-def _role_label(role: str) -> str:
-    return "held items" if role == LOCATION_ROLE_HELD else "stash"
+async def _fail(interaction: discord.Interaction, header: str, reason: str) -> None:
+    await interaction.response.send_message(f"{header}\n{reason}", ephemeral=True)
 
 
 async def _do_carry(
@@ -436,81 +354,32 @@ async def _do_carry(
     notes: str | None = None,
     edit_view: bool = False,
 ) -> None:
-    clean_item = item_name.strip()
-    failure = f"**Failed to carry {quantity}× {clean_item}.**"
-    if not clean_item:
-        await interaction.response.send_message(
-            f"{failure}\nItem name cannot be empty.", ephemeral=True
-        )
-        return
-    if quantity < 1:
-        await interaction.response.send_message(
-            f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
-        )
-        return
-    if freeform_slots < 0:
-        await interaction.response.send_message(
-            f"{failure}\nGear slots each must be ≥ 0.", ephemeral=True
-        )
-        return
-
-    with session_scope() as session:
-        char = _load_character(session, user_id)
-        if char is None:
-            await interaction.response.send_message(
-                f"{failure}\nYou don't have a character yet — run `/character sheet`.",
-                ephemeral=True,
+    failure = f"**Failed to carry {quantity}× {item_name.strip()}.**"
+    try:
+        with session_scope() as session:
+            result = characters.carry(
+                session,
+                user_id,
+                item_name=item_name,
+                quantity=quantity,
+                role=role,
+                freeform_slots=freeform_slots,
+                notes=notes,
             )
-            return
-        held, stash = storage.ensure_character_locations(session, char)
-        loc = held if role == LOCATION_ROLE_HELD else stash
-
-        cat_item = session.scalar(select(Item).where(Item.name == clean_item))
-        if cat_item is not None:
-            existing = storage.find_catalog_stack(session, loc.id, cat_item.id)
-            gear_slots, bundle = cat_item.gear_slots, cat_item.bundle_size
-        else:
-            existing = storage.find_freeform_stack(session, loc.id, clean_item)
-            if existing is not None:
-                gear_slots = existing.effective_gear_slots
-                bundle = existing.effective_bundle_size
-            else:
-                gear_slots, bundle = freeform_slots, 1
-
-        current_qty = existing.quantity if existing else 0
-        delta = stack_slots(current_qty + quantity, gear_slots, bundle) - stack_slots(
-            current_qty, gear_slots, bundle
+    except CharacterNotFound:
+        await _fail(
+            interaction,
+            failure,
+            "You don't have a character yet — run `/character sheet`.",
         )
-        used = storage.used_slots(storage.location_entries(session, loc.id))
-        cap = loc.max_gear_slots
-        new_used = used + delta
-        if new_used > cap:
-            await interaction.response.send_message(
-                f"{failure}\nYour {_role_label(role)} holds "
-                f"{fmt_slots(used)}/{fmt_slots(cap)} slots; this would need "
-                f"{fmt_slots(delta)} more ({fmt_slots(new_used)} total).",
-                ephemeral=True,
-            )
-            return
-
-        stack = storage.add_stack(
-            session,
-            loc,
-            quantity=quantity,
-            item=cat_item,
-            freeform_name=None if cat_item is not None else clean_item,
-            slots_each=freeform_slots,
-            bundle_size=1,
-            notes=None if cat_item is not None else notes,
-        )
-        _touch(char)
-        session.flush()
-        display = stack.display_name
-        loc_name = loc.name
+        return
+    except CharacterError as err:
+        await _fail(interaction, failure, str(err))
+        return
 
     confirmation = (
-        f"Added {quantity}× **{display}** to **{loc_name}**. "
-        f"{fmt_slots(new_used)}/{fmt_slots(cap)} slots used."
+        f"Added {quantity}× **{result.display_name}** to **{result.location_name}**. "
+        f"{fmt_slots(result.used_slots)}/{fmt_slots(result.max_slots)} slots used."
     )
     await _respond(interaction, confirmation, user_id, role, edit_view)
 
@@ -523,82 +392,20 @@ async def _do_add_more(
     entry_id: int,
     quantity: int,
 ) -> None:
-    failure = "**Failed to add more.**"
-    if quantity < 1:
-        await interaction.response.send_message(
-            f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
-        )
+    try:
+        with session_scope() as session:
+            result = characters.add_more(
+                session, user_id, role=role, entry_id=entry_id, quantity=quantity
+            )
+    except CharacterError as err:
+        await _fail(interaction, "**Failed to add more.**", str(err))
         return
-    with session_scope() as session:
-        char = _load_character(session, user_id)
-        loc = _location_by_role(session, user_id, role)
-        entry = session.get(InventoryEntry, entry_id)
-        if loc is None or entry is None or entry.location_id != loc.id:
-            await interaction.response.send_message(
-                f"{failure}\nThat item is no longer there.", ephemeral=True
-            )
-            return
-        gear_slots, bundle = entry.effective_gear_slots, entry.effective_bundle_size
-        delta = stack_slots(
-            entry.quantity + quantity, gear_slots, bundle
-        ) - stack_slots(entry.quantity, gear_slots, bundle)
-        used = storage.used_slots(storage.location_entries(session, loc.id))
-        cap = loc.max_gear_slots
-        new_used = used + delta
-        if new_used > cap:
-            await interaction.response.send_message(
-                f"{failure}\nYour {_role_label(role)} holds "
-                f"{fmt_slots(used)}/{fmt_slots(cap)} slots; this would need "
-                f"{fmt_slots(delta)} more.",
-                ephemeral=True,
-            )
-            return
-        entry.quantity += quantity
-        if char is not None:
-            _touch(char)
-        session.flush()
-        display = entry.display_name
 
     confirmation = (
-        f"Added {quantity}× **{display}**. {fmt_slots(new_used)}/{fmt_slots(cap)} "
-        "slots used."
+        f"Added {quantity}× **{result.display_name}**. "
+        f"{fmt_slots(result.used_slots)}/{fmt_slots(result.max_slots)} slots used."
     )
     await _respond(interaction, confirmation, user_id, role, edit_view=True)
-
-
-def _return_open_borrows(
-    session: Session, user_id: str, item_id: int, limit: int | None = None
-) -> list[int]:
-    """Close up to `limit` of this user's open treasury borrows of a catalog
-    item (oldest first) and mark those entries available again. Returns the
-    affected treasury entry ids.
-
-    Used when a borrowed item is removed from a character's inventory — dropping
-    it from your pack returns it to the treasury, one borrow per copy removed.
-    Inventory isn't adjusted here (the caller has already dropped the copies)."""
-    open_borrows = list(
-        session.scalars(
-            select(Borrow)
-            .join(TreasuryEntry, Borrow.treasury_entry_id == TreasuryEntry.id)
-            .where(
-                Borrow.borrower_id == user_id,
-                Borrow.returned_at.is_(None),
-                TreasuryEntry.item_id == item_id,
-            )
-            .order_by(Borrow.borrowed_at)
-        ).all()
-    )
-    if limit is not None:
-        open_borrows = open_borrows[:limit]
-    now = datetime.now(UTC).replace(tzinfo=None)
-    returned: list[int] = []
-    for borrow in open_borrows:
-        borrow.returned_at = now
-        entry = session.get(TreasuryEntry, borrow.treasury_entry_id)
-        if entry is not None:
-            entry.status = "available"
-        returned.append(borrow.treasury_entry_id)
-    return returned
 
 
 async def _do_remove(
@@ -611,47 +418,20 @@ async def _do_remove(
 ) -> None:
     """Remove a stack from a character location. `quantity=None` drops the whole
     stack; a value drops that many copies (deleting the stack if it empties)."""
-    failure = "**Failed to remove.**"
-    if quantity is not None and quantity < 1:
-        await interaction.response.send_message(
-            f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
-        )
+    try:
+        with session_scope() as session:
+            result = characters.remove(
+                session, user_id, role=role, entry_id=entry_id, quantity=quantity
+            )
+    except CharacterError as err:
+        await _fail(interaction, "**Failed to remove.**", str(err))
         return
-    with session_scope() as session:
-        char = _load_character(session, user_id)
-        loc = _location_by_role(session, user_id, role)
-        entry = session.get(InventoryEntry, entry_id)
-        if loc is None or entry is None or entry.location_id != loc.id:
-            await interaction.response.send_message(
-                f"{failure}\nThat item is already gone.", ephemeral=True
-            )
-            return
-        if quantity is not None and quantity > entry.quantity:
-            await interaction.response.send_message(
-                f"{failure}\nYou only have {entry.quantity}× **{entry.display_name}**.",
-                ephemeral=True,
-            )
-            return
-        display = entry.display_name
-        item_id = entry.item_id
-        removed = entry.quantity if quantity is None else quantity
-        entry.quantity -= removed
-        if entry.quantity == 0:
-            session.delete(entry)
-        # Borrowed treasury copies removed from your pack are returned to the
-        # treasury, one per copy dropped. Freeform items have no treasury link.
-        returned = (
-            _return_open_borrows(session, user_id, item_id, limit=removed)
-            if item_id is not None
-            else []
-        )
-        if char is not None:
-            _touch(char)
 
     if quantity is None:
-        confirmation = f"Removed **{display}**."
+        confirmation = f"Removed **{result.display_name}**."
     else:
-        confirmation = f"Removed {removed}× **{display}**."
+        confirmation = f"Removed {result.removed}× **{result.display_name}**."
+    returned = result.returned_treasury_ids
     if returned:
         ids = ", ".join(f"#{eid}" for eid in returned)
         noun = "it" if len(returned) == 1 else "them"
@@ -665,17 +445,9 @@ async def _do_remove(
 def _give_targets(
     session: Session, user_id: str, source: Location
 ) -> list[tuple[int, str]]:
-    """Valid give destinations: guild inventory locations, your own other
-    location, and other characters' held locations (not their stashes)."""
-    locs = session.scalars(
-        select(Location)
-        .where(Location.kind == "inventory")
-        .order_by(Location.owner_user_id.is_(None).desc(), Location.name)
-    ).all()
+    """(location id, dropdown label) for each valid give destination."""
     targets: list[tuple[int, str]] = []
-    for loc in locs:
-        if loc.id == source.id:
-            continue
+    for loc in characters.give_target_locations(session, user_id, source):
         if loc.owner_user_id is None:
             label = f"📦 {loc.name}"
         elif loc.owner_user_id == user_id:
@@ -685,53 +457,19 @@ def _give_targets(
                 else "🎒 Your stash"
             )
         else:
-            if loc.role == LOCATION_ROLE_STASH:
-                continue  # another character's stash is private
             label = f"🧑 {loc.name} (held)"
         targets.append((loc.id, label))
     return targets[:25]
-
-
-def _validate_give_target(
-    user_id: str, source: Location, target: Location | None, entry: InventoryEntry
-) -> str | None:
-    """Return an error string if the target is invalid, else None."""
-    if target is None:
-        return "That destination no longer exists."
-    if target.kind != "inventory":
-        return "You can only give into inventory locations."
-    if target.id == source.id:
-        return "That's where the item already is."
-    if (
-        target.owner_user_id is not None
-        and target.owner_user_id != user_id
-        and target.role == LOCATION_ROLE_STASH
-    ):
-        return "You can't give into another character's stash."
-    if target.owner_user_id is None:
-        if not entry.is_catalog:
-            return (
-                "Freeform items can only be given to another character, not "
-                "guild inventory."
-            )
-        if entry.item is not None and entry.item.item_type == ITEM_TYPE_MAGICAL:
-            return (
-                "Magical items can't go into guild inventory — they belong in "
-                "the treasury."
-            )
-    return None
 
 
 def _build_give_payload(
     user_id: str, role: str, entry_id: int
 ) -> tuple[discord.Embed, "GiveTargetView"] | None:
     with session_scope() as session:
-        source = _location_by_role(session, user_id, role)
-        if source is None:
+        entry = characters.location_entry(session, user_id, role, entry_id)
+        if entry is None:
             return None
-        entry = session.get(InventoryEntry, entry_id)
-        if entry is None or entry.location_id != source.id:
-            return None
+        source = session.get(Location, entry.location_id)
         targets = _give_targets(session, user_id, source)
         name = entry.display_name
         qty = entry.quantity
@@ -754,85 +492,23 @@ async def _do_give(
     target_location_id: int,
     quantity: int | None = None,
 ) -> None:
-    failure = "**Failed to give.**"
-    if quantity is not None and quantity < 1:
-        await interaction.response.send_message(
-            f"{failure}\nQuantity must be ≥ 1.", ephemeral=True
-        )
+    try:
+        with session_scope() as session:
+            result = characters.give(
+                session,
+                user_id,
+                role=role,
+                entry_id=entry_id,
+                target_location_id=target_location_id,
+                quantity=quantity,
+            )
+    except CharacterError as err:
+        await _fail(interaction, "**Failed to give.**", str(err))
         return
-    with session_scope() as session:
-        char = _load_character(session, user_id)
-        source = _location_by_role(session, user_id, role)
-        entry = session.get(InventoryEntry, entry_id)
-        if source is None or entry is None or entry.location_id != source.id:
-            await interaction.response.send_message(
-                f"{failure}\nThat item is no longer there.", ephemeral=True
-            )
-            return
-        target = session.get(Location, target_location_id)
-        error = _validate_give_target(user_id, source, target, entry)
-        if error is not None:
-            await interaction.response.send_message(
-                f"{failure}\n{error}", ephemeral=True
-            )
-            return
-        give_qty = entry.quantity if quantity is None else quantity
-        if give_qty > entry.quantity:
-            await interaction.response.send_message(
-                f"{failure}\nYou only have {entry.quantity}× **{entry.display_name}**.",
-                ephemeral=True,
-            )
-            return
 
-        # Capacity check on the target.
-        gear_slots, bundle = entry.effective_gear_slots, entry.effective_bundle_size
-        if entry.item_id is not None:
-            tstack = storage.find_catalog_stack(session, target.id, entry.item_id)
-        else:
-            tstack = storage.find_freeform_stack(
-                session, target.id, entry.display_name
-            )
-        texisting = tstack.quantity if tstack else 0
-        delta = stack_slots(texisting + give_qty, gear_slots, bundle) - stack_slots(
-            texisting, gear_slots, bundle
-        )
-        tused = storage.used_slots(storage.location_entries(session, target.id))
-        if tused + delta > target.max_gear_slots:
-            await interaction.response.send_message(
-                f"{failure}\n**{target.name}** holds "
-                f"{fmt_slots(tused)}/{fmt_slots(target.max_gear_slots)} slots; "
-                f"this would need {fmt_slots(delta)} more.",
-                ephemeral=True,
-            )
-            return
-
-        # Snapshot the source stack before mutating it.
-        src_item = entry.item
-        src_name = entry.name
-        src_slots = entry.slots_each if entry.slots_each is not None else 1.0
-        src_bundle = entry.bundle_size if entry.bundle_size is not None else 1
-        src_notes = entry.notes
-        display = entry.display_name
-        target_name = target.name
-
-        entry.quantity -= give_qty
-        if entry.quantity == 0:
-            session.delete(entry)
-        storage.add_stack(
-            session,
-            target,
-            quantity=give_qty,
-            item=src_item,
-            freeform_name=None if src_item is not None else src_name,
-            slots_each=src_slots,
-            bundle_size=src_bundle,
-            notes=None if src_item is not None else src_notes,
-        )
-        if char is not None:
-            _touch(char)
-        session.flush()
-
-    confirmation = f"Gave {give_qty}× **{display}** to **{target_name}**."
+    confirmation = (
+        f"Gave {result.quantity}× **{result.display_name}** to **{result.target_name}**."
+    )
     await _respond(interaction, confirmation, user_id, role, edit_view=True)
 
 
@@ -864,46 +540,12 @@ async def _respond(
 async def _do_learn_spell(
     interaction: discord.Interaction, *, user_id: str, tier: int, spell_name: str
 ) -> None:
-    """Learn a reference spell of the character's class. Any tier is allowed;
-    only the class is checked (no alignment gating)."""
-    failure = f"**Failed to learn {spell_name}.**"
-    with session_scope() as session:
-        char = _load_character(session, user_id)
-        if char is None:
-            await interaction.response.send_message(
-                f"{failure}\nCharacter not found.", ephemeral=True
-            )
-            return
-        cls = _spell_class_for(char)
-        if cls is None:
-            await interaction.response.send_message(
-                f"{failure}\nYour character isn't a spellcaster — set a "
-                "spellcasting stat (INT or WIS) via **Edit Stats**.",
-                ephemeral=True,
-            )
-            return
-        sp = session.scalar(select(Spell).where(Spell.name == spell_name))
-        if sp is None:
-            await interaction.response.send_message(
-                f"{failure}\nThat spell no longer exists.", ephemeral=True
-            )
-            return
-        if cls not in sp.class_list:
-            allowed = " / ".join(c.capitalize() for c in sp.class_list)
-            await interaction.response.send_message(
-                f"{failure}\n**{sp.name}** is a {allowed} spell; your character "
-                f"casts {cls} spells.",
-                ephemeral=True,
-            )
-            return
-        if any(s.spell_id == sp.id for s in char.spells):
-            await interaction.response.send_message(
-                f"{failure}\nYou already know **{sp.name}**.", ephemeral=True
-            )
-            return
-        session.add(CharacterSpell(character_id=char.id, spell_id=sp.id))
-        _touch(char)
-        session.flush()
+    try:
+        with session_scope() as session:
+            characters.learn_spell(session, user_id, spell_name)
+    except CharacterError as err:
+        await _fail(interaction, f"**Failed to learn {spell_name}.**", str(err))
+        return
 
     # Return to the tier's pick list (the learned spell is now excluded).
     payload = _build_learn_pick_payload(user_id, tier)
@@ -920,22 +562,12 @@ async def _do_learn_spell(
 async def _do_forget_spell(
     interaction: discord.Interaction, *, user_id: str, cs_id: int
 ) -> None:
-    with session_scope() as session:
-        char = _load_character(session, user_id)
-        if char is None:
-            await interaction.response.send_message(
-                "**Failed to forget.**\nCharacter not found.", ephemeral=True
-            )
-            return
-        cs = next((s for s in char.spells if s.id == cs_id), None)
-        if cs is None:
-            await interaction.response.send_message(
-                "**Failed to forget.**\nYou don't know that spell.", ephemeral=True
-            )
-            return
-        display = cs.display_name
-        session.delete(cs)
-        _touch(char)
+    try:
+        with session_scope() as session:
+            display = characters.forget_spell(session, user_id, cs_id)
+    except CharacterError as err:
+        await _fail(interaction, "**Failed to forget.**", str(err))
+        return
 
     payload = _build_spells_payload(user_id)
     if payload is not None:
@@ -957,33 +589,28 @@ def _modal_tab(modal: discord.ui.Modal, default: str) -> str:
     return getattr(modal, "refresh_tab", default)
 
 
-def _parse_spellcasting(raw: str) -> tuple[str | None, int]:
-    """Parse the combined spellcasting field into (ability, talent bonus).
-
-    Accepts "INT", "WIS +1", "int-1", "none"/blank. The ability picks the spell
-    list; the optional signed number is the talent spell-check bonus."""
-    raw = raw.strip()
-    if raw.lower() in ("", "none", "-"):
-        return None, 0
-    match = re.fullmatch(r"([A-Za-z]+)\s*([+-]?\d+)?", raw)
-    if match is None:
-        raise ValueError(
-            "Spellcasting must look like INT, WIS +1, or none."
+async def _save_and_refresh(
+    interaction: discord.Interaction,
+    user_id: str,
+    tab: str,
+    save: Callable[[Session], object],
+) -> None:
+    """Run a sheet edit (`save(session)`) in one transaction, then refresh the
+    sheet on `tab`. Validation failures become an ephemeral error."""
+    try:
+        with session_scope() as session:
+            save(session)
+    except CharacterNotFound:
+        await interaction.response.send_message(
+            "Character not found — run `/character sheet` first.", ephemeral=True
         )
-    ability = match.group(1).lower()
-    if ability not in SPELL_ABILITIES:
-        raise ValueError("Spellcasting stat must be INT, WIS, or none.")
-    bonus = int(match.group(2)) if match.group(2) else 0
-    return ability, bonus
-
-
-def _format_spellcasting(char: PlayerCharacter) -> str:
-    if char.spell_ability is None:
-        return ""
-    text = char.spell_ability.upper()
-    if char.spell_check_bonus:
-        text += f" {char.spell_check_bonus:+d}"
-    return text
+        return
+    except CharacterError as err:
+        await interaction.response.send_message(
+            f"**Failed to save.**\n{err}", ephemeral=True
+        )
+        return
+    await _refresh_sheet(interaction, user_id, tab)
 
 
 class EditStatsModal(discord.ui.Modal):
@@ -1044,12 +671,12 @@ class EditStatsModal(discord.ui.Modal):
             level=str(char.level),
             max_hp=str(char.max_hp) if char.max_hp is not None else "",
             ac=str(char.armor_class) if char.armor_class is not None else "",
-            spell_stat=_format_spellcasting(char),
+            spell_stat=characters.format_spellcasting(char),
         )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            scores = _parse_scores(str(self._scores.value))
+            scores = characters.parse_scores(str(self._scores.value))
         except ValueError as err:
             await interaction.response.send_message(
                 f"**Failed to save.**\n{err}", ephemeral=True
@@ -1065,8 +692,8 @@ class EditStatsModal(discord.ui.Modal):
             )
             return
         try:
-            max_hp = _parse_optional_int(str(self._hp.value), minimum=0)
-            armor_class = _parse_optional_int(str(self._ac.value))
+            max_hp = characters.parse_optional_int(str(self._hp.value), minimum=0)
+            armor_class = characters.parse_optional_int(str(self._ac.value))
         except ValueError:
             await interaction.response.send_message(
                 "**Failed to save.**\nMax HP and AC must be whole numbers.",
@@ -1074,35 +701,28 @@ class EditStatsModal(discord.ui.Modal):
             )
             return
         try:
-            spell_ability, spell_bonus = _parse_spellcasting(str(self._spell_stat.value))
+            spell_ability, spell_bonus = characters.parse_spellcasting(str(self._spell_stat.value))
         except ValueError as err:
             await interaction.response.send_message(
                 f"**Failed to save.**\n{err}", ephemeral=True
             )
             return
 
-        with session_scope() as session:
-            char = session.scalar(
-                select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
-            )
-            if char is None:
-                await interaction.response.send_message(
-                    "Character not found — run `/character sheet` first.",
-                    ephemeral=True,
-                )
-                return
-            for (key, _), value in zip(ABILITIES, scores, strict=True):
-                setattr(char, f"{key}_score", value)
-            char.level = level
-            char.max_hp = max_hp
-            char.armor_class = armor_class
-            char.spell_ability = spell_ability
-            char.spell_check_bonus = spell_bonus
-            _touch(char)
-            session.flush()
-            # STR drives held-inventory capacity — keep the held location in sync.
-            storage.ensure_character_locations(session, char)
-        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "combat"))
+        await _save_and_refresh(
+            interaction,
+            self.user_id,
+            _modal_tab(self, "combat"),
+            lambda session: characters.update_stats(
+                session,
+                self.user_id,
+                scores=scores,
+                level=level,
+                max_hp=max_hp,
+                armor_class=armor_class,
+                spell_ability=spell_ability,
+                spell_check_bonus=spell_bonus,
+            ),
+        )
 
 
 class EditGoldModal(discord.ui.Modal):
@@ -1129,20 +749,12 @@ class EditGoldModal(discord.ui.Modal):
                 f"**Failed to save.**\n{err}", ephemeral=True
             )
             return
-        with session_scope() as session:
-            char = session.scalar(
-                select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
-            )
-            if char is None:
-                await interaction.response.send_message(
-                    "Character not found — run `/character sheet` first.",
-                    ephemeral=True,
-                )
-                return
-            char.gold_cp = gold if gold is not None else 0
-            _touch(char)
-            session.flush()
-        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "inventory"))
+        await _save_and_refresh(
+            interaction,
+            self.user_id,
+            _modal_tab(self, "inventory"),
+            lambda session: characters.set_gold(session, self.user_id, gold),
+        )
 
 
 class EditProficienciesModal(discord.ui.Modal):
@@ -1163,20 +775,14 @@ class EditProficienciesModal(discord.ui.Modal):
         return cls(char.user_id, proficiencies=char.proficiencies or "")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        with session_scope() as session:
-            char = session.scalar(
-                select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
-            )
-            if char is None:
-                await interaction.response.send_message(
-                    "Character not found — run `/character sheet` first.",
-                    ephemeral=True,
-                )
-                return
-            char.proficiencies = str(self._prof.value).strip() or None
-            _touch(char)
-            session.flush()
-        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "combat"))
+        await _save_and_refresh(
+            interaction,
+            self.user_id,
+            _modal_tab(self, "combat"),
+            lambda session: characters.set_proficiencies(
+                session, self.user_id, str(self._prof.value)
+            ),
+        )
 
 
 class EditSkillsKnowledgeModal(discord.ui.Modal):
@@ -1227,25 +833,18 @@ class EditSkillsKnowledgeModal(discord.ui.Modal):
         )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        with session_scope() as session:
-            char = session.scalar(
-                select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
-            )
-            if char is None:
-                await interaction.response.send_message(
-                    "Character not found — run `/character sheet` first.",
-                    ephemeral=True,
-                )
-                return
-            char.languages = str(self._languages.value).strip() or None
-            char.talents = str(self._talents.value).strip() or None
-            char.additional_info = str(self._additional_info.value).strip() or None
-            _touch(char)
-            session.flush()
-        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "roleplaying"))
-
-
-_ALIGNMENTS = {"lawful": "Lawful", "neutral": "Neutral", "chaotic": "Chaotic"}
+        await _save_and_refresh(
+            interaction,
+            self.user_id,
+            _modal_tab(self, "roleplaying"),
+            lambda session: characters.set_skills_knowledge(
+                session,
+                self.user_id,
+                languages=str(self._languages.value),
+                talents=str(self._talents.value),
+                additional_info=str(self._additional_info.value),
+            ),
+        )
 
 
 class EditIdentityModal(discord.ui.Modal):
@@ -1313,55 +912,23 @@ class EditIdentityModal(discord.ui.Modal):
         )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        name = str(self._name.value).strip()
-        if not name:
-            await interaction.response.send_message(
-                "**Failed to save.**\nName cannot be empty.", ephemeral=True
-            )
-            return
-        raw_align = str(self._alignment.value).strip().lower()
-        if raw_align in ("", "none", "-"):
-            alignment: str | None = None
-        elif raw_align in _ALIGNMENTS:
-            alignment = _ALIGNMENTS[raw_align]
-        else:
-            await interaction.response.send_message(
-                "**Failed to save.**\nAlignment must be Lawful, Neutral, "
-                "Chaotic, or none.",
-                ephemeral=True,
-            )
-            return
-
-        # "Class & title" is one field: everything before the first comma is the
-        # class, the remainder is the title.
-        raw_ct = str(self._class_title.value).strip()
-        if "," in raw_ct:
-            class_part, title_part = raw_ct.split(",", 1)
-            char_class = class_part.strip() or None
-            title = title_part.strip() or None
-        else:
-            char_class = raw_ct or None
-            title = None
-
-        with session_scope() as session:
-            char = session.scalar(
-                select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
-            )
-            if char is None:
-                char = PlayerCharacter(user_id=self.user_id, name=name)
-                session.add(char)
-            char.name = name
-            char.char_class = char_class
-            char.title = title
-            char.ancestry = str(self._ancestry.value).strip() or None
-            char.alignment = alignment
-            char.background = str(self._background.value).strip() or None
-            _touch(char)
-            session.flush()
-            # Create (on first save) or rename this character's storage locations.
-            storage.ensure_character_locations(session, char)
-
-        await _refresh_sheet(interaction, self.user_id, _modal_tab(self, "roleplaying"))
+        # "Class & title" is one field (modals cap at five inputs).
+        char_class, title = characters.parse_class_title(str(self._class_title.value))
+        await _save_and_refresh(
+            interaction,
+            self.user_id,
+            _modal_tab(self, "roleplaying"),
+            lambda session: characters.save_identity(
+                session,
+                self.user_id,
+                name=str(self._name.value),
+                char_class=char_class,
+                title=title,
+                ancestry=str(self._ancestry.value),
+                alignment=str(self._alignment.value),
+                background=str(self._background.value),
+            ),
+        )
 
 
 class AddItemModal(discord.ui.Modal):
@@ -1648,27 +1215,20 @@ class _DeleteButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view: CharacterSheetView = self.view  # type: ignore[assignment]
-        with session_scope() as session:
-            char = _load_character(session, view.user_id)
-            if char is None:
-                await interaction.response.send_message(
-                    "Character not found.", ephemeral=True
-                )
-                return
-            name = char.name
-            held = _location_by_role(session, view.user_id, LOCATION_ROLE_HELD)
-            stash = _location_by_role(session, view.user_id, LOCATION_ROLE_STASH)
-            count = sum(
-                len(storage.location_entries(session, loc.id))
-                for loc in (held, stash)
-                if loc is not None
+        try:
+            with session_scope() as session:
+                preview = characters.delete_preview(session, view.user_id)
+        except CharacterNotFound:
+            await interaction.response.send_message(
+                "Character not found.", ephemeral=True
             )
+            return
         embed = discord.Embed(
             title="Delete character?",
             description=(
-                f"Are you sure you want to delete **{name}**? "
-                f"This also drops its {count} stored stack(s) (held + stash) and "
-                "all known spells, and can't be undone."
+                f"Are you sure you want to delete **{preview.name}**? "
+                f"This also drops its {preview.stack_count} stored stack(s) "
+                "(held + stash) and all known spells, and can't be undone."
             ),
             color=discord.Color.red(),
         )
@@ -2302,12 +1862,7 @@ class DeleteConfirmView(_OwnerView):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         with session_scope() as session:
-            char = session.scalar(
-                select(PlayerCharacter).where(PlayerCharacter.user_id == self.user_id)
-            )
-            if char is not None:
-                storage.delete_character_locations(session, self.user_id)
-                session.delete(char)
+            characters.delete_character(session, self.user_id)
         await interaction.response.edit_message(
             content="Your character has been deleted.", embed=None, view=None
         )

@@ -136,7 +136,7 @@ New `.env` keys: `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `SESSION_SECRET`,
 
 Each phase is its own PR.
 
-1. **Services refactor** — extract `services/characters.py`, cog calls it, tests added. No behavior change.
+1. ✅ **Services refactor** — `services/characters.py` extracted; the cog calls it; `tests/test_character_services.py` covers it without discord.py. No behavior change.
 2. **Web API + standalone login** — FastAPI in-process, `/api/auth/exchange`, read endpoints, guild allowlist.
 3. **Hosting** — static IP, DNS, cert, NPM host, compose port. Read-only sheet live at `shadowdark.bunnyufo.net`.
 4. **Frontend, read-only** — three tabs rendering the sheet; proves auth + hosting end to end.

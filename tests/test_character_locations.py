@@ -19,6 +19,7 @@ from shadowdark_bot.models import (
     PlayerCharacter,
     TreasuryEntry,
 )
+from shadowdark_bot.services import characters
 
 # ---------- fakes ----------
 
@@ -172,12 +173,12 @@ def test_validate_give_blocks_magical_and_freeform_into_guild(dbsession):
         mag = storage.add_stack(s, held, quantity=1, item=amulet)
         free = storage.add_stack(s, held, quantity=1, freeform_name="Idol", slots_each=1)
         s.flush()
-        assert "Magical" in pc._validate_give_target("u1", held, guild, mag)
-        assert "Freeform" in pc._validate_give_target("u1", held, guild, free)
+        assert "Magical" in characters.give_target_error("u1", held, guild, mag)
+        assert "Freeform" in characters.give_target_error("u1", held, guild, free)
         # freeform into another character's held is allowed
         _make_char(s, "u2", "Amy", 12)
         amy_held = storage.held_location(s, "u2")
-        assert pc._validate_give_target("u1", held, amy_held, free) is None
+        assert characters.give_target_error("u1", held, amy_held, free) is None
 
 
 # ---------- flows through _do_* ----------
