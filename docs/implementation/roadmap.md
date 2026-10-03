@@ -30,7 +30,7 @@ Below are the next slices in rough order of priority. Each should be its own foc
 | **Session log / shared notes** | `/note add`, `/note list` — bot-tracked session notes pinned in a channel. |
 | **Multi-tenant data (per-guild isolation)** | Commands already sync to every guild (M6), but the underlying database is single-tenant — all servers see the same catalog/inventory/treasury/coffers. Real isolation needs a `guild_id` column on every domain table, queries scoped by `interaction.guild_id`, and a backfill migration that stamps existing rows with the original guild's ID. Worth doing the moment a second server actually wants its own data. |
 | **Backups to off-LXC storage** | Restic or rclone the `/backups` directory to a NAS or Backblaze B2. |
-| **Web view** | Read-only Flask/FastAPI page showing the catalog and inventory. Lowest priority — Discord is the UX. |
+| **Web view / Discord Activity** | Character sheet as a web app at `shadowdark.bunnyufo.net`, also embedded in Discord as an Activity (private to our servers). Full plan: [discord-activity.md](discord-activity.md). |
 
 ## Non-goals (probably forever)
 

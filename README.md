@@ -87,6 +87,7 @@ shadow-dark-bot/
         ├── architecture.md       ← high-level: which file does what, why these libraries
         ├── data-model.md         ← the database schema, table by table, with invariants
         ├── permissions.md        ← who can run what (currently: everyone; roles are future work)
+        ├── discord-activity.md   ← plan: character sheet as a web app / embedded Discord Activity
         └── roadmap.md            ← what's planned next (audit log, role-based perms, channel routing, etc.)
 ```
 
@@ -160,3 +161,4 @@ Implementation:
 - [Data model](docs/implementation/data-model.md)
 - [Permissions & audit log](docs/implementation/permissions.md)
 - [Roadmap](docs/implementation/roadmap.md)
+- [Plan: character sheet as a Discord Activity](docs/implementation/discord-activity.md)
