@@ -48,10 +48,12 @@ def api(dbsession):
         return user_id in members
 
     app = create_app(
+        mode="discord",
         oauth=oauth,
         signer=SessionSigner(SECRET, ttl_seconds=3600),
         is_allowed_member=is_member,
         public_base_url=BASE + "/",
+        static_dir=None,
     )
     client = TestClient(app)
     client.oauth = oauth
@@ -106,6 +108,7 @@ def test_health_needs_no_login(api):
 def test_auth_config_exposes_no_secret(api):
     body = api.get("/api/auth/config").json()
     assert body == {
+        "mode": "discord",
         "client_id": "app123",
         "redirect_uri": BASE + "/auth/callback",
         "scopes": ["identify"],
@@ -149,13 +152,13 @@ def test_endpoints_require_a_valid_token(api):
     assert api.get("/api/me").status_code == 401
     assert api.get("/api/me", headers=auth("garbage")).status_code == 401
     assert api.get("/api/me", headers={"Authorization": "Basic abc"}).status_code == 401
-    forged = SessionSigner("y" * 40, 3600).issue(DiscordUser(id="u1", username="x"))
+    forged = SessionSigner("y" * 40, 3600).issue("u1", "x")
     assert api.get("/api/me", headers=auth(forged)).status_code == 401
 
 
 def test_expired_token_is_rejected():
     signer = SessionSigner(SECRET, ttl_seconds=-1)
-    token = signer.issue(DiscordUser(id="u1", username="bob"))
+    token = signer.issue("u1", "bob")
     assert signer.verify(token) is None
     assert SessionSigner(SECRET, 60).verify(token).user_id == "u1"
 
@@ -349,8 +352,9 @@ def test_bot_membership_check():
 def test_web_config_errors():
     from shadowdark_bot.config import Settings
 
+    assert Settings(DISCORD_TOKEN="t", LOCAL_WEB_ENABLED=True).web_config_errors() == []
     ok = Settings(
-        DISCORD_TOKEN="t", PUBLIC_BASE_URL=BASE, DISCORD_CLIENT_ID="1",
+        DISCORD_TOKEN="t", WEB_ENABLED=True, PUBLIC_BASE_URL=BASE, DISCORD_CLIENT_ID="1",
         DISCORD_CLIENT_SECRET="s", SESSION_SECRET=SECRET, ALLOWED_GUILD_IDS="1, 2",
     )
     assert ok.web_config_errors() == []
@@ -360,3 +364,98 @@ def test_web_config_errors():
     assert "SESSION_SECRET" in errors and "ALLOWED_GUILD_IDS" in errors
     junk = ok.model_copy(update={"ALLOWED_GUILD_IDS": "abc"})
     assert "numeric" in " ".join(junk.web_config_errors())
+    clash = ok.model_copy(update={"LOCAL_WEB_ENABLED": True, "LOCAL_WEB_PORT": 8080})
+    assert "must differ" in " ".join(clash.web_config_errors())
+
+
+# ---------- local (home network, no login) mode ----------
+
+LAN = ("192.168.1.50", 50000)
+
+
+@pytest.fixture
+def local_api(dbsession):
+    app = create_app(
+        mode="local", signer=SessionSigner(SECRET, 3600, purpose="local"), static_dir=None
+    )
+    return TestClient(app, client=LAN)
+
+
+def test_local_mode_picks_a_character_without_discord(local_api):
+    with session_scope() as s:
+        _seed(s)
+        _make_bob(s)
+        characters.save_identity(s, "u2", name="Amy", char_class="Thief")
+    assert local_api.get("/api/auth/config").json()["mode"] == "local"
+    picks = local_api.get("/api/auth/local/characters").json()
+    assert [(c["user_id"], c["name"]) for c in picks] == [("u2", "Amy"), ("u1", "Bob")]
+
+    body = local_api.post("/api/auth/local", json={"user_id": "u1"}).json()
+    assert body["user"] == {"id": "u1", "display_name": "Bob", "avatar_url": None}
+    sheet = local_api.get("/api/character", headers=auth(body["token"])).json()
+    assert sheet["name"] == "Bob" and sheet["stash"] is not None
+    party = local_api.get("/api/characters", headers=auth(body["token"])).json()
+    assert len(party) == 2
+
+
+def test_local_mode_has_no_discord_login_and_still_needs_a_session(local_api):
+    assert local_api.post("/api/auth/exchange", json={"code": "good-u1"}).status_code == 404
+    assert local_api.get("/api/character").status_code == 401
+    missing = local_api.post("/api/auth/local", json={"user_id": "nobody"})
+    assert missing.status_code == 404
+
+
+def test_local_mode_refuses_proxied_or_public_requests(dbsession):
+    app = create_app(mode="local", signer=SessionSigner(SECRET, 60), static_dir=None)
+    lan = TestClient(app, client=LAN)
+    assert lan.get("/api/health").status_code == 200
+    assert TestClient(app, client=("127.0.0.1", 1)).get("/api/health").status_code == 200
+    # through a reverse proxy (NPM adds these) -> refused
+    for header in ("X-Forwarded-For", "X-Real-IP", "Forwarded"):
+        resp = lan.get("/api/health", headers={header: "203.0.113.9"})
+        assert resp.status_code == 403, header
+    # straight from a public address -> refused
+    public = TestClient(app, client=("8.8.8.8", 1))
+    assert public.get("/api/auth/local/characters").status_code == 403
+
+
+def test_local_tokens_never_work_on_the_public_app(api, local_api):
+    """Same secret on purpose: the purpose salt alone must keep them apart."""
+    with session_scope() as s:
+        characters.save_identity(s, "u1", name="Bob")
+    local_token = local_api.post("/api/auth/local", json={"user_id": "u1"}).json()["token"]
+    assert api.get("/api/character", headers=auth(local_token)).status_code == 401
+    public_token = login(api, "u1")["token"]
+    assert local_api.get("/api/character", headers=auth(public_token)).status_code == 401
+
+
+def test_build_local_app_uses_a_fresh_random_key(dbsession):
+    from shadowdark_bot.web.server import build_local_app
+
+    with session_scope() as s:
+        characters.save_identity(s, "u1", name="Bob")
+    a = TestClient(build_local_app(), client=LAN)
+    b = TestClient(build_local_app(), client=LAN)
+    token = a.post("/api/auth/local", json={"user_id": "u1"}).json()["token"]
+    assert a.get("/api/me", headers=auth(token)).status_code == 200
+    assert b.get("/api/me", headers=auth(token)).status_code == 401  # restarted app
+
+
+# ---------- frontend serving ----------
+
+
+def test_frontend_is_served_for_non_api_paths(dbsession):
+    app = create_app(mode="local", signer=SessionSigner(SECRET, 60))
+    client = TestClient(app, client=LAN)
+    for path in ("/", "/auth/callback", "/anything/else"):
+        resp = client.get(path)
+        assert resp.status_code == 200, path
+        assert "<title>Shadowdark Sheet</title>" in resp.text
+        assert resp.headers["cache-control"] == "no-cache"
+        assert "x-frame-options" not in resp.headers  # Discord must be able to embed it
+    js = client.get("/assets/app.js")
+    assert js.status_code == 200 and "javascript" in js.headers["content-type"]
+    assert client.get("/assets/nope.js").status_code == 404
+    # unknown API paths stay JSON 404s instead of falling through to the page
+    resp = client.get("/api/nope")
+    assert resp.status_code == 404 and resp.json() == {"detail": "Not found."}

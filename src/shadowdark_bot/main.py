@@ -43,7 +43,7 @@ class ShadowDarkBot(commands.Bot):
         intents = discord.Intents.default()
         super().__init__(command_prefix="!", intents=intents)
         self._synced_guilds: set[int] = set()
-        self._web = None
+        self._web_servers: list = []
 
     async def setup_hook(self) -> None:
         await self.load_extension("shadowdark_bot.cogs.items_database")
@@ -52,16 +52,21 @@ class ShadowDarkBot(commands.Bot):
         await self.load_extension("shadowdark_bot.cogs.guild_coffers")
         await self.load_extension("shadowdark_bot.cogs.player_characters")
         await self.load_extension("shadowdark_bot.cogs.spell_reference")
-        if settings.WEB_ENABLED:
+        if settings.LOCAL_WEB_ENABLED or settings.WEB_ENABLED:
             from shadowdark_bot.web.server import WebServer
 
-            self._web = WebServer(self, settings)
-            self._web.start()
-            log.info("Web app listening on %s:%s", settings.WEB_HOST, settings.WEB_PORT)
+            if settings.LOCAL_WEB_ENABLED:
+                self._web_servers.append(WebServer.local(settings))
+                log.info("Local web app (no login) on port %s", settings.LOCAL_WEB_PORT)
+            if settings.WEB_ENABLED:
+                self._web_servers.append(WebServer.public(self, settings))
+                log.info("Public web app (Discord login) on port %s", settings.WEB_PORT)
+            for server in self._web_servers:
+                server.start()
 
     async def close(self) -> None:
-        if self._web is not None:
-            await self._web.stop()
+        for server in self._web_servers:
+            await server.stop()
         await super().close()
 
     async def _sync_to_guild(self, guild: discord.Guild) -> None:
@@ -94,8 +99,8 @@ async def ping(interaction: discord.Interaction) -> None:
 
 
 def main() -> None:
-    if settings.WEB_ENABLED and (errors := settings.web_config_errors()):
-        raise SystemExit("WEB_ENABLED=true but: " + "; ".join(errors))
+    if errors := settings.web_config_errors():
+        raise SystemExit("Web app settings are incomplete: " + "; ".join(errors))
     run_migrations()
     seed_reference_data()
     bot.run(settings.DISCORD_TOKEN, log_handler=None)

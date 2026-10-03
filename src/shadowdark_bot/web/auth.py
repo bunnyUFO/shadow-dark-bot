@@ -110,16 +110,20 @@ class SessionUser:
 
 
 class SessionSigner:
-    """Issues and verifies timestamped, HMAC-signed session tokens."""
+    """Issues and verifies timestamped, HMAC-signed session tokens.
 
-    _SALT = "shadowdark-web-session"
+    `purpose` is mixed into the signature, so a token issued by one app (e.g.
+    the no-login local app) can never verify on another (the public app) even
+    if both were given the same secret."""
 
-    def __init__(self, secret: str, ttl_seconds: int) -> None:
-        self._serializer = URLSafeTimedSerializer(secret, salt=self._SALT)
+    def __init__(self, secret: str, ttl_seconds: int, *, purpose: str = "public") -> None:
+        self._serializer = URLSafeTimedSerializer(
+            secret, salt=f"shadowdark-web-session:{purpose}"
+        )
         self.ttl_seconds = ttl_seconds
 
-    def issue(self, user: DiscordUser) -> str:
-        return self._serializer.dumps({"uid": user.id, "name": user.display_name})
+    def issue(self, user_id: str, display_name: str) -> str:
+        return self._serializer.dumps({"uid": user_id, "name": display_name})
 
     def verify(self, token: str) -> SessionUser | None:
         try:

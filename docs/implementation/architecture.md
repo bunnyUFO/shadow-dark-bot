@@ -44,7 +44,8 @@ This is the target shape. `/character` follows it: the cog parses interaction in
 
 ```
 Discord ─── gateway ─── shadowdark_bot (Python, single process)
-                         ├── web app on :8080 (optional, WEB_ENABLED=true)
+                         ├── local web app on :8081 (optional, LOCAL_WEB_ENABLED=true)
+                         ├── public web app on :8080 (optional, WEB_ENABLED=true)
                          └── /data/shadowdark.db (SQLite)
 ```
 
@@ -68,7 +69,8 @@ src/shadowdark_bot/
     app.py          # FastAPI routes: login exchange, sheet + reference endpoints
     auth.py         # Discord OAuth code exchange, signed session tokens
     schemas.py      # JSON response shapes built from the ORM rows
-    server.py       # runs uvicorn inside the bot's event loop; guild-membership check
+    server.py       # runs the local (no-login) and public apps on the bot's event loop
+    static/         # frontend: index.html + assets/*.js|css, no build step
   cogs/
     items_database.py    # /items add, info, edit, remove, browse
     guild_inventory.py   # /inventory location-create/edit/delete, add, browse

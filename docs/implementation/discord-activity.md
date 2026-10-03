@@ -12,10 +12,27 @@ Hosting lives on the Bunnylink Proxmox server; the infra side of this plan is mi
 A full character sheet (Combat / Inventory / Roleplaying tabs, editing, spells, carry/give) as a
 web page that:
 
-1. Works as a **standalone website** at `https://shadowdark.bunnyufo.net` with "Log in with Discord".
-2. Opens **inside Discord** as an Activity — from the App Launcher or an "Open full sheet" button
+1. Works on the **home network without Discord** — `http://<bot-container-ip>:8081`, pick your
+   character (the "local" app; built first so the UI can be iterated on).
+2. Works as a **public website** at `https://shadowdark.bunnyufo.net` with "Log in with Discord".
+3. Opens **inside Discord** as an Activity — from the App Launcher or an "Open full sheet" button
    on `/character sheet`.
-3. Is usable **only by our players, only in our servers**.
+4. Is usable **only by our players, only in our servers** (public app), or only from the home
+   network (local app).
+
+### Two apps, one process
+
+| | Local app | Public app |
+|---|---|---|
+| Setting | `LOCAL_WEB_ENABLED=true` | `WEB_ENABLED=true` (+ OAuth settings) |
+| Port | 8081 | 8080 (behind Nginx Proxy Manager) |
+| Login | Pick a character from a list — no Discord | Discord OAuth + guild allowlist |
+| Reachable from | Private / loopback addresses only; requests carrying proxy headers (`X-Forwarded-For`, `X-Real-IP`, `Forwarded`) are refused | The internet, via NPM |
+| Session tokens | Signed with a random key made at every start (picking again after a restart) | Signed with `SESSION_SECRET` |
+
+Both serve the same frontend and API. Local tokens are signed with a different key **and** a
+different salt, so a token from the no-login app can never be replayed against the public one.
+**Never point NPM at port 8081.**
 
 The existing Discord-native sheet keeps working; the web app is an addition, not a replacement.
 
@@ -106,7 +123,9 @@ cookies are frequently blocked.
 
 ### Frontend
 
-Vite + TypeScript SPA (framework TBD; vanilla or a light React). Startup detects whether it is
+Plain ES modules + CSS in `src/shadowdark_bot/web/static/`, served by the app itself — **no build
+step**, so the Docker image needs no Node and the 512 MB container is fine. (Originally sketched as
+Vite + TypeScript; revisit only if the UI outgrows this.) Startup detects whether it is
 inside Discord (`frame_id` query param): if so, it uses `@discord/embedded-app-sdk`
 (`ready()` → `authorize()` → `/api/auth/exchange` → `authenticate()`); otherwise it uses the
 normal OAuth redirect. Everything after login is shared.
@@ -150,15 +169,16 @@ New `.env` keys (see `.env.example`): `WEB_ENABLED`, `WEB_PORT`, `PUBLIC_BASE_UR
 
 ## Phases
 
-Each phase is its own PR.
+Order changed (2026-10-03): build and iterate on the **local** app first, then do public hosting.
 
 1. ✅ **Services refactor** — `services/characters.py` extracted; the cog calls it; `tests/test_character_services.py` covers it without discord.py. No behavior change.
-2. ✅ **Web API + login backend** — FastAPI in the bot's event loop, `/api/auth/exchange` for both login flows, read endpoints, guild allowlist, `tests/test_web_api.py`. (The login *pages* come with the frontend in Phase 4.)
-3. **Hosting** — static IP, DNS, cert, NPM host, compose port. Read-only sheet live at `shadowdark.bunnyufo.net`.
-4. **Frontend, read-only** — three tabs rendering the sheet; proves auth + hosting end to end.
+2. ✅ **Web API + login backend** — FastAPI in the bot's event loop, `/api/auth/exchange` for both login flows, read endpoints, guild allowlist, `tests/test_web_api.py`.
+3. ✅ **Local app + read-only frontend** — `LOCAL_WEB_ENABLED` on port 8081 (pick a character, home network only); no-build frontend in `web/static/` (Combat / Inventory / Roleplaying tabs, party view, Discord redirect login page for later). Compose publishes 8081.
+4. **Iterate on the UI** from feedback on the local app.
 5. **Editing** — write endpoints + edit forms (identity, stats, gold, skills, items, spells, give).
-6. **Activity** — enable in the portal, URL mapping, SDK login path, App Testers invited.
-7. **Bot integration** — "Open full sheet" button using `interaction.response.launch_activity()`
+6. **Public hosting** — static IP, DNS, cert, NPM host → port 8080, OAuth settings. Sheet live at `shadowdark.bunnyufo.net`.
+7. **Activity** — enable in the portal, URL mapping, SDK login path (vendor the SDK as one ES module; no build step), App Testers invited.
+8. **Bot integration** — "Open full sheet" button using `interaction.response.launch_activity()`
    (requires bumping `discord.py` to **≥ 2.6**; `pyproject.toml` currently allows 2.4).
 
 ## Gotchas

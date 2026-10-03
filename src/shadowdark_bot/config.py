@@ -11,7 +11,12 @@ class Settings(BaseSettings):
     DISCORD_TOKEN: str
     DATABASE_URL: str = "sqlite:///./data/shadowdark.db"
 
-    # --- Web app / Discord Activity. Off unless WEB_ENABLED=true. ---
+    # --- Local web app: home network only, no Discord login (pick a character). ---
+    LOCAL_WEB_ENABLED: bool = False
+    LOCAL_WEB_HOST: str = "0.0.0.0"
+    LOCAL_WEB_PORT: int = 8081
+
+    # --- Public web app / Discord Activity (Discord login). Off unless WEB_ENABLED=true. ---
     WEB_ENABLED: bool = False
     WEB_HOST: str = "0.0.0.0"
     WEB_PORT: int = 8080
@@ -34,8 +39,12 @@ class Settings(BaseSettings):
         return {int(part) for part in self.ALLOWED_GUILD_IDS.replace(" ", "").split(",") if part}
 
     def web_config_errors(self) -> list[str]:
-        """Problems that stop the web app from starting safely (empty if fine)."""
+        """Problems that stop the web apps from starting safely (empty if fine)."""
         errors = []
+        if self.LOCAL_WEB_ENABLED and self.WEB_ENABLED and self.LOCAL_WEB_PORT == self.WEB_PORT:
+            errors.append("LOCAL_WEB_PORT and WEB_PORT must differ")
+        if not self.WEB_ENABLED:
+            return errors
         for name in ("PUBLIC_BASE_URL", "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET"):
             if not getattr(self, name):
                 errors.append(f"{name} is not set")

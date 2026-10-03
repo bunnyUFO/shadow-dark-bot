@@ -104,6 +104,15 @@ class CharacterSheetOut(BaseModel):
     updated_at: datetime
 
 
+class CharacterSummaryOut(BaseModel):
+    user_id: str
+    name: str
+    char_class: str | None
+    title: str | None
+    ancestry: str | None
+    level: int
+
+
 class CatalogItemOut(BaseModel):
     id: int
     name: str
@@ -127,6 +136,17 @@ def spell_out(sp: Spell) -> SpellOut:
         duration=sp.duration,
         range=sp.range_,
         description=sp.description,
+    )
+
+
+def character_summary(char: PlayerCharacter) -> CharacterSummaryOut:
+    return CharacterSummaryOut(
+        user_id=char.user_id,
+        name=char.name,
+        char_class=char.char_class,
+        title=char.title,
+        ancestry=char.ancestry,
+        level=char.level,
     )
 
 
