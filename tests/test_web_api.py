@@ -459,3 +459,75 @@ def test_frontend_is_served_for_non_api_paths(dbsession):
     # unknown API paths stay JSON 404s instead of falling through to the page
     resp = client.get("/api/nope")
     assert resp.status_code == 404 and resp.json() == {"detail": "Not found."}
+
+
+# ---------- guild / catalog ----------
+
+
+def test_guild_overview(api):
+    from shadowdark_bot.models import (
+        ITEM_TYPE_MAGICAL,
+        Borrow,
+        Coffer,
+        InventoryEntry,
+        Location,
+        TreasuryEntry,
+    )
+
+    with session_scope() as s:
+        _seed(s)
+        _make_bob(s)  # Bob's held/stash must NOT appear as guild storage
+        rope = s.query(Item).filter_by(name="Rope").one()
+        amulet = Item(name="Amulet", gear_slots=1, item_type=ITEM_TYPE_MAGICAL,
+                      description="Glows near undead.", value_cp=10000)
+        armory = Location(name="Armory", kind="inventory", max_gear_slots=20,
+                          description="Behind the tavern")
+        vault = Location(name="Treasury", kind="treasury", max_gear_slots=0)
+        s.add_all([amulet, armory, vault, Coffer(balance_cp=12345)])
+        s.flush()
+        s.add(InventoryEntry(location_id=armory.id, item_id=rope.id, quantity=3))
+        lent = TreasuryEntry(location_id=vault.id, item_id=amulet.id, tag="cracked",
+                             status="borrowed")
+        spare = TreasuryEntry(location_id=vault.id, item_id=amulet.id, status="available")
+        s.add_all([lent, spare])
+        s.flush()
+        s.add(Borrow(treasury_entry_id=lent.id, borrower_id="u1", notes="for the crypt"))
+        s.add(Borrow(treasury_entry_id=spare.id, borrower_id="u2",
+                     returned_at=lent.added_at))  # old, returned loan
+    token = login(api, "u2")["token"]
+    g = api.get("/api/guild", headers=auth(token)).json()
+
+    assert g["coffers"] == {"balance_cp": 12345, "balance": "123gp 4sp 5cp"}
+    assert [loc["name"] for loc in g["locations"]] == ["Armory"]
+    armory = g["locations"][0]
+    assert armory["description"] == "Behind the tavern"
+    assert (armory["used_slots"], armory["max_slots"]) == (3, 20)
+    assert armory["items"][0]["name"] == "Rope"
+
+    by_tag = {t["tag"]: t for t in g["treasury"]}
+    assert by_tag["cracked"]["status"] == "borrowed"
+    assert by_tag["cracked"]["borrower"]["name"] == "Bob"
+    assert by_tag["cracked"]["borrower"]["notes"] == "for the crypt"
+    assert by_tag["cracked"]["item"]["description"] == "Glows near undead."
+    assert by_tag[None]["status"] == "available" and by_tag[None]["borrower"] is None
+    assert api.get("/api/guild").status_code == 401
+
+
+def test_guild_overview_empty(api):
+    token = login(api, "u1")["token"]
+    g = api.get("/api/guild", headers=auth(token)).json()
+    assert g == {"coffers": {"balance_cp": 0, "balance": "0cp"}, "locations": [], "treasury": []}
+
+
+def test_item_catalog_type_filter_and_limit(api):
+    from shadowdark_bot.models import ITEM_TYPE_WEAPON
+
+    with session_scope() as s:
+        _seed(s)
+        s.add(Item(name="Bow", gear_slots=1, item_type=ITEM_TYPE_WEAPON))
+    token = login(api, "u1")["token"]
+    names = lambda r: [x["name"] for x in r.json()]  # noqa: E731
+    assert names(api.get("/api/items?type=weapon", headers=auth(token))) == ["Bow"]
+    assert len(api.get("/api/items?limit=1000", headers=auth(token)).json()) == 3
+    assert api.get("/api/items?type=banana", headers=auth(token)).status_code == 422
+    assert api.get("/api/items?limit=5000", headers=auth(token)).status_code == 422

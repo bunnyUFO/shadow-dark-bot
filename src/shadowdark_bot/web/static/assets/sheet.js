@@ -140,7 +140,7 @@ function inventoryTab(c) {
   ];
 }
 
-function storeCard(label, store, empty) {
+export function storeCard(label, store, empty) {
   const pct = store.max_slots > 0 ? Math.min(100, (store.used_slots / store.max_slots) * 100) : 0;
   const full = store.used_slots >= store.max_slots;
   return h("section", { class: "card" },
@@ -149,6 +149,7 @@ function storeCard(label, store, empty) {
       h("span", { class: full ? "slots full" : "slots" },
         `${slots(store.used_slots)} / ${slots(store.max_slots)} slots`),
     ),
+    store.description ? h("p", { class: "store-desc muted" }, store.description) : null,
     h("div", {
       class: "meter",
       role: "meter",

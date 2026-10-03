@@ -5,14 +5,29 @@
 //   #/sheet/<tab>           -> your sheet
 //   #/party                 -> everyone's characters
 //   #/party/<user_id>/<tab> -> someone else's sheet (read-only, no stash)
+//   #/guild                 -> coffers, guild storage, magic item treasury
+//   #/items                 -> the item catalog
+//   #/spells                -> the spell reference
 //   /auth/callback?code=…   -> Discord redirect login lands here
 
 import { api, ApiError, getToken, setToken } from "./api.js";
 import { h, mount } from "./dom.js";
+import { renderGuild, renderItems, renderSpells } from "./library.js";
 import { sheetBody, sheetHeader, subtitle, TABS } from "./sheet.js";
 
 const app = document.getElementById("app");
 const topnav = document.getElementById("topnav");
+const bottomnav = document.getElementById("bottomnav");
+
+// Top-level sections: [route, label]. Desktop shows them in the top bar,
+// phones in a bottom tab bar.
+const SECTIONS = [
+  ["sheet", "Sheet"],
+  ["party", "Party"],
+  ["guild", "Guild"],
+  ["items", "Items"],
+  ["spells", "Spells"],
+];
 const STATE_KEY = "sd.oauth_state";
 
 let config = null; // /api/auth/config
@@ -49,11 +64,14 @@ async function route() {
     }
     throw err;
   }
-  renderNav();
-
   const [, section = "sheet", a, b] = location.hash.replace(/^#/, "").split("/");
+  renderNav(section);
+  window.scrollTo(0, 0);
   if (section === "party" && a) return renderOtherSheet(decodeURIComponent(a), tabOr(b));
   if (section === "party") return renderParty();
+  if (section === "guild") return renderGuild(app);
+  if (section === "items") return renderItems(app);
+  if (section === "spells") return renderSpells(app);
   return renderMySheet(tabOr(a));
 }
 
@@ -61,17 +79,27 @@ const tabOr = (t) => (TABS.some(([key]) => key === t) ? t : "combat");
 
 // ---------- nav ----------
 
-function renderNav() {
+function renderNav(active) {
+  document.body.classList.toggle("signed-in", Boolean(me));
   if (!me) {
     mount(topnav);
+    mount(bottomnav);
     return;
   }
+  const links = () =>
+    SECTIONS.map(([key, label]) =>
+      h("a", {
+        href: key === "sheet" ? "#/sheet/combat" : `#/${key}`,
+        class: key === active ? "active" : null,
+        "aria-current": key === active ? "page" : null,
+      }, label),
+    );
   const switchLabel = config.mode === "local" ? "Switch" : "Log out";
   mount(topnav,
-    h("a", { href: "#/sheet/combat" }, "My sheet"),
-    h("a", { href: "#/party" }, "Party"),
+    h("span", { class: "sections" }, links()),
     h("button", { type: "button", class: "link", onclick: signOut }, switchLabel),
   );
+  mount(bottomnav, links());
 }
 
 function signOut() {

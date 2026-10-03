@@ -310,3 +310,107 @@ button.primary:hover { filter: brightness(1.08); }
   padding: 2px 10px;
   font-size: 0.92rem;
 }
+
+/* ---------- section navigation ---------- */
+
+.topnav .sections { display: none; gap: 4px; }
+.topnav .sections a,
+.bottomnav a {
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.topnav .sections a:hover,
+.bottomnav a:hover { color: var(--text); text-decoration: none; }
+.topnav .sections a.active,
+.bottomnav a.active { color: var(--torch); }
+
+/* Phones: sections live in a bottom tab bar, within thumb reach. */
+.bottomnav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: none;
+  justify-content: space-around;
+  padding: 6px 4px;
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
+  background: rgba(12, 12, 13, 0.96);
+  border-top: 1px solid var(--line);
+}
+.bottomnav a { flex: 1; text-align: center; font-size: 0.9rem; font-weight: 500; }
+body.signed-in .bottomnav { display: flex; }
+body.signed-in main { padding-bottom: 84px; }
+
+@media (min-width: 720px) {
+  .topnav .sections { display: flex; }
+  body.signed-in .bottomnav { display: none; }
+  body.signed-in main { padding-bottom: 32px; }
+}
+
+/* ---------- filters ---------- */
+
+.filters { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+
+.search {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  padding: 9px 12px;
+}
+.search::placeholder { color: var(--muted); }
+.search:focus { outline: none; border-color: var(--torch); }
+
+.chip-group {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.chip-group::-webkit-scrollbar { display: none; }
+.chip {
+  flex: 0 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 5px 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.chip:hover { color: var(--text); }
+.chip.on { color: var(--bg); background: var(--torch); border-color: var(--torch); }
+
+.count { margin: 0 0 8px; font-size: 0.9rem; }
+
+/* ---------- badges ---------- */
+
+.badge {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  padding: 1px 8px;
+  border-radius: 99px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.badge.align { color: var(--muted); }
+.badge.in { color: #6fcf8e; }
+.badge.out { color: var(--torch); }
+
+/* Item types — same hues as the bot's embed colours. */
+.type-common { color: #5dade2; }
+.type-magical { color: #bb8fce; }
+.type-crafted { color: #58d68d; }
+.type-scroll { color: #eb984e; }
+.type-potion { color: #48c9b0; }
+.type-weapon { color: #ec7063; }
+.type-armor { color: #bfc9ca; }
+.type-loot { color: #f4d03f; }
+
+.tag { color: var(--muted); }
+.store-desc { margin: -2px 0 8px; font-size: 0.9rem; }

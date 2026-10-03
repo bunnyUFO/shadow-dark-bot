@@ -105,7 +105,9 @@ tokens), `schemas.py` (JSON shapes), `server.py` (uvicorn in the bot's loop + me
 | `GET /api/me` | ✅ | Session user + whether they have a character |
 | `GET /api/character` | ✅ | Full sheet for the session user (404 if none) |
 | `GET /api/characters/{user_id}` | ✅ | Read-only view, held items only (like `/character show`) |
-| `GET /api/spells?class=&tier=` · `GET /api/items?q=` | ✅ | Reference data for pickers |
+| `GET /api/spells?class=&tier=` · `GET /api/items?q=&type=&limit=` | ✅ | Spell reference and item catalog (Spells / Items sections, pickers) |
+| `GET /api/guild` | ✅ | Coffers, shared storage locations with contents, magic item treasury (status + borrower's character name) |
+| `GET /api/characters` | ✅ | Party list |
 | `PATCH /api/character/{identity,stats,gold,skills,proficiencies}` | Phase 5 | Mirrors the edit modals |
 | `POST /api/character/items` · `DELETE …/items/{id}` · `POST …/items/{id}/give` | Phase 5 | Carry / remove / give |
 | `POST /api/character/spells` · `DELETE …/spells/{id}` | Phase 5 | Learn / forget |
@@ -173,7 +175,7 @@ Order changed (2026-10-03): build and iterate on the **local** app first, then d
 
 1. ✅ **Services refactor** — `services/characters.py` extracted; the cog calls it; `tests/test_character_services.py` covers it without discord.py. No behavior change.
 2. ✅ **Web API + login backend** — FastAPI in the bot's event loop, `/api/auth/exchange` for both login flows, read endpoints, guild allowlist, `tests/test_web_api.py`.
-3. ✅ **Local app + read-only frontend** — `LOCAL_WEB_ENABLED` on port 8081 (pick a character, home network only); no-build frontend in `web/static/` (Combat / Inventory / Roleplaying tabs, party view, Discord redirect login page for later). Compose publishes 8081.
+3. ✅ **Local app + read-only frontend** — `LOCAL_WEB_ENABLED` on port 8081 (pick a character, home network only); no-build frontend in `web/static/`. Sections: **Sheet** (Combat / Inventory / Roleplaying tabs), **Party**, **Guild** (coffers, storage locations, magic item treasury), **Items** (catalog with search + type filter), **Spells** (reference with class / tier / alignment filters). Bottom tab bar on phones, top bar on desktop. Discord redirect login page ready for later. Compose publishes 8081.
 4. **Iterate on the UI** from feedback on the local app.
 5. **Editing** — write endpoints + edit forms (identity, stats, gold, skills, items, spells, give).
 6. **Public hosting** — static IP, DNS, cert, NPM host → port 8080, OAuth settings. Sheet live at `shadowdark.bunnyufo.net`.

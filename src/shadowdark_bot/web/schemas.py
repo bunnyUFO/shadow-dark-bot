@@ -8,11 +8,21 @@ so the web sheet and the bot always agree.
 from datetime import datetime
 
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, joinedload
 
 from shadowdark_bot import storage
 from shadowdark_bot.currency import format_cp
-from shadowdark_bot.models import InventoryEntry, Item, Location, PlayerCharacter, Spell
+from shadowdark_bot.models import (
+    Borrow,
+    Coffer,
+    InventoryEntry,
+    Item,
+    Location,
+    PlayerCharacter,
+    Spell,
+    TreasuryEntry,
+)
 from shadowdark_bot.rules import ABILITIES, ability_modifier, spellcasting_modifier
 from shadowdark_bot.services import characters
 
@@ -73,6 +83,7 @@ class ItemStackOut(BaseModel):
 class StoreOut(BaseModel):
     location_id: int
     name: str
+    description: str | None = None
     used_slots: float
     max_slots: float
     items: list[ItemStackOut]
@@ -121,6 +132,32 @@ class CatalogItemOut(BaseModel):
     bundle_size: int
     value_cp: int | None
     description: str | None
+
+
+class BorrowerOut(BaseModel):
+    user_id: str
+    name: str | None  # their character's name, if they have one
+    borrowed_at: datetime
+    notes: str | None
+
+
+class TreasuryEntryOut(BaseModel):
+    id: int
+    item: CatalogItemOut
+    tag: str | None
+    status: str  # "available" | "borrowed"
+    borrower: BorrowerOut | None
+
+
+class CoffersOut(BaseModel):
+    balance_cp: int
+    balance: str
+
+
+class GuildOut(BaseModel):
+    coffers: CoffersOut
+    locations: list[StoreOut]  # shared guild storage (not characters' held/stash)
+    treasury: list[TreasuryEntryOut]
 
 
 # ---------- builders ----------
@@ -186,6 +223,7 @@ def _store_out(session: Session, loc: Location) -> StoreOut:
     return StoreOut(
         location_id=loc.id,
         name=loc.name,
+        description=loc.description,
         used_slots=storage.used_slots(entries),
         max_slots=loc.max_gear_slots,
         items=[_stack_out(e) for e in entries],
@@ -253,4 +291,62 @@ def character_sheet(
         talents=char.talents,
         additional_info=char.additional_info,
         updated_at=char.updated_at,
+    )
+
+
+def guild_overview(session: Session) -> GuildOut:
+    """Coffers, every shared storage location with its contents, and the magic
+    item treasury with who has each borrowed instance."""
+    coffer = session.scalar(select(Coffer).limit(1))
+    balance = coffer.balance_cp if coffer is not None else 0
+
+    locations = session.scalars(
+        select(Location)
+        .where(Location.kind == "inventory", Location.owner_user_id.is_(None))
+        .order_by(Location.name)
+    ).all()
+
+    entries = session.scalars(
+        select(TreasuryEntry)
+        .options(joinedload(TreasuryEntry.item))
+        .join(Item, TreasuryEntry.item_id == Item.id)
+        .order_by(Item.name, TreasuryEntry.id)
+    ).all()
+    open_borrows = {
+        b.treasury_entry_id: b
+        for b in session.scalars(select(Borrow).where(Borrow.returned_at.is_(None))).all()
+    }
+    names = {
+        uid: name
+        for uid, name in session.execute(
+            select(PlayerCharacter.user_id, PlayerCharacter.name).where(
+                PlayerCharacter.user_id.in_({b.borrower_id for b in open_borrows.values()})
+            )
+        ).all()
+    }
+
+    treasury = []
+    for e in entries:
+        borrow = open_borrows.get(e.id) if e.status == "borrowed" else None
+        treasury.append(
+            TreasuryEntryOut(
+                id=e.id,
+                item=catalog_item_out(e.item),
+                tag=e.tag,
+                status=e.status,
+                borrower=BorrowerOut(
+                    user_id=borrow.borrower_id,
+                    name=names.get(borrow.borrower_id),
+                    borrowed_at=borrow.borrowed_at,
+                    notes=borrow.notes,
+                )
+                if borrow is not None
+                else None,
+            )
+        )
+
+    return GuildOut(
+        coffers=CoffersOut(balance_cp=balance, balance=format_cp(balance) or "0cp"),
+        locations=[_store_out(session, loc) for loc in locations],
+        treasury=treasury,
     )

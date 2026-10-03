@@ -167,7 +167,7 @@ The bot can also serve the character sheets as a web page on your home network �
 LOCAL_WEB_ENABLED=true
 ```
 
-then restart (`docker compose up -d`, or the update script). Open `http://<bot container IP>:8081` from any device on the network. It's read-only for now; editing and a public, Discord-login version (and the in-Discord Activity) are planned — see [the plan](docs/implementation/discord-activity.md).
+then restart (`docker compose up -d`, or the update script). Open `http://<bot container IP>:8081` from any device on the network. Besides each character's sheet it has **Party**, **Guild** (coffers, storage locations, the magic item treasury and who has what), **Items** (the catalog) and **Spells** (the reference) sections. It's read-only for now; editing and a public, Discord-login version (and the in-Discord Activity) are planned — see [the plan](docs/implementation/discord-activity.md).
 
 The local sheet only answers private-network addresses and refuses anything that comes through a reverse proxy, so don't put it behind Nginx Proxy Manager.
 

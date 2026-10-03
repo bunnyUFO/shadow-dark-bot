@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from shadowdark_bot.db import session_scope
-from shadowdark_bot.models import Item, PlayerCharacter, Spell
+from shadowdark_bot.models import ITEM_TYPES, Item, PlayerCharacter, Spell
 from shadowdark_bot.services import characters
 from shadowdark_bot.services.characters import CharacterError, CharacterNotFound
 from shadowdark_bot.web.auth import (
@@ -40,11 +40,13 @@ from shadowdark_bot.web.schemas import (
     CatalogItemOut,
     CharacterSheetOut,
     CharacterSummaryOut,
+    GuildOut,
     SpellOut,
     UserOut,
     catalog_item_out,
     character_sheet,
     character_summary,
+    guild_overview,
     spell_out,
 )
 
@@ -287,14 +289,25 @@ def create_app(
     def items(
         user: User,
         q: Annotated[str, Query(max_length=100)] = "",
-        limit: Annotated[int, Query(ge=1, le=100)] = 25,
+        item_type: Annotated[str | None, Query(alias="type")] = None,
+        limit: Annotated[int, Query(ge=1, le=1000)] = 25,
     ) -> list[CatalogItemOut]:
-        """Catalog items matching `q` (for the carry picker)."""
+        """The guild's item catalog, optionally filtered by name and type."""
+        if item_type is not None and item_type not in ITEM_TYPES:
+            raise HTTPException(status_code=422, detail="Unknown item type.")
         stmt = select(Item).order_by(Item.name).limit(limit)
         if q.strip():
             stmt = stmt.where(Item.name.ilike(f"%{q.strip()}%"))
+        if item_type is not None:
+            stmt = stmt.where(Item.item_type == item_type)
         with session_scope() as session:
             return [catalog_item_out(item) for item in session.scalars(stmt).all()]
+
+    @app.get("/api/guild")
+    def guild(user: User) -> GuildOut:
+        """Guild coffers, shared storage locations and the magic item treasury."""
+        with session_scope() as session:
+            return guild_overview(session)
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"])
     def api_not_found(path: str) -> None:
