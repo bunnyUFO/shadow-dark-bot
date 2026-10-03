@@ -70,13 +70,16 @@ shadow-dark-bot/
 │       ├── rules.py              ← pure Shadow Dark rules helpers (ability modifiers, carry limit, slot cost)
 │       ├── spell_data.py         ← Tier 1–5 + alignment spell reference + idempotent seeder
 │       ├── embeds.py             ← functions that build the pretty Discord embed cards
+│       ├── storage.py            ← character held/stash location helpers
+│       ├── services/             ← domain operations with no Discord code (shared with the planned web API)
+│       │   └── characters.py         ← character sheet: edits, carry/give/remove, spells, delete
 │       └── cogs/                 ← "cog" = discord.py term for a group of related commands
 │           ├── __init__.py
 │           ├── items_database.py     ← /items add, info, edit, remove, browse
 │           ├── guild_inventory.py    ← /inventory location-create/edit/delete, add, browse
 │           ├── magical_treasury.py   ← /treasury add, remove, browse
 │           ├── guild_coffers.py      ← /coffers add, subtract, browse
-│           ├── player_characters.py  ← /character sheet, carry, show (+ Manage Spells, Delete button)
+│           ├── player_characters.py  ← /character sheet, carry, show — Discord UI over services/characters.py
 │           └── spell_reference.py     ← /spells browse (class/tier/alignment/name) + /spells info
 │
 └── docs/                         ← human-readable documentation (not loaded at runtime)
@@ -87,6 +90,7 @@ shadow-dark-bot/
         ├── architecture.md       ← high-level: which file does what, why these libraries
         ├── data-model.md         ← the database schema, table by table, with invariants
         ├── permissions.md        ← who can run what (currently: everyone; roles are future work)
+        ├── discord-activity.md   ← plan: character sheet as a web app / embedded Discord Activity
         └── roadmap.md            ← what's planned next (audit log, role-based perms, channel routing, etc.)
 ```
 
@@ -96,6 +100,7 @@ shadow-dark-bot/
 |---|---|
 | **Add a new slash command** | A cog under `src/shadowdark_bot/cogs/`. Use `items_database.py` as a template. |
 | **Change how an embed looks** | `src/shadowdark_bot/embeds.py` |
+| **Change a character-sheet rule** (capacity, give targets, spell learning, validation) | `src/shadowdark_bot/services/characters.py` — the `/character` cog only renders Discord UI |
 | **Add a database column** | Edit `src/shadowdark_bot/models.py`, then create a new migration in `migrations/versions/` |
 | **Change a setting** | `.env` (your local copy; never commit secrets) |
 | **Update install dependencies** | `pyproject.toml`, then re-run `pip install -e .` |
@@ -160,3 +165,4 @@ Implementation:
 - [Data model](docs/implementation/data-model.md)
 - [Permissions & audit log](docs/implementation/permissions.md)
 - [Roadmap](docs/implementation/roadmap.md)
+- [Plan: character sheet as a Discord Activity](docs/implementation/discord-activity.md)

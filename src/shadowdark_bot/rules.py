@@ -63,3 +63,8 @@ def stack_slots(quantity: int, gear_slots: float, bundle_size: int) -> float:
     gear_slots``. A partial bundle still consumes a full bundle's worth of
     slots."""
     return math.ceil(quantity / max(bundle_size, 1)) * gear_slots
+
+
+def fmt_slots(n: float) -> str:
+    """Render a gear-slot count without a trailing ``.0`` (``1.0`` → ``1``)."""
+    return f"{n:g}"

@@ -12,13 +12,13 @@
 ┌──────────────────────────────────────────────┐
 │ Discord slash commands (cogs/*.py)           │  ← presentation + arg parsing
 ├──────────────────────────────────────────────┤
-│ Domain operations on ORM models (models.py)  │  ← business invariants live here
+│ Domain services (services/*.py)              │  ← business invariants live here
 ├──────────────────────────────────────────────┤
 │ SQLAlchemy session + SQLite (db.py)          │  ← persistence
 └──────────────────────────────────────────────┘
 ```
 
-Cogs are thin: they parse interaction options, open a session, call a domain function, format an embed, reply. Invariants (magical-only-in-treasury, no-double-borrow, etc.) live in domain functions on the models module so they're testable without spinning up discord.py.
+This is the target shape. `/character` follows it: the cog parses interaction input, opens a session, calls `services/characters.py`, and formats the reply; the service enforces the invariants and raises `CharacterError` with a user-facing reason. Services never import discord.py, so they're unit-tested directly and will be shared with the planned web API (see [discord-activity.md](discord-activity.md)). The guild cogs (`/items`, `/inventory`, `/treasury`, `/coffers`) still keep their invariants inline — see below.
 
 ## Tech stack
 
@@ -60,14 +60,20 @@ src/shadowdark_bot/
   models.py         # SQLAlchemy ORM classes (Item, Location, InventoryEntry, TreasuryEntry, Borrow, AuditLog, Coffer)
   currency.py       # gp/sp/cp ↔ copper helpers (parse_to_cp, format_cp)
   embeds.py         # build_item_embed, build_location_*_embed, build_treasury_*_embed, build_coffer_*_embed, time helpers
+  rules.py          # pure Shadow Dark rules: modifiers, carry capacity, bundle-aware slot cost
+  storage.py        # character held/stash location helpers shared by the cogs
+  services/
+    characters.py   # character-sheet operations: identity/stats edits, carry/give/remove, spells, delete
   cogs/
     items_database.py    # /items add, info, edit, remove, browse
     guild_inventory.py   # /inventory location-create/edit/delete, add, browse
     magical_treasury.py  # /treasury add, remove, browse
     guild_coffers.py     # /coffers add, subtract, browse
+    player_characters.py # /character sheet, carry, show — Discord UI over services/characters.py
+    spell_reference.py   # /spells info, browse
 ```
 
-Cogs implement both the slash-command surface and the invariants (capacity checks, magical-vs-non-magical sorting, borrow-state guards). Models are plain ORM rows. There's no separate "domain layer" — cogs are short enough that the extra indirection wouldn't pay off.
+The guild cogs still implement both the slash-command surface and the invariants (capacity checks, magical-vs-non-magical sorting, borrow-state guards). They move into `services/` only when something besides Discord needs them — `/character` moved first because the web app needs it.
 
 ## Key cross-cutting concerns
 
