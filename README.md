@@ -71,8 +71,14 @@ shadow-dark-bot/
 │       ├── spell_data.py         ← Tier 1–5 + alignment spell reference + idempotent seeder
 │       ├── embeds.py             ← functions that build the pretty Discord embed cards
 │       ├── storage.py            ← character held/stash location helpers
-│       ├── services/             ← domain operations with no Discord code (shared with the planned web API)
+│       ├── services/             ← domain operations with no Discord code (shared by the cogs and web API)
 │       │   └── characters.py         ← character sheet: edits, carry/give/remove, spells, delete
+│       ├── web/                  ← optional web app (WEB_ENABLED=true): FastAPI on the bot's event loop
+│       │   ├── app.py                ← routes: Discord login exchange, sheet + reference endpoints
+│       │   ├── auth.py               ← OAuth code exchange, signed session tokens
+│       │   ├── schemas.py            ← JSON shapes for the sheet
+│       │   ├── server.py             ← runs the local (8081) / public (8080) apps + guild-membership check
+│       │   └── static/               ← the frontend: plain HTML/CSS/JS modules, no build step
 │       └── cogs/                 ← "cog" = discord.py term for a group of related commands
 │           ├── __init__.py
 │           ├── items_database.py     ← /items add, info, edit, remove, browse
@@ -152,6 +158,18 @@ bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/mai
 ```
 
 Full walkthrough (overrides, backups, restore, troubleshooting): [docs/deploy-proxmox.md](docs/deploy-proxmox.md).
+
+## Web character sheet (home network)
+
+The bot can also serve the character sheets as a web page on your home network — no Discord login, you just pick your character. In the bot's `.env` set:
+
+```bash
+LOCAL_WEB_ENABLED=true
+```
+
+then restart (`docker compose up -d`, or the update script). Open `http://<bot container IP>:8081` from any device on the network. Besides each character's sheet it has **Party**, **Guild** (coffers, storage locations, the magic item treasury and who has what), **Items** (the catalog) and **Spells** (the reference) sections. It's read-only for now; editing and a public, Discord-login version (and the in-Discord Activity) are planned — see [the plan](docs/implementation/discord-activity.md).
+
+The local sheet only answers private-network addresses and refuses anything that comes through a reverse proxy, so don't put it behind Nginx Proxy Manager.
 
 ## Docs
 

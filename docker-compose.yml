@@ -5,3 +5,6 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
+    ports:
+      # Local web sheet (LOCAL_WEB_ENABLED=true): http://<container-ip>:8081
+      - "8081:8081"

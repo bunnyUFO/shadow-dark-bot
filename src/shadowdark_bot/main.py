@@ -43,6 +43,7 @@ class ShadowDarkBot(commands.Bot):
         intents = discord.Intents.default()
         super().__init__(command_prefix="!", intents=intents)
         self._synced_guilds: set[int] = set()
+        self._web_servers: list = []
 
     async def setup_hook(self) -> None:
         await self.load_extension("shadowdark_bot.cogs.items_database")
@@ -51,6 +52,22 @@ class ShadowDarkBot(commands.Bot):
         await self.load_extension("shadowdark_bot.cogs.guild_coffers")
         await self.load_extension("shadowdark_bot.cogs.player_characters")
         await self.load_extension("shadowdark_bot.cogs.spell_reference")
+        if settings.LOCAL_WEB_ENABLED or settings.WEB_ENABLED:
+            from shadowdark_bot.web.server import WebServer
+
+            if settings.LOCAL_WEB_ENABLED:
+                self._web_servers.append(WebServer.local(settings))
+                log.info("Local web app (no login) on port %s", settings.LOCAL_WEB_PORT)
+            if settings.WEB_ENABLED:
+                self._web_servers.append(WebServer.public(self, settings))
+                log.info("Public web app (Discord login) on port %s", settings.WEB_PORT)
+            for server in self._web_servers:
+                server.start()
+
+    async def close(self) -> None:
+        for server in self._web_servers:
+            await server.stop()
+        await super().close()
 
     async def _sync_to_guild(self, guild: discord.Guild) -> None:
         if guild.id in self._synced_guilds:
@@ -82,6 +99,8 @@ async def ping(interaction: discord.Interaction) -> None:
 
 
 def main() -> None:
+    if errors := settings.web_config_errors():
+        raise SystemExit("Web app settings are incomplete: " + "; ".join(errors))
     run_migrations()
     seed_reference_data()
     bot.run(settings.DISCORD_TOKEN, log_handler=None)
