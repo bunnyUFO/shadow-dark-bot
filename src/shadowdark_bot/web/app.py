@@ -25,8 +25,17 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from shadowdark_bot import storage
+from shadowdark_bot.currency import parse_value_string
 from shadowdark_bot.db import session_scope
-from shadowdark_bot.models import ITEM_TYPES, Item, PlayerCharacter, Spell
+from shadowdark_bot.models import (
+    ITEM_TYPES,
+    LOCATION_ROLE_HELD,
+    LOCATION_ROLE_STASH,
+    Item,
+    PlayerCharacter,
+    Spell,
+)
 from shadowdark_bot.services import characters
 from shadowdark_bot.services.characters import CharacterError, CharacterNotFound
 from shadowdark_bot.web.auth import (
@@ -39,9 +48,18 @@ from shadowdark_bot.web.auth import (
 from shadowdark_bot.web.schemas import (
     CatalogItemOut,
     CharacterSheetOut,
+    CarryIn,
     CharacterSummaryOut,
+    GiveIn,
+    GiveTargetOut,
+    GoldIn,
     GuildOut,
+    IdentityIn,
+    LearnSpellIn,
+    ProficienciesIn,
+    SkillsIn,
     SpellOut,
+    StatsIn,
     UserOut,
     catalog_item_out,
     character_sheet,
@@ -248,9 +266,7 @@ def create_app(
 
     @app.get("/api/character")
     def my_character(user: User) -> CharacterSheetOut:
-        with session_scope() as session:
-            char = characters.require_character(session, user.user_id)
-            return character_sheet(session, char, include_stash=True)
+        return _my_sheet(user.user_id)
 
     @app.get("/api/characters")
     def all_characters(user: User) -> list[CharacterSummaryOut]:
@@ -309,6 +325,159 @@ def create_app(
         with session_scope() as session:
             return guild_overview(session)
 
+    # ---------- editing ----------
+    # Every write returns the full updated sheet (same body as GET /api/character).
+    # These must stay above the catch-all below, which also matches PATCH/POST/DELETE.
+
+    @app.patch("/api/character/gold")
+    def set_gold(body: GoldIn, user: User) -> CharacterSheetOut:
+        try:
+            cp = parse_value_string(body.gold)
+        except ValueError as err:
+            raise CharacterError(str(err)) from err
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            characters.set_gold(session, user.user_id, cp)
+        return _my_sheet(user.user_id)
+
+    @app.post("/api/character/items")
+    def carry_item(body: CarryIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            characters.carry(
+                session,
+                user.user_id,
+                item_name=body.name,
+                quantity=body.quantity,
+                role=body.to,
+                freeform_slots=body.slots_each,
+                notes=body.notes,
+            )
+        return _my_sheet(user.user_id)
+
+    @app.delete("/api/character/items/{entry_id}")
+    def drop_item(
+        entry_id: int, user: User, quantity: int | None = None
+    ) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            role = _own_entry_role(session, user.user_id, entry_id)
+            characters.remove(
+                session, user.user_id, role=role, entry_id=entry_id, quantity=quantity
+            )
+        return _my_sheet(user.user_id)
+
+    @app.get("/api/character/items/{entry_id}/give-targets")
+    def give_targets(entry_id: int, user: User) -> list[GiveTargetOut]:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            role = _own_entry_role(session, user.user_id, entry_id)
+            source = storage.character_location(session, user.user_id, role)
+            out = []
+            for loc in characters.give_target_locations(session, user.user_id, source):
+                if loc.owner_user_id is None:
+                    kind = "guild"
+                elif loc.owner_user_id == user.user_id:
+                    kind = "self"
+                else:
+                    kind = "character"
+                out.append(
+                    GiveTargetOut(
+                        location_id=loc.id,
+                        name=loc.name,
+                        kind=kind,
+                        owner_user_id=loc.owner_user_id,
+                    )
+                )
+            return out
+
+    @app.post("/api/character/items/{entry_id}/give")
+    def give_item(entry_id: int, body: GiveIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            role = _own_entry_role(session, user.user_id, entry_id)
+            characters.give(
+                session,
+                user.user_id,
+                role=role,
+                entry_id=entry_id,
+                target_location_id=body.target_location_id,
+                quantity=body.quantity,
+            )
+        return _my_sheet(user.user_id)
+
+    @app.post("/api/character/spells")
+    def learn_spell(body: LearnSpellIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            sp = session.get(Spell, body.spell_id)
+            if sp is None:
+                raise CharacterNotFound("That spell no longer exists.")
+            characters.learn_spell(session, user.user_id, sp.name)
+        return _my_sheet(user.user_id)
+
+    @app.delete("/api/character/spells/{known_id}")
+    def forget_spell(known_id: int, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            char = characters.require_character(session, user.user_id)
+            if characters.find_known_spell(char, known_id) is None:
+                raise CharacterNotFound("You don't know that spell.")
+            characters.forget_spell(session, user.user_id, known_id)
+        return _my_sheet(user.user_id)
+
+    @app.patch("/api/character/identity")
+    def set_identity(body: IdentityIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)  # no creation over the web
+            characters.save_identity(
+                session,
+                user.user_id,
+                name=body.name,
+                char_class=body.char_class,
+                title=body.title,
+                ancestry=body.ancestry,
+                alignment=body.alignment,
+                background=body.background,
+            )
+        return _my_sheet(user.user_id)
+
+    @app.patch("/api/character/stats")
+    def set_stats(body: StatsIn, user: User) -> CharacterSheetOut:
+        ability = (body.spell_ability or "").strip().lower()
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            characters.update_stats(
+                session,
+                user.user_id,
+                scores=body.scores,
+                level=body.level,
+                max_hp=body.max_hp,
+                armor_class=body.armor_class,
+                spell_ability=None if ability in ("", "none") else ability,
+                spell_check_bonus=body.spell_check_bonus,
+            )
+        return _my_sheet(user.user_id)
+
+    @app.patch("/api/character/skills")
+    def set_skills(body: SkillsIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            characters.set_skills_knowledge(
+                session,
+                user.user_id,
+                languages=body.languages,
+                talents=body.talents,
+                additional_info=body.additional_info,
+            )
+        return _my_sheet(user.user_id)
+
+    @app.patch("/api/character/proficiencies")
+    def set_proficiencies(body: ProficienciesIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            characters.set_proficiencies(session, user.user_id, body.proficiencies)
+        return _my_sheet(user.user_id)
+
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"])
     def api_not_found(path: str) -> None:
         raise HTTPException(status_code=404, detail="Not found.")
@@ -325,6 +494,22 @@ def create_app(
             return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
     return app
+
+
+def _my_sheet(user_id: str) -> CharacterSheetOut:
+    """The signed-in user's full sheet, read in a fresh session so it reflects
+    what the write just committed (no stale identity-map state after deletes)."""
+    with session_scope() as session:
+        char = characters.require_character(session, user_id)
+        return character_sheet(session, char, include_stash=True)
+
+
+def _own_entry_role(session, user_id: str, entry_id: int) -> str:
+    """Whether a stack is in the user's held items or stash (404 if neither)."""
+    for role in (LOCATION_ROLE_HELD, LOCATION_ROLE_STASH):
+        if characters.location_entry(session, user_id, role, entry_id) is not None:
+            return role
+    raise CharacterNotFound("That item is no longer there.")
 
 
 def _summaries(session) -> list[CharacterSummaryOut]:
