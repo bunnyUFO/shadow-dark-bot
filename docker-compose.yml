@@ -6,5 +6,7 @@ services:
     volumes:
       - ./data:/app/data
     ports:
-      # Local web sheet (LOCAL_WEB_ENABLED=true): http://<container-ip>:8081
-      - "8081:8081"
+      # Public app (WEB_ENABLED=true): Nginx Proxy Manager -> http://<CT IP>:8080. Never expose to the internet directly.
+      - "${WEB_PORT:-8080}:${WEB_PORT:-8080}"
+      # Local web sheet (LOCAL_WEB_ENABLED=true): home network only
+      - "${LOCAL_WEB_PORT:-8081}:${LOCAL_WEB_PORT:-8081}"
