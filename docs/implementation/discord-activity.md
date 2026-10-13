@@ -108,12 +108,15 @@ tokens), `schemas.py` (JSON shapes), `server.py` (uvicorn in the bot's loop + me
 | `GET /api/spells?class=&tier=` · `GET /api/items?q=&type=&limit=` | ✅ | Spell reference and item catalog (Spells / Items sections, pickers) |
 | `GET /api/guild` | ✅ | Coffers, shared storage locations with contents, magic item treasury (status + borrower's character name) |
 | `GET /api/characters` | ✅ | Party list |
-| `PATCH /api/character/{identity,stats,gold,skills,proficiencies}` | Phase 5 | Mirrors the edit modals |
-| `POST /api/character/items` · `DELETE …/items/{id}` · `POST …/items/{id}/give` | Phase 5 | Carry / remove / give |
-| `POST /api/character/spells` · `DELETE …/spells/{id}` | Phase 5 | Learn / forget |
+| `PATCH /api/character/{identity,stats,gold,skills,proficiencies}` | ✅ | Mirrors the edit modals; each PATCH replaces its whole group (gold is a `"12gp 5sp"` string, stats take `armor_class_base`) |
+| `POST /api/character/items` · `DELETE …/items/{id}?quantity=` · `POST …/items/{id}/give` | ✅ | Carry / remove / give (`{target_location_id, quantity?}`) |
+| `GET /api/character/items/{id}/give-targets` | ✅ | Where a stack may go: guild locations, own other location (`self`), other characters' held items |
+| `POST /api/character/spells` (`{spell_id}`) · `DELETE …/spells/{known_id}` | ✅ | Learn / forget (`known_id` = `spells[].id` on the sheet) |
 
-Errors are `{"detail": "..."}`: 401 not logged in, 403 not in an allowed guild, 404 no character,
-400 a rule failed (the same reason text the bot shows). Interactive docs (`/docs`) are disabled.
+Every write returns 200 with the full updated sheet (same body as `GET /api/character`).
+Errors are `{"detail": "..."}`: 401 not logged in, 403 not in an allowed guild, 404 no character
+or an item/spell id that isn't yours, 422 a body of the wrong type,
+400 a rule failed (the same reason text the bot shows, which may contain `**bold**`). Interactive docs (`/docs`) are disabled.
 
 **Allowlist.** At login the bot checks whether the user is in any `ALLOWED_GUILD_IDS` guild
 (member cache, then a REST lookup — no members intent needed). The result is baked into the
