@@ -213,8 +213,9 @@ async function renderMySheet(tab) {
   }
   const draw = (c) => {
     const y = window.scrollY;
-    mount(app, sheetHeader(c, tab, (t) => `#/sheet/${t}`),
-      h("div", { class: "sheet" }, sheetBody(c, tab, editOpts(c, draw))));
+    const ed = editOpts(c, draw);
+    mount(app, sheetHeader(c, tab, (t) => `#/sheet/${t}`, ed.tools("identity")),
+      h("div", { class: "sheet" }, sheetBody(c, tab, ed)));
     window.scrollTo(0, y);
   };
   draw(await api("/character"));

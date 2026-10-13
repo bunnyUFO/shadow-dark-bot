@@ -176,7 +176,8 @@ button.primary:hover { filter: brightness(1.08); }
 
 /* ---------- sheet header + tabs ---------- */
 
-.sheet-head { margin: 6px 0 12px; }
+.sheet-head { margin: 6px 0 12px; display: grid; grid-template-columns: 1fr auto; gap: 0 8px; align-items: start; }
+.sheet-head .char-sub { grid-column: 1 / -1; }
 .char-name { font-size: 1.5rem; line-height: 1.15; overflow-wrap: anywhere; }
 .char-sub { margin: 4px 0 0; color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
 
@@ -404,6 +405,9 @@ body.signed-in main { padding-bottom: calc(60px + env(safe-area-inset-bottom) + 
   scrollbar-width: none;
 }
 .chip-group::-webkit-scrollbar { display: none; }
+.chip-group.fade-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
+.chip-group.fade-l { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
+.chip-group.fade-l.fade-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
 .chip {
   flex: 0 0 auto;
   background: var(--panel);
@@ -455,6 +459,7 @@ dialog.sheet-form {
   border-radius: var(--radius);
   padding: 16px;
 }
+dialog.sheet-form { max-height: calc(100dvh - 32px); overflow-y: auto; }
 dialog.sheet-form::backdrop { background: rgba(0, 0, 0, 0.65); }
 dialog.sheet-form h2 { margin: 0 0 8px; font-size: 1.1rem; }
 dialog.sheet-form .field { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
@@ -488,3 +493,6 @@ button.tool {
 }
 button.primary.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .row-actions { flex-shrink: 0; }
+.form-actions button { flex: 0 0 auto; white-space: nowrap; }
+.form-actions button.primary { margin-top: 0; }
+dialog.sheet-form select { max-width: 100%; min-width: 0; text-overflow: ellipsis; }
