@@ -410,6 +410,7 @@ def test_local_mode_refuses_proxied_or_public_requests(dbsession):
     lan = TestClient(app, client=LAN)
     assert lan.get("/api/health").status_code == 200
     assert TestClient(app, client=("127.0.0.1", 1)).get("/api/health").status_code == 200
+    assert TestClient(app, client=("::1", 1)).get("/api/health").status_code == 200
     # through a reverse proxy (NPM adds these) -> refused
     for header in ("X-Forwarded-For", "X-Real-IP", "Forwarded"):
         resp = lan.get("/api/health", headers={header: "203.0.113.9"})

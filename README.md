@@ -57,7 +57,8 @@ shadow-dark-bot/
 │       └── 0014_character_title.py       ← adds title to characters
 │
 ├── data/                         ← runtime data — gitignored
-│   └── shadowdark.db             ← the SQLite database file (auto-created on first run)
+│   ├── shadowdark.db             ← the SQLite database file (auto-created on first run)
+│   └── dev.db                    ← the dev runner's own seeded database (`shadowdark_bot.dev`)
 │
 ├── src/                          ← all Python source code lives under here
 │   └── shadowdark_bot/           ← the actual Python "package" (the bot)
@@ -71,6 +72,8 @@ shadow-dark-bot/
 │       ├── spell_data.py         ← Tier 1–5 + alignment spell reference + idempotent seeder
 │       ├── embeds.py             ← functions that build the pretty Discord embed cards
 │       ├── storage.py            ← character held/stash location helpers
+│       ├── dev.py                ← standalone local web sheet on a seeded dev DB
+│       ├── dev_seed.py           ← sample party + guild data for the dev runner
 │       ├── services/             ← domain operations with no Discord code (shared by the cogs and web API)
 │       │   └── characters.py         ← character sheet: edits, carry/give/remove, spells, delete
 │       ├── web/                  ← optional web app (WEB_ENABLED=true): FastAPI on the bot's event loop
@@ -140,6 +143,26 @@ shadow-dark-bot/
    python -m shadowdark_bot.main
    ```
 4. In Discord, run `/ping` — you should get back `pong`.
+
+### Try the web sheet without Discord
+
+No token, no `.env`. From the repo root in Git Bash:
+
+```bash
+py -3.12 -m venv .venv
+source .venv/Scripts/activate
+pip install -e ".[dev]"
+python -m shadowdark_bot.dev --reset
+```
+
+Then open <http://localhost:8081> and pick a character.
+
+The seed has three characters (Brannoc Ashfall the fighter, Ysolde Vane the wizard with a nearly full pack, Brother Aldric the sparse priest), guild storage (a storeroom and a pack mule), the coffers, and a treasury with one borrowed item.
+
+- Without `--reset`, your edits are kept between runs; `--reset` deletes the dev database and rebuilds it from scratch.
+- `--host 0.0.0.0` lets a phone on the LAN open the sheet (`--port` changes 8081).
+- It uses `data/dev.db` only, never the bot's database, and never reads the bot token from `.env`.
+- `python -m pytest` runs the tests.
 
 ## Deploy on Proxmox (one-line install)
 
