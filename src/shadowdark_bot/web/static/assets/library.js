@@ -59,7 +59,15 @@ function chipGroup(label, options, current, onpick) {
         }, text),
       ),
     );
+  const edges = () => {
+    const max = group.scrollWidth - group.clientWidth;
+    group.classList.toggle("fade-l", group.scrollLeft > 1);
+    group.classList.toggle("fade-r", group.scrollLeft < max - 1);
+  };
+  group.addEventListener("scroll", edges, { passive: true });
+  new ResizeObserver(edges).observe(group);
   draw(current);
+  edges();
   return group;
 }
 
