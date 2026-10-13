@@ -197,6 +197,16 @@ def _clean(text: str | None) -> str | None:
     return (text or "").strip() or None
 
 
+def _clean_languages(text: str | None) -> str | None:
+    """Comma list with each language once (case-insensitive); first spelling and order win."""
+    seen: dict[str, str] = {}
+    for part in (text or "").split(","):
+        part = part.strip()
+        if part:
+            seen.setdefault(part.casefold(), part)
+    return ", ".join(seen.values()) or None
+
+
 # ---------- Sheet edits ----------
 
 
@@ -308,7 +318,7 @@ def set_skills_knowledge(
     additional_info: str | None,
 ) -> PlayerCharacter:
     char = require_character(session, user_id)
-    char.languages = _clean(languages)
+    char.languages = _clean_languages(languages)
     char.talents = _clean(talents)
     char.additional_info = _clean(additional_info)
     touch(char)

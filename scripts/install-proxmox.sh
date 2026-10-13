@@ -12,6 +12,10 @@
 #   CTID=201 MEMORY=1024 IP_CONFIG="192.168.1.50/24,gw=192.168.1.1" \
 #     bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/main/scripts/install-proxmox.sh)
 #
+# Reproduce an existing CT (same static IP and MAC) on a fresh install:
+#   CTID=200 IP_CONFIG="192.168.1.34/24,gw=<your gateway>" HWADDR=<old MAC> \
+#     bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/main/scripts/install-proxmox.sh)
+#
 # All env vars (with defaults):
 #   CTID                 next free from 200
 #   HOSTNAME_VAR         shadowdark-bot
@@ -20,6 +24,8 @@
 #   DISK_GB              4
 #   BRIDGE               vmbr0
 #   IP_CONFIG            dhcp       (or "192.168.1.50/24,gw=192.168.1.1")
+#   HWADDR               (empty)    MAC for eth0, e.g. AA:BB:CC:DD:EE:FF; keeps DHCP reservations
+#   WEB_PORT             8080       public web port written to .env (see docs/deploy-proxmox.md)
 #   TEMPLATE_STORAGE     local
 #   ROOTFS_STORAGE       local-lvm
 #   REPO_URL             https://github.com/bunnyUFO/shadow-dark-bot.git
@@ -34,6 +40,8 @@ CORES="${CORES:-1}"
 DISK_GB="${DISK_GB:-4}"
 BRIDGE="${BRIDGE:-vmbr0}"
 IP_CONFIG="${IP_CONFIG:-dhcp}"
+HWADDR="${HWADDR:-}"
+WEB_PORT="${WEB_PORT:-8080}"
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
 ROOTFS_STORAGE="${ROOTFS_STORAGE:-local-lvm}"
 REPO_URL="${REPO_URL:-https://github.com/bunnyUFO/shadow-dark-bot.git}"
@@ -47,6 +55,17 @@ fail() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || fail "must run as root"
 command -v pct >/dev/null 2>&1 || fail "pct not found — are you on a Proxmox host?"
 command -v pveam >/dev/null 2>&1 || fail "pveam not found — are you on a Proxmox host?"
+
+# ---------- Validate network and web settings ----------
+if [ "$IP_CONFIG" != "dhcp" ] && ! [[ "$IP_CONFIG" =~ ^[0-9.]+/[0-9]{1,2},gw=[0-9.]+$ ]]; then
+    fail "IP_CONFIG must be 'dhcp' or like '192.168.1.50/24,gw=192.168.1.1' (got: $IP_CONFIG)"
+fi
+if [ -n "$HWADDR" ] && ! [[ "$HWADDR" =~ ^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$ ]]; then
+    fail "HWADDR must be a MAC address like AA:BB:CC:DD:EE:FF (got: $HWADDR)"
+fi
+[[ "$WEB_PORT" =~ ^[0-9]+$ ]] || fail "WEB_PORT must be a number (got: $WEB_PORT)"
+NET0="name=eth0,bridge=${BRIDGE},ip=${IP_CONFIG}"
+[ -z "$HWADDR" ] || NET0="${NET0},hwaddr=${HWADDR}"
 
 # ---------- Discord token ----------
 if [ -z "${DISCORD_TOKEN:-}" ]; then
@@ -100,7 +119,7 @@ pct create "$CTID" "$TEMPLATE_PATH" \
     --memory "$MEMORY" \
     --cores "$CORES" \
     --rootfs "${ROOTFS_STORAGE}:${DISK_GB}" \
-    --net0 "name=eth0,bridge=${BRIDGE},ip=${IP_CONFIG}" \
+    --net0 "$NET0" \
     --password "$ROOT_PW" \
     --onboot 1
 
@@ -152,6 +171,10 @@ chmod 600 "$ENV_TMP"
 cat > "$ENV_TMP" <<EOF
 DISCORD_TOKEN=$DISCORD_TOKEN
 DATABASE_URL=sqlite:///./data/shadowdark.db
+# Public web sheet / Discord Activity: off until hosting is set up. The other
+# keys are in .env.example; see docs/deploy-proxmox.md ("Public web sheet").
+WEB_ENABLED=false
+WEB_PORT=$WEB_PORT
 EOF
 pct push "$CTID" "$ENV_TMP" "$REPO_DIR/.env" --perms 0600
 rm -f "$ENV_TMP"
@@ -183,6 +206,13 @@ cat <<EOF
   IP:            $IP
   Root password: $ROOT_PW
                  (note this down — won't be shown again)
+
+  Public web (when WEB_ENABLED=true): http://$IP:$WEB_PORT  <- point NPM here
+EOF
+if [ "$IP_CONFIG" = "dhcp" ]; then
+    echo "  NOTE: IP_CONFIG=dhcp, so that NPM target can move. Prefer a static IP_CONFIG."
+fi
+cat <<EOF
 
   The LXC is set to start on Proxmox boot, and the bot container restarts
   automatically inside it. No further action required.
