@@ -211,6 +211,18 @@ def test_my_character_full_sheet(api):
     assert stash["items"][0]["value_cp"] == 100
 
 
+def test_sheet_languages_are_deduplicated(api):
+    with session_scope() as s:
+        _seed(s)
+        _make_bob(s)
+        characters.set_skills_knowledge(
+            s, "u1", languages="Common, common", talents=None, additional_info=None
+        )
+    token = login(api, "u1")["token"]
+    sheet = api.get("/api/character", headers=auth(token)).json()
+    assert sheet["languages"] == "Common"
+
+
 def test_other_players_sheet_hides_stash(api):
     with session_scope() as s:
         _seed(s)
