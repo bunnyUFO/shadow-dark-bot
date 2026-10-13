@@ -161,6 +161,30 @@ def test_set_gold_and_text_fields(dbsession):
             characters.set_gold(s, "u1", -1)
 
 
+def test_set_skills_knowledge_dedupes_languages(dbsession):
+    with session_scope() as s:
+        _create(s)
+        characters.set_skills_knowledge(
+            s, "u1", languages=" Common, elvish, COMMON ,Elvish,, Draconic ",
+            talents=None, additional_info=None,
+        )
+    with session_scope() as s:
+        assert characters.load_character(s, "u1").languages == "Common, elvish, Draconic"
+        characters.set_skills_knowledge(
+            s, "u1", languages=" , ,", talents=None, additional_info=None
+        )
+    with session_scope() as s:
+        char = characters.load_character(s, "u1")
+        assert char.languages is None
+        char.languages = "Common, Common"
+    with session_scope() as s:
+        characters.set_skills_knowledge(
+            s, "u1", languages="Common, Common", talents=None, additional_info=None
+        )
+    with session_scope() as s:
+        assert characters.load_character(s, "u1").languages == "Common"
+
+
 # ---------- carry / add more / remove ----------
 
 
