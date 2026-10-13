@@ -47,7 +47,9 @@ export async function api(path, { method = "GET", body } = {}) {
   }
   const data = await resp.json().catch(() => null);
   if (!resp.ok) {
-    const detail = data && typeof data.detail === "string" ? data.detail : resp.statusText;
+    const detail = data && typeof data.detail === "string"
+      ? data.detail
+      : data && Array.isArray(data.detail) ? "Check the form." : resp.statusText;
     if (resp.status === 401) setToken(null);
     throw new ApiError(resp.status, detail);
   }
