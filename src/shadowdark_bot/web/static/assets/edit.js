@@ -139,6 +139,65 @@ export function editOpts(c, redraw) {
         }
       });
     }
+    if (key === "identity" || key === "background") {
+      return btn("Edit", () => openForm({
+        title: "Edit character",
+        fields: [
+          { name: "name", label: "Name", type: "text", value: c.name, required: true },
+          { name: "char_class", label: "Class", type: "text", value: c.char_class },
+          { name: "title", label: "Title", type: "text", value: c.title },
+          { name: "ancestry", label: "Ancestry", type: "text", value: c.ancestry },
+          { name: "alignment", label: "Alignment", type: "select", value: (c.alignment ?? "").toLowerCase(),
+            options: [["", "None"], ["lawful", "Lawful"], ["neutral", "Neutral"], ["chaotic", "Chaotic"]] },
+          { name: "background", label: "Background", type: "textarea", value: c.background },
+        ],
+        onSubmit: (v) => write("/character/identity", "PATCH", {
+          name: v.name, char_class: v.char_class || null, title: v.title || null,
+          ancestry: v.ancestry || null, alignment: v.alignment || null, background: v.background || null,
+        }),
+      }));
+    }
+    if (key === "vitals" || key === "abilities") {
+      return btn("Edit", () => openForm({
+        title: "Edit stats",
+        fields: [
+          ...c.abilities.map((a) => ({ name: "score_" + a.key, label: a.label, type: "number",
+            value: a.score, min: 1, max: 30, required: true })),
+          { name: "level", label: "Level", type: "number", value: c.level, min: 1, required: true },
+          { name: "max_hp", label: "Max HP", type: "number", value: c.max_hp, min: 0 },
+          { name: "armor_class", label: "Base AC (without DEX)", type: "number", value: c.armor_class_base },
+          { name: "spell_ability", label: "Spellcasting stat", type: "select",
+            value: c.spellcasting?.ability ?? "none", options: [["none", "None"], ["int", "INT"], ["wis", "WIS"]] },
+          { name: "spell_check_bonus", label: "Spellcasting talent bonus", type: "number",
+            value: c.spellcasting?.talent_bonus ?? 0 },
+        ],
+        onSubmit: (v) => write("/character/stats", "PATCH", {
+          scores: c.abilities.map((a) => v["score_" + a.key]),
+          level: v.level, max_hp: v.max_hp, armor_class: v.armor_class,
+          spell_ability: v.spell_ability, spell_check_bonus: v.spell_check_bonus ?? 0,
+        }),
+      }));
+    }
+    if (key === "languages" || key === "talents" || key === "additional") {
+      return btn("Edit", () => openForm({
+        title: "Edit skills",
+        fields: [
+          { name: "languages", label: "Languages", type: "text", value: c.languages, hint: "Comma separated, like Common, Elvish" },
+          { name: "talents", label: "Talents", type: "textarea", value: c.talents },
+          { name: "additional_info", label: "Additional info", type: "textarea", value: c.additional_info },
+        ],
+        onSubmit: (v) => write("/character/skills", "PATCH", {
+          languages: v.languages || null, talents: v.talents || null, additional_info: v.additional_info || null,
+        }),
+      }));
+    }
+    if (key === "proficiencies") {
+      return btn("Edit", () => openForm({
+        title: "Edit proficiencies",
+        fields: [{ name: "proficiencies", label: "Proficiencies", type: "textarea", value: c.proficiencies }],
+        onSubmit: (v) => write("/character/proficiencies", "PATCH", { proficiencies: v.proficiencies || null }),
+      }));
+    }
     return null;
   };
 

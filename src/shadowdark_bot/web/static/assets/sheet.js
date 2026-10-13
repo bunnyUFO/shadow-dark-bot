@@ -15,10 +15,11 @@ export function subtitle(c) {
   return c.title ? `${parts} — ${c.title}` : parts;
 }
 
-export function sheetHeader(c, tab, hrefFor) {
+export function sheetHeader(c, tab, hrefFor, tools = null) {
   return [
     h("section", { class: "sheet-head" },
       h("h1", { class: "char-name" }, c.name),
+      h("span", { class: "card-tools" }, tools),
       h("p", { class: "char-sub" }, subtitle(c)),
     ),
     h("nav", { class: "tabs", role: "tablist" },
@@ -81,6 +82,7 @@ function combatTab(c, opts) {
     ? statTile("AC", "—")
     : statTile("AC", c.armor_class, `${c.armor_class_base} + DEX`);
   const cast = c.spellcasting;
+  const profTools = tools("proficiencies");
   return [
     card("vitals", "Hit points & armour", { tools: tools("vitals") },
       h("div", { class: "tiles" },
@@ -108,9 +110,9 @@ function combatTab(c, opts) {
         ),
       ),
     ),
-    c.proficiencies
-      ? card("proficiencies", "Proficiencies", { tools: tools("proficiencies") },
-          h("p", { class: "prose" }, c.proficiencies))
+    c.proficiencies || profTools
+      ? card("proficiencies", "Proficiencies", { tools: profTools },
+          c.proficiencies ? h("p", { class: "prose" }, c.proficiencies) : h("p", { class: "muted" }, "—"))
       : null,
     spellsCard(c, opts),
   ];
@@ -179,7 +181,7 @@ export function storeCard(label, store, empty, ctx = {}) {
     `${slots(store.used_slots)} / ${slots(store.max_slots)} slots`);
   return card(ctx.key ?? `store-${store.id ?? label}`, label,
     { aside, tools: ctx.opts?.tools?.(ctx.key, ctx.c) },
-    store.description ? h("p", { class: "store-desc muted" }, store.description) : null,
+    store.description && !ctx.key ? h("p", { class: "store-desc muted" }, store.description) : null,
     h("div", {
       class: "meter",
       role: "meter",
