@@ -55,6 +55,8 @@ class Settings(BaseSettings):
                 errors.append("ALLOWED_GUILD_IDS is empty — nobody could log in")
         except ValueError:
             errors.append("ALLOWED_GUILD_IDS must be comma-separated numeric guild IDs")
+        if "*" in [ip.strip() for ip in self.FORWARDED_ALLOW_IPS.split(",")]:
+            errors.append("FORWARDED_ALLOW_IPS must list the reverse proxy's IP, not *")
         return errors
 
 

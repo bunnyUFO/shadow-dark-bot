@@ -366,6 +366,27 @@ def test_web_config_errors():
     assert "numeric" in " ".join(junk.web_config_errors())
     clash = ok.model_copy(update={"LOCAL_WEB_ENABLED": True, "LOCAL_WEB_PORT": 8080})
     assert "must differ" in " ".join(clash.web_config_errors())
+    star = ok.model_copy(update={"FORWARDED_ALLOW_IPS": "*"})
+    assert "not *" in " ".join(star.web_config_errors())
+    for fine in ("192.168.1.11", "127.0.0.1, 192.168.1.11"):
+        assert ok.model_copy(update={"FORWARDED_ALLOW_IPS": fine}).web_config_errors() == []
+    off = ok.model_copy(update={"WEB_ENABLED": False, "FORWARDED_ALLOW_IPS": "*"})
+    assert off.web_config_errors() == []
+
+
+def test_proxy_headers_public_only():
+    from shadowdark_bot.config import Settings
+    from shadowdark_bot.web.server import WebServer
+
+    ok = Settings(
+        DISCORD_TOKEN="t", WEB_ENABLED=True, PUBLIC_BASE_URL=BASE, DISCORD_CLIENT_ID="1",
+        DISCORD_CLIENT_SECRET="s", SESSION_SECRET=SECRET, ALLOWED_GUILD_IDS="1",
+        FORWARDED_ALLOW_IPS="192.168.1.11",
+    )
+    public = WebServer.public(_Bot({}), ok)._server.config
+    assert public.proxy_headers is True
+    assert public.forwarded_allow_ips == "192.168.1.11"
+    assert WebServer.local(ok)._server.config.proxy_headers is False
 
 
 # ---------- local (home network, no login) mode ----------
