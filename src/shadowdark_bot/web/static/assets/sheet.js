@@ -34,10 +34,34 @@ export function sheetHeader(c, tab, hrefFor) {
   ];
 }
 
-export function sheetBody(c, tab) {
-  if (tab === "inventory") return inventoryTab(c);
-  if (tab === "roleplaying") return roleplayingTab(c);
-  return combatTab(c);
+// opts (all optional, used by the editing layer):
+//   opts.tools?.(sectionKey, c)          -> nodes for a card's tools slot
+//   opts.itemActions?.(item, storeKey, c) -> nodes for an item row's action slot
+export function sheetBody(c, tab, opts = {}) {
+  if (tab === "inventory") return inventoryTab(c, opts);
+  if (tab === "roleplaying") return roleplayingTab(c, opts);
+  return combatTab(c, opts);
+}
+
+// Page heading shared by Party, Guild, Items and Spells.
+export function pageHead(title, meta) {
+  return h("header", { class: "page-head" },
+    h("h1", {}, title),
+    meta ? h("p", { class: "page-meta" }, meta) : null,
+  );
+}
+
+// A sheet card: <section data-section=key> with a head row of title, aside
+// text and a tools slot (empty and hidden until something fills it).
+export function card(key, title, { aside, tools } = {}, ...body) {
+  return h("section", { class: "card", "data-section": key },
+    h("div", { class: "card-head" },
+      h("h2", {}, title),
+      h("span", { class: "card-aside" }, aside ?? null),
+      h("span", { class: "card-tools" }, tools ?? null),
+    ),
+    ...body,
+  );
 }
 
 // ---------- combat ----------
@@ -50,27 +74,29 @@ function statTile(label, value, note) {
   );
 }
 
-function combatTab(c) {
+function combatTab(c, opts) {
+  const tools = (key) => opts.tools?.(key, c);
   const ac = c.armor_class === null
     ? statTile("AC", "—")
     : statTile("AC", c.armor_class, `${c.armor_class_base} + DEX`);
   const cast = c.spellcasting;
   return [
-    h("div", { class: "tiles" },
-      statTile("HP", c.max_hp ?? "—"),
-      ac,
-      statTile("Level", c.level),
-      cast
-        ? statTile(
-            "Spellcasting",
-            signed(cast.total),
-            `${cast.ability.toUpperCase()} ${signed(cast.ability_modifier)}`
-              + (cast.talent_bonus ? `, talent ${signed(cast.talent_bonus)}` : ""),
-          )
-        : null,
+    card("vitals", "Hit points & armour", { tools: tools("vitals") },
+      h("div", { class: "tiles" },
+        statTile("HP", c.max_hp ?? "—"),
+        ac,
+        statTile("Level", c.level),
+        cast
+          ? statTile(
+              "Spellcasting",
+              signed(cast.total),
+              `${cast.ability.toUpperCase()} ${signed(cast.ability_modifier)}`
+                + (cast.talent_bonus ? `, talent ${signed(cast.talent_bonus)}` : ""),
+            )
+          : null,
+      ),
     ),
-    h("section", { class: "card" },
-      h("h2", {}, "Abilities"),
+    card("abilities", "Abilities", { tools: tools("abilities") },
       h("div", { class: "abilities" },
         c.abilities.map((a) =>
           h("div", { class: "ability" },
@@ -82,15 +108,14 @@ function combatTab(c) {
       ),
     ),
     c.proficiencies
-      ? h("section", { class: "card" },
-          h("h2", {}, "Proficiencies"),
+      ? card("proficiencies", "Proficiencies", { tools: tools("proficiencies") },
           h("p", { class: "prose" }, c.proficiencies))
       : null,
-    spellsCard(c),
+    spellsCard(c, opts),
   ];
 }
 
-function spellsCard(c) {
+function spellsCard(c, opts) {
   if (!c.spells.length && !c.spellcasting) return null;
   const byTier = new Map();
   for (const s of c.spells) {
@@ -98,8 +123,7 @@ function spellsCard(c) {
     if (!byTier.has(key)) byTier.set(key, []);
     byTier.get(key).push(s);
   }
-  return h("section", { class: "card" },
-    h("h2", {}, "Spells"),
+  return card("spells", "Spells", { tools: opts.tools?.("spells", c) },
     c.spells.length === 0
       ? h("p", { class: "muted" }, "No spells known yet.")
       : [...byTier.entries()].map(([tier, spells]) => [
@@ -132,23 +156,27 @@ function spellRow(s) {
 
 // ---------- inventory ----------
 
-function inventoryTab(c) {
+function inventoryTab(c, opts) {
   return [
-    h("div", { class: "tiles" }, statTile("Gold", c.gold)),
-    storeCard("Held", c.held, "Carrying nothing."),
-    c.stash ? storeCard("Stash", c.stash, "Empty.") : null,
+    card("gold", "Gold", { tools: opts.tools?.("gold", c) },
+      h("div", { class: "coin-row" },
+        h("span", {}, "Coins"),
+        h("strong", {}, c.gold),
+      ),
+    ),
+    storeCard("Carrying", c.held, "Carrying nothing.", { key: "held", c, opts }),
+    c.stash ? storeCard("Stash", c.stash, "Empty.", { key: "stash", c, opts }) : null,
   ];
 }
 
-export function storeCard(label, store, empty) {
+// ctx = { key, c, opts } on the character sheet; absent on guild locations.
+export function storeCard(label, store, empty, ctx = {}) {
   const pct = store.max_slots > 0 ? Math.min(100, (store.used_slots / store.max_slots) * 100) : 0;
   const full = store.used_slots >= store.max_slots;
-  return h("section", { class: "card" },
-    h("div", { class: "store-head" },
-      h("h2", {}, label),
-      h("span", { class: full ? "slots full" : "slots" },
-        `${slots(store.used_slots)} / ${slots(store.max_slots)} slots`),
-    ),
+  const aside = h("span", { class: full ? "slots full" : "slots" },
+    `${slots(store.used_slots)} / ${slots(store.max_slots)} slots`);
+  return card(ctx.key ?? `store-${store.id ?? label}`, label,
+    { aside, tools: ctx.opts?.tools?.(ctx.key, ctx.c) },
     store.description ? h("p", { class: "store-desc muted" }, store.description) : null,
     h("div", {
       class: "meter",
@@ -160,11 +188,12 @@ export function storeCard(label, store, empty) {
     }, h("div", { class: full ? "meter-fill full" : "meter-fill", style: `width:${pct}%` })),
     store.items.length === 0
       ? h("p", { class: "muted" }, empty)
-      : h("ul", { class: "rows" }, store.items.map(itemRow)),
+      : h("ul", { class: "rows" },
+          store.items.map((i) => itemRow(i, ctx.opts?.itemActions?.(i, ctx.key, ctx.c)))),
   );
 }
 
-function itemRow(i) {
+function itemRow(i, actions) {
   const per = `${slots(i.gear_slots_each)} each` + (i.bundle_size > 1 ? `, ${i.bundle_size} per slot` : "");
   return h("li", {},
     h("details", { class: "row" },
@@ -183,32 +212,25 @@ function itemRow(i) {
         i.notes ? h("p", { class: "prose muted" }, i.notes) : null,
       ),
     ),
+    h("span", { class: "row-actions" }, actions ?? null),
   );
 }
 
 // ---------- roleplaying ----------
 
-function roleplayingTab(c) {
+function roleplayingTab(c, opts) {
+  const tools = (key) => opts.tools?.(key, c);
   const languages = (c.languages ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const prose = (text) => (text ? h("p", { class: "prose" }, text) : h("p", { class: "muted" }, "—"));
   return [
-    h("section", { class: "card" },
-      h("h2", {}, "Background"),
-      c.background ? h("p", { class: "prose" }, c.background) : h("p", { class: "muted" }, "—"),
-    ),
-    h("section", { class: "card" },
-      h("h2", {}, "Languages"),
+    card("background", "Background", { tools: tools("background") }, prose(c.background)),
+    card("languages", "Languages", { tools: tools("languages") },
       languages.length
         ? h("ul", { class: "chips" }, languages.map((l) => h("li", {}, l)))
-        : h("p", { class: "muted" }, "—"),
-    ),
-    h("section", { class: "card" },
-      h("h2", {}, "Talents"),
-      c.talents ? h("p", { class: "prose" }, c.talents) : h("p", { class: "muted" }, "—"),
-    ),
+        : h("p", { class: "muted" }, "—")),
+    card("talents", "Talents", { tools: tools("talents") }, prose(c.talents)),
     c.additional_info
-      ? h("section", { class: "card" },
-          h("h2", {}, "Additional info"),
-          h("p", { class: "prose" }, c.additional_info))
+      ? card("additional", "Additional info", { tools: tools("additional") }, prose(c.additional_info))
       : null,
   ];
 }

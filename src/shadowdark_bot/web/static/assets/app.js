@@ -13,7 +13,7 @@
 import { api, ApiError, getToken, setToken } from "./api.js";
 import { h, mount } from "./dom.js";
 import { renderGuild, renderItems, renderSpells } from "./library.js";
-import { sheetBody, sheetHeader, subtitle, TABS } from "./sheet.js";
+import { pageHead, sheetBody, sheetHeader, subtitle, TABS } from "./sheet.js";
 
 const app = document.getElementById("app");
 const topnav = document.getElementById("topnav");
@@ -22,11 +22,11 @@ const bottomnav = document.getElementById("bottomnav");
 // Top-level sections: [route, label]. Desktop shows them in the top bar,
 // phones in a bottom tab bar.
 const SECTIONS = [
-  ["sheet", "Sheet"],
-  ["party", "Party"],
-  ["guild", "Guild"],
-  ["items", "Items"],
-  ["spells", "Spells"],
+  ["sheet", "Sheet", "\u2694"],
+  ["party", "Party", "\u2605"],
+  ["guild", "Guild", "\u2302"],
+  ["items", "Items", "\u2699"],
+  ["spells", "Spells", "\u2726"],
 ];
 const STATE_KEY = "sd.oauth_state";
 
@@ -86,20 +86,20 @@ function renderNav(active) {
     mount(bottomnav);
     return;
   }
-  const links = () =>
-    SECTIONS.map(([key, label]) =>
+  const links = (withIcons) =>
+    SECTIONS.map(([key, label, glyph]) =>
       h("a", {
         href: key === "sheet" ? "#/sheet/combat" : `#/${key}`,
         class: key === active ? "active" : null,
         "aria-current": key === active ? "page" : null,
-      }, label),
+      }, withIcons ? h("span", { class: "ico", "aria-hidden": "true" }, glyph) : null, label),
     );
   const switchLabel = config.mode === "local" ? "Switch" : "Log out";
   mount(topnav,
     h("span", { class: "sections" }, links()),
     h("button", { type: "button", class: "link", onclick: signOut }, switchLabel),
   );
-  mount(bottomnav, links());
+  mount(bottomnav, links(true));
 }
 
 function signOut() {
@@ -233,7 +233,7 @@ async function renderOtherSheet(userId, tab) {
 async function renderParty() {
   const chars = await api("/characters");
   mount(app,
-    h("section", { class: "intro" }, h("h1", {}, "Party")),
+    pageHead("Party", "Everyone's characters"),
     h("ul", { class: "picker" },
       chars.map((c) =>
         h("li", {},

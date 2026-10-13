@@ -3,7 +3,7 @@
 
 import { api } from "./api.js";
 import { h, mount, slots } from "./dom.js";
-import { coins, storeCard } from "./sheet.js";
+import { card, coins, pageHead, storeCard } from "./sheet.js";
 
 // Filters survive navigating away and back within a visit.
 const spellFilters = { q: "", cls: "", tier: "", alignment: "" };
@@ -74,7 +74,7 @@ export async function renderSpells(app) {
   const redraw = () => drawSpells(list, spells);
   const tiers = [...new Set(spells.map((s) => s.tier))].sort((a, b) => a - b);
   mount(app,
-    h("section", { class: "intro" }, h("h1", {}, "Spells")),
+    pageHead("Spells", "Reference"),
     h("div", { class: "filters" },
       searchBox(spellFilters.q, "Search spells", (v) => { spellFilters.q = v; redraw(); }),
       chipGroup("Class", [["", "All classes"], ["wizard", "Wizard"], ["priest", "Priest"]],
@@ -107,8 +107,7 @@ function drawSpells(list, spells) {
     shown.length === 0
       ? h("p", { class: "card muted" }, "No spells match those filters.")
       : [...byTier.entries()].map(([tier, group]) =>
-          h("section", { class: "card" },
-            h("h2", {}, `Tier ${tier}`),
+          card(`tier-${tier}`, `Tier ${tier}`, {},
             h("ul", { class: "rows" }, group.map(spellRefRow)),
           ),
         ),
@@ -145,10 +144,7 @@ export async function renderItems(app) {
   const redraw = () => drawItems(list, items);
   const present = new Set(items.map((i) => i.item_type));
   mount(app,
-    h("section", { class: "intro" },
-      h("h1", {}, "Items"),
-      h("p", { class: "muted" }, "Everything the guild has catalogued."),
-    ),
+    pageHead("Items", "Catalog"),
     h("div", { class: "filters" },
       searchBox(itemFilters.q, "Search items", (v) => { itemFilters.q = v; redraw(); }),
       chipGroup("Type", [["", "All types"], ...ITEM_TYPES.filter(([t]) => present.has(t))],
@@ -205,7 +201,7 @@ export async function renderGuild(app) {
   const g = await api("/guild");
   const available = g.treasury.filter((t) => t.status === "available").length;
   mount(app,
-    h("section", { class: "intro" }, h("h1", {}, "Guild")),
+    pageHead("Guild", "Shared with everyone in this server"),
     h("div", { class: "tiles" },
       h("div", { class: "tile" },
         h("span", { class: "tile-label" }, "Coffers"),
@@ -217,11 +213,7 @@ export async function renderGuild(app) {
         h("span", { class: "tile-note" }, "magic items available"),
       ),
     ),
-    h("section", { class: "card treasury" },
-      h("div", { class: "store-head" },
-        h("h2", {}, "Magic item treasury"),
-        h("span", { class: "slots" }, `${available} available`),
-      ),
+    card("treasury", "Magic item treasury", { aside: h("span", { class: "slots" }, `${available} available`) },
       g.treasury.length === 0
         ? h("p", { class: "muted" }, "Empty. Add magical items in Discord with /treasury add.")
         : h("ul", { class: "rows" }, g.treasury.map(treasuryRow)),
