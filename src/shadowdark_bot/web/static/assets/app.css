@@ -445,3 +445,46 @@ body.signed-in main { padding-bottom: calc(60px + env(safe-area-inset-bottom) + 
 
 .tag { color: var(--muted); }
 .store-desc { margin: -2px 0 8px; font-size: 0.9rem; }
+
+/* ---------- edit forms ---------- */
+dialog.sheet-form {
+  width: min(92vw, 420px);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+dialog.sheet-form::backdrop { background: rgba(0, 0, 0, 0.65); }
+dialog.sheet-form h2 { margin: 0 0 8px; font-size: 1.1rem; }
+dialog.sheet-form .field { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+dialog.sheet-form label { font-size: 0.85rem; color: var(--muted); }
+dialog.sheet-form input,
+dialog.sheet-form select,
+dialog.sheet-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 16px;
+  padding: 8px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.form-error { color: var(--danger); margin: 8px 0 0; }
+.form-error:empty { display: none; }
+.form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+button.tool {
+  min-height: 32px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--torch);
+  background: transparent;
+  border: 1px solid var(--torch-dim);
+  border-radius: 6px;
+  cursor: pointer;
+}
+button.primary.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.row-actions { flex-shrink: 0; }

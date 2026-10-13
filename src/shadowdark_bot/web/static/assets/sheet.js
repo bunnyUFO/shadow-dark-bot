@@ -35,6 +35,7 @@ export function sheetHeader(c, tab, hrefFor) {
 }
 
 // opts (all optional, used by the editing layer):
+//   opts.spellActions?.(spell, c)         -> nodes for a spell row's action slot
 //   opts.tools?.(sectionKey, c)          -> nodes for a card's tools slot
 //   opts.itemActions?.(item, storeKey, c) -> nodes for an item row's action slot
 export function sheetBody(c, tab, opts = {}) {
@@ -128,12 +129,12 @@ function spellsCard(c, opts) {
       ? h("p", { class: "muted" }, "No spells known yet.")
       : [...byTier.entries()].map(([tier, spells]) => [
           h("h3", { class: "tier" }, tier ? `Tier ${tier}` : "Other"),
-          h("ul", { class: "rows" }, spells.map(spellRow)),
+          h("ul", { class: "rows" }, spells.map((s) => spellRow(s, opts.spellActions?.(s, c)))),
         ]),
   );
 }
 
-function spellRow(s) {
+function spellRow(s, actions) {
   const ref = s.spell;
   return h("li", {},
     h("details", { class: "row" },
@@ -151,6 +152,7 @@ function spellRow(s) {
           : h("p", { class: "muted" }, "No reference text."),
       ),
     ),
+    h("span", { class: "row-actions" }, actions ?? null),
   );
 }
 

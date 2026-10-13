@@ -12,6 +12,7 @@
 
 import { api, ApiError, getToken, setToken } from "./api.js";
 import { h, mount } from "./dom.js";
+import { editOpts } from "./edit.js";
 import { renderGuild, renderItems, renderSpells } from "./library.js";
 import { pageHead, sheetBody, sheetHeader, subtitle, TABS } from "./sheet.js";
 
@@ -210,8 +211,13 @@ async function renderMySheet(tab) {
     );
     return;
   }
-  const c = await api("/character");
-  mount(app, sheetHeader(c, tab, (t) => `#/sheet/${t}`), h("div", { class: "sheet" }, sheetBody(c, tab)));
+  const draw = (c) => {
+    const y = window.scrollY;
+    mount(app, sheetHeader(c, tab, (t) => `#/sheet/${t}`),
+      h("div", { class: "sheet" }, sheetBody(c, tab, editOpts(c, draw))));
+    window.scrollTo(0, y);
+  };
+  draw(await api("/character"));
 }
 
 async function renderOtherSheet(userId, tab) {
