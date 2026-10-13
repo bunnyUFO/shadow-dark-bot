@@ -172,7 +172,7 @@ On your Proxmox host as `root`:
 bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/main/scripts/install-proxmox.sh)
 ```
 
-Creates an unprivileged Debian 12 LXC, installs Docker inside, clones this repo, writes `.env` with the bot token (prompted securely), and starts the bot. Default specs: 1 vCPU / 512 MB RAM / 4 GB disk / DHCP on `vmbr0`; everything overridable via env vars. Container auto-starts on Proxmox boot.
+Creates an unprivileged Debian 12 LXC, installs Docker inside, clones this repo, writes `.env` with the bot token (prompted securely), and starts the bot. Default specs: 1 vCPU / 512 MB RAM / 4 GB disk / DHCP on `vmbr0`; everything overridable via env vars. Container auto-starts on Proxmox boot. Extra overrides: `HWADDR` (keep the MAC) and `WEB_PORT`.
 
 Update later with:
 
@@ -190,9 +190,13 @@ The bot can also serve the character sheets as a web page on your home network �
 LOCAL_WEB_ENABLED=true
 ```
 
-then restart (`docker compose up -d`, or the update script). Open `http://<bot container IP>:8081` from any device on the network. Besides each character's sheet it has **Party**, **Guild** (coffers, storage locations, the magic item treasury and who has what), **Items** (the catalog) and **Spells** (the reference) sections. It's read-only for now; editing and a public, Discord-login version (and the in-Discord Activity) are planned — see [the plan](docs/implementation/discord-activity.md).
+then restart (`docker compose up -d`, or the update script). Open `http://<bot container IP>:8081` from any device on the network. Besides each character's sheet it has **Party**, **Guild** (coffers, storage locations, the magic item treasury and who has what), **Items** (the catalog) and **Spells** (the reference) sections. It's read-only for now; editing and the in-Discord Activity are planned — see [the plan](docs/implementation/discord-activity.md).
 
 The local sheet only answers private-network addresses and refuses anything that comes through a reverse proxy, so don't put it behind Nginx Proxy Manager.
+
+### Public web sheet / Discord Activity
+
+The public, Discord-login version is in the code (`WEB_ENABLED=true`, port 8080, behind a reverse proxy); turning it on is a manual hosting step. See [Public web sheet (Bunnylink)](docs/deploy-proxmox.md#public-web-sheet-bunnylink).
 
 ## Docs
 
