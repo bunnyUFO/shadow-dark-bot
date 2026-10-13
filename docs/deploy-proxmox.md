@@ -62,7 +62,45 @@ bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/mai
 | `TEMPLATE_STORAGE` | `local` | where Proxmox templates live |
 | `ROOTFS_STORAGE` | `local-lvm` | where the LXC disk lives |
 | `REPO_URL` | the public repo URL | useful if you fork |
+| `HWADDR` | empty | MAC for `eth0` (e.g. `AA:BB:CC:DD:EE:FF`); set it to keep a DHCP reservation or firewall rule when reinstalling |
+| `WEB_PORT` | `8080` | public web port written to `.env` (compose publishes the same port) |
 | `DISCORD_TOKEN` | prompted | set this to skip the prompt |
+
+## Public web sheet (Bunnylink)
+
+The public, Discord-login sheet (and the Discord Activity) runs inside the bot container on port 8080, behind Nginx Proxy Manager (NPM). The installer never changes an existing CT; these are **steps you run yourself**, in order.
+
+**1. Give CT 200 a static IP without reinstalling** (run on the Proxmox host):
+
+```bash
+pct config 200 | grep net0
+pct set 200 --net0 name=eth0,bridge=vmbr0,hwaddr=<keep the existing>,ip=192.168.1.34/24,gw=<your gateway>
+pct reboot 200
+```
+
+- Keep the existing `hwaddr` from the first command.
+- Check 192.168.1.34 is outside the router's DHCP pool.
+- NPM's target must change at the same moment (step 4).
+
+**2. Configure `.env` in CT 200** (`pct enter 200`, `nano /opt/shadow-dark-bot/.env`): set `WEB_ENABLED=true`, the keys listed in [`.env.example`](../.env.example) (`PUBLIC_BASE_URL`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `SESSION_SECRET`, `ALLOWED_GUILD_IDS`) and `FORWARDED_ALLOW_IPS=192.168.1.11` (the NPM host; never `*`). Then run the update script (see [Updating](#updating)): it pulls the new compose file and recreates the container so port 8080 is published. The bot refuses to start if a required key is missing.
+
+**3. Route 53:** `shadowdark.bunnyufo.net` CNAME `home.bunnyufo.net`.
+
+**4. NPM proxy host:** `shadowdark.bunnyufo.net` -> `http://192.168.1.34:8080`; Force SSL on; Websockets on; Let's Encrypt via Route 53 DNS-01; no frame-blocking headers (the Activity runs in an iframe).
+
+**5. Optional Proxmox firewall on CT 200:** allow 8080 only from 192.168.1.11.
+
+**6. Discord portal:** follow [Discord Developer Portal](implementation/discord-activity.md#discord-developer-portal).
+
+**Memory:** the runtime fits in 512 MB; raise to 1 GB if an in-image frontend build runs out of memory.
+
+**Check:**
+
+```bash
+curl -I http://192.168.1.34:8080/      # from the NPM host: should answer
+```
+
+then open `https://shadowdark.bunnyufo.net/`: it shows the login.
 
 ## Updating
 
