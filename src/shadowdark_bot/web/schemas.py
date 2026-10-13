@@ -6,6 +6,7 @@ so the web sheet and the bot always agree.
 """
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -158,6 +159,65 @@ class GuildOut(BaseModel):
     coffers: CoffersOut
     locations: list[StoreOut]  # shared guild storage (not characters' held/stash)
     treasury: list[TreasuryEntryOut]
+
+
+class GiveTargetOut(BaseModel):
+    location_id: int
+    name: str
+    kind: Literal["guild", "self", "character"]
+    owner_user_id: str | None
+
+
+# ---------- request bodies (edits) ----------
+
+
+class GoldIn(BaseModel):
+    gold: str  # "12gp 5sp 3cp", same grammar as the bot's Gold modal
+
+
+class CarryIn(BaseModel):
+    name: str
+    quantity: int = 1
+    to: Literal["held", "stash"] = "held"
+    slots_each: float = 1.0
+    notes: str | None = None
+
+
+class GiveIn(BaseModel):
+    target_location_id: int
+    quantity: int | None = None  # None = the whole stack
+
+
+class LearnSpellIn(BaseModel):
+    spell_id: int
+
+
+class IdentityIn(BaseModel):
+    name: str
+    char_class: str | None = None
+    title: str | None = None
+    ancestry: str | None = None
+    alignment: str | None = None
+    background: str | None = None
+
+
+class StatsIn(BaseModel):
+    scores: list[int]  # STR DEX CON INT WIS CHA
+    level: int
+    max_hp: int | None = None
+    armor_class: int | None = None  # the base AC (sheet's armor_class_base)
+    spell_ability: str | None = None
+    spell_check_bonus: int = 0
+
+
+class SkillsIn(BaseModel):
+    languages: str | None = None
+    talents: str | None = None
+    additional_info: str | None = None
+
+
+class ProficienciesIn(BaseModel):
+    proficiencies: str | None = None
 
 
 # ---------- builders ----------

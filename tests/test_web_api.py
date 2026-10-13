@@ -532,3 +532,197 @@ def test_item_catalog_type_filter_and_limit(api):
     assert len(api.get("/api/items?limit=1000", headers=auth(token)).json()) == 3
     assert api.get("/api/items?type=banana", headers=auth(token)).status_code == 422
     assert api.get("/api/items?limit=5000", headers=auth(token)).status_code == 422
+
+
+# ---------- editing ----------
+
+
+def _bob_client(api):
+    with session_scope() as s:
+        _seed(s)
+        _make_bob(s)
+    return api, auth(login(api, "u1")["token"])
+
+
+def _stack(sheet, where, name):
+    return next(i for i in sheet[where]["items"] if i["name"] == name)
+
+
+def test_edit_gold(api):
+    c, h = _bob_client(api)
+    r = c.patch("/api/character/gold", json={"gold": "3gp"}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["gold_cp"] == 300 and r.json()["gold"] == "3gp"
+    r = c.patch("/api/character/gold", json={"gold": "12gp 5sp 3cp"}, headers=h)
+    assert r.json()["gold_cp"] == 1253
+    assert c.patch("/api/character/gold", json={"gold": ""}, headers=h).json()["gold_cp"] == 0
+    bad = c.patch("/api/character/gold", json={"gold": "lots"}, headers=h)
+    assert bad.status_code == 400 and bad.json()["detail"]
+    assert c.patch("/api/character/gold", json={"gold": "1050"}, headers=h).status_code == 400
+    assert c.patch("/api/character/gold", json={"gold": 5}, headers=h).status_code == 422
+    other = auth(login(c, "u2")["token"])  # u2 has no character
+    assert c.patch("/api/character/gold", json={"gold": "1gp"}, headers=other).status_code == 404
+
+
+def test_edit_requires_login(api):
+    _bob_client(api)
+    assert api.patch("/api/character/gold", json={"gold": "1gp"}).status_code == 401
+    assert api.post("/api/character/items", json={"name": "Rope"}).status_code == 401
+    assert api.delete("/api/character/spells/1").status_code == 401
+
+
+def test_carry_items(api):
+    c, h = _bob_client(api)
+    r = c.post("/api/character/items", json={"name": "Rope"}, headers=h)
+    assert r.status_code == 200
+    rope = _stack(r.json(), "held", "Rope")
+    assert rope["source"] == "catalog" and rope["quantity"] == 1
+    r = c.post("/api/character/items", json={"name": "Rope", "to": "stash"}, headers=h)
+    assert _stack(r.json(), "stash", "Rope")["quantity"] == 2
+    r = c.post("/api/character/items", json={"name": "Lamp", "slots_each": 0.5,
+                                             "notes": "oil"}, headers=h)
+    assert _stack(r.json(), "held", "Lamp")["source"] == "freeform"
+    assert c.post("/api/character/items", json={"name": ""}, headers=h).status_code == 400
+    assert c.post("/api/character/items", json={"name": "Rope", "quantity": 0},
+                  headers=h).status_code == 400
+    big = c.post("/api/character/items", json={"name": "Rope", "quantity": 30}, headers=h)
+    assert big.status_code == 400 and big.json()["detail"].startswith("Your held items holds")
+    assert c.post("/api/character/items", json={"name": "Rope", "to": "x"},
+                  headers=h).status_code == 422
+    # the failed carries changed nothing
+    sheet = c.get("/api/character", headers=h).json()
+    assert _stack(sheet, "held", "Rope")["quantity"] == 1
+
+
+def test_drop_items(api):
+    c, h = _bob_client(api)
+    sheet = c.get("/api/character", headers=h).json()
+    arrow = _stack(sheet, "held", "Arrow")["id"]
+    r = c.delete(f"/api/character/items/{arrow}?quantity=5", headers=h)
+    assert r.status_code == 200 and _stack(r.json(), "held", "Arrow")["quantity"] == 20
+    over = c.delete(f"/api/character/items/{arrow}?quantity=99", headers=h)
+    assert over.status_code == 400 and "You only have" in over.json()["detail"]
+    r = c.delete(f"/api/character/items/{arrow}", headers=h)
+    assert r.status_code == 200
+    assert all(i["name"] != "Arrow" for i in r.json()["held"]["items"])
+    assert c.delete(f"/api/character/items/{arrow}", headers=h).status_code == 404
+    assert c.delete("/api/character/items/99999", headers=h).status_code == 404
+    # another user's entry id is a 404, and it is untouched
+    with session_scope() as s:
+        characters.save_identity(s, "u2", name="Alice")
+        characters.carry(s, "u2", item_name="Rope", quantity=1)
+    alice = c.get("/api/characters/u2", headers=h).json()
+    rope = _stack(alice, "held", "Rope")["id"]
+    assert c.delete(f"/api/character/items/{rope}", headers=h).status_code == 404
+    assert _stack(c.get("/api/characters/u2", headers=h).json(), "held", "Rope")
+
+
+def test_give_targets_and_give(api):
+    c, h = _bob_client(api)
+    from shadowdark_bot.models import Location
+
+    with session_scope() as s:
+        characters.save_identity(s, "u2", name="Alice")
+        s.add(Location(name="Armory", kind="inventory", max_gear_slots=20))
+    c.get("/api/characters/u2", headers=h)  # makes sure Alice's locations exist
+    sheet = c.get("/api/character", headers=h).json()
+    arrow = _stack(sheet, "held", "Arrow")["id"]
+    idol = _stack(sheet, "held", "Idol")["id"]
+
+    targets = c.get(f"/api/character/items/{arrow}/give-targets", headers=h).json()
+    kinds = [t["kind"] for t in targets]
+    assert kinds[0] == "guild" and targets[0]["name"] == "Armory"
+    assert targets[0]["owner_user_id"] is None
+    assert "self" in kinds and "character" in kinds
+    alice = next(t for t in targets if t["kind"] == "character")
+    assert alice["owner_user_id"] == "u2"
+    assert c.get("/api/character/items/99999/give-targets", headers=h).status_code == 404
+
+    r = c.post(f"/api/character/items/{arrow}/give",
+               json={"target_location_id": alice["location_id"], "quantity": 5}, headers=h)
+    assert r.status_code == 200
+    assert _stack(r.json(), "held", "Arrow")["quantity"] == 20
+    assert _stack(c.get("/api/characters/u2", headers=h).json(), "held", "Arrow")["quantity"] == 5
+
+    # held to own stash
+    mine = next(t for t in targets if t["kind"] == "self")
+    r = c.post(f"/api/character/items/{arrow}/give",
+               json={"target_location_id": mine["location_id"]}, headers=h)
+    assert r.status_code == 200 and _stack(r.json(), "stash", "Arrow")["quantity"] == 20
+
+    bad = c.post(f"/api/character/items/{idol}/give",
+                 json={"target_location_id": targets[0]["location_id"]}, headers=h)
+    assert bad.status_code == 400 and "Freeform" in bad.json()["detail"]
+    assert c.post("/api/character/items/99999/give",
+                  json={"target_location_id": 1}, headers=h).status_code == 404
+    gone = c.post(f"/api/character/items/{idol}/give",
+                  json={"target_location_id": 99999}, headers=h)
+    assert gone.status_code == 400
+
+
+def test_learn_and_forget_spells(api):
+    c, h = _bob_client(api)
+    spells = {s["name"]: s["id"] for s in c.get("/api/spells", headers=h).json()}
+    light = c.post("/api/character/spells", json={"spell_id": spells["Light"]}, headers=h)
+    assert light.status_code == 400 and "You already know" in light.json()["detail"]
+    cure = c.post("/api/character/spells", json={"spell_id": spells["Cure Wounds"]}, headers=h)
+    assert cure.status_code == 400
+    assert c.post("/api/character/spells", json={"spell_id": 99999}, headers=h).status_code == 404
+
+    sheet = c.get("/api/character", headers=h).json()
+    known = next(k for k in sheet["spells"] if k["name"] == "Fireball")["id"]
+    r = c.delete(f"/api/character/spells/{known}", headers=h)
+    assert r.status_code == 200 and [k["name"] for k in r.json()["spells"]] == ["Light"]
+    assert c.delete(f"/api/character/spells/{known}", headers=h).status_code == 404
+    r = c.post("/api/character/spells", json={"spell_id": spells["Fireball"]}, headers=h)
+    assert r.status_code == 200 and len(r.json()["spells"]) == 2
+
+
+def test_edit_in_local_mode(local_api):
+    with session_scope() as s:
+        _seed(s)
+        _make_bob(s)
+    token = local_api.post("/api/auth/local", json={"user_id": "u1"}).json()["token"]
+    r = local_api.patch("/api/character/gold", json={"gold": "7gp"}, headers=auth(token))
+    assert r.status_code == 200 and r.json()["gold"] == "7gp"
+    with session_scope() as s:
+        assert characters.require_character(s, "u1").gold_cp == 700
+
+
+def test_edit_identity_stats_skills_proficiencies(api):
+    c, h = _bob_client(api)
+    r = c.patch("/api/character/identity", headers=h, json={
+        "name": "Robert", "char_class": "Wizard", "title": "Apprentice",
+        "ancestry": "Human", "alignment": "Lawful", "background": "Urchin"})
+    assert r.status_code == 200
+    assert (r.json()["name"], r.json()["alignment"], r.json()["title"]) == (
+        "Robert", "Lawful", "Apprentice")
+    assert c.patch("/api/character/identity", json={"name": " "}, headers=h).status_code == 400
+    assert c.patch("/api/character/identity", json={"name": "B", "alignment": "evil"},
+                   headers=h).status_code == 400
+    # no character creation over the web
+    other = auth(login(c, "u2")["token"])
+    assert c.patch("/api/character/identity", json={"name": "Eve"},
+                   headers=other).status_code == 404
+
+    sheet = c.get("/api/character", headers=h).json()
+    base_ac = sheet["armor_class_base"]
+    body = {"scores": [a["score"] for a in sheet["abilities"]], "level": 3, "max_hp": 12,
+            "armor_class": base_ac, "spell_ability": "INT", "spell_check_bonus": 1}
+    r = c.patch("/api/character/stats", json=body, headers=h)
+    assert r.status_code == 200
+    assert r.json()["level"] == 3 and r.json()["armor_class_base"] == base_ac
+    assert r.json()["spellcasting"]["ability"] == "int"
+    r = c.patch("/api/character/stats", json={**body, "spell_ability": "none"}, headers=h)
+    assert r.json()["spellcasting"] is None
+    bad = c.patch("/api/character/stats", json={**body, "scores": [31, 1, 1, 1, 1, 1]},
+                  headers=h)
+    assert bad.status_code == 400 and "out of range" in bad.json()["detail"]
+
+    r = c.patch("/api/character/skills", headers=h,
+                json={"languages": "Common, Elvish", "talents": "Keen"})
+    assert r.json()["languages"] == "Common, Elvish" and r.json()["additional_info"] is None
+    r = c.patch("/api/character/proficiencies", json={"proficiencies": "Daggers"}, headers=h)
+    assert r.json()["proficiencies"] == "Daggers"
+    r = c.patch("/api/character/proficiencies", json={}, headers=h)
+    assert r.json()["proficiencies"] is None
