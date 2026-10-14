@@ -25,7 +25,7 @@ function control(f, listId) {
   }
   const el = h("input", {
     ...common,
-    type: f.type === "number" ? "number" : "text",
+    type: f.type === "number" || f.type === "date" ? f.type : "text",
     min: f.min ?? null, max: f.max ?? null, step: f.step ?? null,
     list: listId,
     autocomplete: "off",
