@@ -3,7 +3,7 @@
 // that cause it. Anyone may add, edit, delete and link. Also the small chip
 // list other pages use to show the effects linked to one item/spell/creature.
 
-import { api } from "./api.js";
+import { api, getToken } from "./api.js";
 import { h, mount } from "./dom.js";
 import { bonusesFrom, btn, effectFields, openForm } from "./edit.js";
 import { card, pageHead } from "./sheet.js";
@@ -31,12 +31,62 @@ export function bonusChips(bonuses) {
 export const libraryLink = () => h("a", { class: "head-link", href: "#/effects" }, "Effects library →");
 
 // Chips linking to #/effects/<id> for a row's expanded body; null when none.
+// Each chip has an "Apply to [Me]" control beside or under it.
 export function linkedEffects(list) {
   if (!list?.length) return null;
   return h("div", { class: "linked-effects" },
     h("span", { class: "muted" }, "Effects"),
-    h("ul", { class: "chips" }, list.map((e) =>
-      h("li", {}, h("a", { href: `#/effects/${e.id}` }, e.name)))));
+    h("ul", { class: "chips apply-list" }, list.map((e) =>
+      h("li", {}, h("a", { href: `#/effects/${e.id}` }, e.name), applyControl(e)))));
+}
+
+// Who an effect can be applied to: me first (when I have a character), then
+// the rest of the party by name. One request pair, shared for a minute.
+let targetsCache = null;
+function applyTargets() {
+  if (!targetsCache || targetsCache.token !== getToken() || Date.now() - targetsCache.at > 60000) {
+    const load = Promise.all([api("/me"), api("/characters")]).then(([me, party]) => [
+      ...(me.has_character ? [{ id: me.user_id, name: "Me", mine: true }] : []),
+      ...party.filter((c) => c.user_id !== me.user_id).map((c) => ({ id: c.user_id, name: c.name })),
+    ]);
+    targetsCache = { at: Date.now(), token: getToken(), load };
+    load.catch(() => { targetsCache = null; });
+  }
+  return targetsCache.load;
+}
+
+// Compact "[Apply] to [Me v]": a native select (works on phones) and one tap
+// adds a copy of the effect to the chosen character. Stays on the page and
+// says what happened in a line beside it. Hidden when there is nobody to apply to.
+export function applyControl(e) {
+  let mine = null;
+  const select = h("select", { class: "apply-target", "aria-label": `Apply ${e.name} to` });
+  const say = h("span", { class: "apply-say muted", role: "status" });
+  const button = h("button", { type: "button", class: "tool" }, "Apply");
+  const root = h("span", { class: "apply", hidden: true }, button, h("span", { class: "muted" }, "to"), select, say);
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    say.className = "apply-say muted";
+    say.textContent = "";
+    try {
+      const done = await api(`/effects/${e.id}/apply`, {
+        method: "POST", body: select.value === mine ? {} : { target_user_id: select.value },
+      });
+      say.textContent = `${done.effect_name} applied to ${done.target_name}`;
+    } catch (err) {
+      say.className = "apply-say error";
+      say.textContent = err.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  applyTargets().then((targets) => {
+    if (!targets.length) return;
+    mine = targets.find((t) => t.mine)?.id ?? null;
+    for (const t of targets) select.append(h("option", { value: t.id }, t.name));
+    root.hidden = false;
+  }, () => {});
+  return root;
 }
 
 // kind:target_id -> [effect, ...], from the whole library (one request).
@@ -103,28 +153,12 @@ function effectRow(e) {
 // ---------- detail ----------
 
 async function renderEffect(app, id, me) {
-  const notice = h("p", { class: "banner notice", role: "status", hidden: true });
-  const say = (text) => {
-    notice.textContent = text;
-    notice.hidden = false;
-    notice.scrollIntoView({ block: "nearest" });
-  };
-  // A copy lands on your sheet; the library entry stays as it is.
-  const apply = (e) => api("/character/effects", {
-    method: "POST",
-    body: { name: e.name, max_rounds: e.max_rounds, bonuses: e.bonuses, template_id: e.id },
-  }).then(
-    () => say(`${e.name} added to your sheet.`),
-    (err) => say(err.message),
-  );
   const draw = (e) => {
     const y = window.scrollY;
     mount(app,
       h("p", { class: "banner" }, h("a", { href: "#/effects" }, "← Effects")),
-      notice,
       card("effect", e.name, {
         tools: [
-          me?.has_character ? btn("Apply to me", () => apply(e)) : null,
           btn("Edit", () => openEffectForm(e, draw)),
           btn("Delete", () => openForm({
             title: "Delete effect",
@@ -143,6 +177,7 @@ async function renderEffect(app, id, me) {
         ),
         bonusChips(e.bonuses) ?? h("p", { class: "muted" }, "No stat changes."),
         e.description ? h("p", { class: "prose" }, e.description) : null,
+        h("div", { class: "apply-row" }, applyControl(e)),
       ),
       linksCard(e, draw),
     );
