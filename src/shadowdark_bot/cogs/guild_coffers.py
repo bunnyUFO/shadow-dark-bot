@@ -4,12 +4,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from shadowdark_bot.currency import format_cp, parse_to_cp
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import build_coffer_change_embed, build_coffer_show_embed
-from shadowdark_bot.models import Coffer, Item
+from shadowdark_bot.models import Item
+from shadowdark_bot.services.coffers import (
+    get_or_create_coffer as _get_or_create_coffer,
+)
 from shadowdark_bot.sharing import ShareButton, ShareableView
 
 VIEW_TIMEOUT_SECONDS = 300
@@ -122,16 +124,6 @@ class GuildCoffers(commands.Cog):
         await interaction.response.send_message(
             embed=embed, view=view, ephemeral=True
         )
-
-
-def _get_or_create_coffer(session: Session) -> Coffer:
-    """Auto-create the singleton coffer row on first use."""
-    coffer = session.scalars(select(Coffer).limit(1)).first()
-    if coffer is None:
-        coffer = Coffer(balance_cp=0)
-        session.add(coffer)
-        session.flush()
-    return coffer
 
 
 def _fmt(cp: int) -> str:

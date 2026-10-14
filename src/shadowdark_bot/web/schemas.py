@@ -183,6 +183,21 @@ class CarryIn(BaseModel):
     notes: str | None = None
 
 
+class EditStackIn(BaseModel):
+    # Omitted/None = leave alone; notes "" clears them. Catalog stacks accept
+    # only quantity and notes.
+    quantity: int | None = None
+    name: str | None = None
+    slots_each: float | None = None
+    notes: str | None = None
+
+
+class BuyIn(BaseModel):
+    quantity: int = 1
+    pay_from: Literal["character", "guild"]
+    destination_location_id: int
+
+
 class GiveIn(BaseModel):
     target_location_id: int
     quantity: int | None = None  # None = the whole stack

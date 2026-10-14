@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from shadowdark_bot import storage
+from shadowdark_bot.currency import format_cp
 from shadowdark_bot.models import (
     ITEM_TYPE_MAGICAL,
     LOCATION_ROLE_HELD,
@@ -33,6 +34,7 @@ from shadowdark_bot.models import (
     TreasuryEntry,
 )
 from shadowdark_bot.rules import ABILITIES, SPELL_ABILITIES, fmt_slots, stack_slots
+from shadowdark_bot.services.coffers import get_or_create_coffer
 
 # ---------- Errors ----------
 
@@ -362,6 +364,32 @@ def delete_character(session: Session, user_id: str) -> bool:
 # ---------- Carried inventory ----------
 
 
+def _check_room(
+    session: Session,
+    loc: Location,
+    *,
+    current_qty: int,
+    add_qty: int,
+    gear_slots: float,
+    bundle: int,
+    where: str,
+) -> float:
+    """Raise unless `add_qty` more of a stack (already `current_qty` in `loc`)
+    fits the location's capacity. Returns the slots used afterwards."""
+    delta = stack_slots(current_qty + add_qty, gear_slots, bundle) - stack_slots(
+        current_qty, gear_slots, bundle
+    )
+    used = storage.used_slots(storage.location_entries(session, loc.id))
+    cap = loc.max_gear_slots
+    new_used = used + delta
+    if new_used > cap:
+        raise CharacterError(
+            f"{where} holds {fmt_slots(used)}/{fmt_slots(cap)} slots; this "
+            f"would need {fmt_slots(delta)} more ({fmt_slots(new_used)} total)."
+        )
+    return new_used
+
+
 @dataclass
 class CarryResult:
     display_name: str
@@ -408,18 +436,16 @@ def carry(
             gear_slots, bundle = freeform_slots, 1
 
     current_qty = existing.quantity if existing else 0
-    delta = stack_slots(current_qty + quantity, gear_slots, bundle) - stack_slots(
-        current_qty, gear_slots, bundle
+    new_used = _check_room(
+        session,
+        loc,
+        current_qty=current_qty,
+        add_qty=quantity,
+        gear_slots=gear_slots,
+        bundle=bundle,
+        where=f"Your {role_label(role)}",
     )
-    used = storage.used_slots(storage.location_entries(session, loc.id))
     cap = loc.max_gear_slots
-    new_used = used + delta
-    if new_used > cap:
-        raise CharacterError(
-            f"Your {role_label(role)} holds "
-            f"{fmt_slots(used)}/{fmt_slots(cap)} slots; this would need "
-            f"{fmt_slots(delta)} more ({fmt_slots(new_used)} total)."
-        )
 
     stack = storage.add_stack(
         session,
@@ -700,6 +726,188 @@ def give(
         touch(char)
     session.flush()
     return GiveResult(display_name=display, quantity=give_qty, target_name=target.name)
+
+
+# ---------- Edit a stack ----------
+
+
+@dataclass
+class EditStackResult:
+    display_name: str
+    used_slots: float
+    max_slots: float
+
+
+def edit_stack(
+    session: Session,
+    user_id: str,
+    *,
+    role: str,
+    entry_id: int,
+    quantity: int | None = None,
+    name: str | None = None,
+    slots_each: float | None = None,
+    notes: str | None = None,
+) -> EditStackResult:
+    """Edit a stack in one of the user's own locations. `None` leaves a field
+    alone; `notes=""` clears them. Catalog stacks keep their catalog name and
+    slot size (only quantity and notes change); freeform stacks can change
+    everything. Growing the stack in slots must fit the location."""
+    char = require_character(session, user_id)
+    loc = storage.character_location(session, user_id, role)
+    entry = location_entry(session, user_id, role, entry_id)
+    if loc is None or entry is None:
+        raise CharacterError("That item is no longer there.")
+    if quantity is not None and quantity < 1:
+        raise CharacterError("Quantity must be ≥ 1. Drop the item to remove it.")
+
+    new_name = name.strip() if name is not None else None
+    if new_name == "":
+        raise CharacterError("Item name cannot be empty.")
+    if slots_each is not None and slots_each < 0:
+        raise CharacterError("Gear slots each must be ≥ 0.")
+    if entry.is_catalog:
+        if new_name is not None and new_name != entry.display_name:
+            raise CharacterError(
+                f"**{entry.display_name}** is a catalog item and can't be renamed."
+            )
+        if slots_each is not None and slots_each != entry.effective_gear_slots:
+            raise CharacterError(
+                f"**{entry.display_name}** is a catalog item; its slot size "
+                "comes from the catalog."
+            )
+    elif new_name is not None and new_name.lower() != (entry.name or "").lower():
+        clash = storage.find_freeform_stack(session, loc.id, new_name)
+        if clash is not None and clash.id != entry.id:
+            raise CharacterError(f"You already have an item named **{new_name}** there.")
+
+    gear_slots = entry.effective_gear_slots
+    if not entry.is_catalog and slots_each is not None:
+        gear_slots = slots_each
+    bundle = entry.effective_bundle_size
+    new_qty = entry.quantity if quantity is None else quantity
+    delta = stack_slots(new_qty, gear_slots, bundle) - entry.slot_cost
+    used = storage.used_slots(storage.location_entries(session, loc.id))
+    cap = loc.max_gear_slots
+    if delta > 0 and used + delta > cap:
+        raise CharacterError(
+            f"Your {role_label(role)} holds {fmt_slots(used)}/{fmt_slots(cap)} "
+            f"slots; this would need {fmt_slots(delta)} more "
+            f"({fmt_slots(used + delta)} total)."
+        )
+
+    entry.quantity = new_qty
+    if not entry.is_catalog:
+        if new_name is not None:
+            entry.name = new_name
+        if slots_each is not None:
+            entry.slots_each = slots_each
+    if notes is not None:
+        entry.notes = notes.strip() or None
+    touch(char)
+    session.flush()
+    return EditStackResult(
+        display_name=entry.display_name, used_slots=used + delta, max_slots=cap
+    )
+
+
+# ---------- Buy from the catalog ----------
+
+PAY_FROM = ("character", "guild")
+
+
+@dataclass
+class BuyResult:
+    display_name: str
+    quantity: int
+    total_cp: int
+    pay_from: str
+    destination_name: str
+    balance_cp: int  # what's left in the account that paid
+
+
+def buy(
+    session: Session,
+    user_id: str,
+    *,
+    item_id: int,
+    quantity: int,
+    pay_from: str,
+    destination_location_id: int,
+) -> BuyResult:
+    """Buy catalog items with the character's gold or the guild coffers and put
+    them in the character's own held items/stash or a shared guild storage
+    location. Funds and capacity are checked before anything changes."""
+    if quantity < 1:
+        raise CharacterError("Quantity must be ≥ 1.")
+    if pay_from not in PAY_FROM:
+        raise CharacterError("Pay from your gold or the guild coffers.")
+    char = require_character(session, user_id)
+    item = session.get(Item, item_id)
+    if item is None:
+        raise CharacterError("That item is no longer in the catalog.")
+    if item.value_cp is None or item.value_cp <= 0:
+        raise CharacterError(f"**{item.name}** has no price set, so it can't be bought.")
+
+    dest = session.get(Location, destination_location_id)
+    if dest is None or dest.kind != "inventory":
+        raise CharacterError("That destination no longer exists.")
+    if dest.owner_user_id is not None and dest.owner_user_id != user_id:
+        raise CharacterError("You can only put purchases in your own items or guild storage.")
+    if dest.owner_user_id is None and item.item_type == ITEM_TYPE_MAGICAL:
+        raise CharacterError(
+            "Magical items can't go into guild inventory — they belong in the treasury."
+        )
+
+    price = item.value_cp
+    total = price * quantity
+    if pay_from == "guild":
+        account = get_or_create_coffer(session)
+        label, balance = "Coffer balance is", account.balance_cp
+    else:
+        account = char
+        label, balance = "You have", char.gold_cp
+    if balance < total:
+        raise CharacterError(
+            f"{label} {_fmt_cp(balance)}; price is {_fmt_cp(total)} "
+            f"({quantity} × {_fmt_cp(price)}). Short by {_fmt_cp(total - balance)}."
+        )
+
+    existing = storage.find_catalog_stack(session, dest.id, item.id)
+    where = (
+        f"Your {role_label(dest.role)}" if dest.owner_user_id is not None else dest.name
+    )
+    _check_room(
+        session,
+        dest,
+        current_qty=existing.quantity if existing else 0,
+        add_qty=quantity,
+        gear_slots=item.gear_slots,
+        bundle=item.bundle_size,
+        where=where,
+    )
+
+    if pay_from == "guild":
+        account.balance_cp -= total
+        left = account.balance_cp
+    else:
+        char.gold_cp -= total
+        left = char.gold_cp
+    storage.add_stack(session, dest, quantity=quantity, item=item)
+    touch(char)
+    session.flush()
+    return BuyResult(
+        display_name=item.name,
+        quantity=quantity,
+        total_cp=total,
+        pay_from=pay_from,
+        destination_name=where,
+        balance_cp=left,
+    )
+
+
+def _fmt_cp(cp: int) -> str:
+    return format_cp(cp) or "0cp"
 
 
 # ---------- Spells ----------
