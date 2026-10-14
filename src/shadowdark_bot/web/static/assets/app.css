@@ -269,7 +269,7 @@ button.primary:hover { filter: brightness(1.08); }
 .rows > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 6px; }
 .rows > li + li { border-top: 1px solid var(--line); }
 .rows > li > details { min-width: 0; }
-.row-actions { align-self: start; padding-top: 6px; display: flex; gap: 6px; }
+.row-actions { padding-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
 
 .row summary {
   display: flex;
@@ -496,3 +496,10 @@ button.primary.danger { background: var(--danger); border-color: var(--danger); 
 .form-actions button { flex: 0 0 auto; white-space: nowrap; }
 .form-actions button.primary { margin-top: 0; }
 dialog.sheet-form select { max-width: 100%; min-width: 0; text-overflow: ellipsis; }
+
+/* add / edit / buy dialogs */
+dialog.sheet-form .field[hidden] { display: none; }
+dialog.sheet-form select[size] { padding: 4px; }
+dialog.sheet-form select[size] option { padding: 8px 6px; }
+.form-total { margin: 10px 0 0; }
+.banner.notice[hidden] { display: none; }

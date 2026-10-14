@@ -6,8 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from shadowdark_bot.db import session_scope
-from shadowdark_bot.models import ITEM_TYPE_COMMON, Item, Spell
+from shadowdark_bot.models import ITEM_TYPE_COMMON, Item, Location, Spell
 from shadowdark_bot.services import characters
+from shadowdark_bot.services.coffers import get_or_create_coffer
 from shadowdark_bot.web.app import create_app
 from shadowdark_bot.web.auth import (
     DiscordOAuth,
@@ -759,3 +760,78 @@ def test_edit_identity_stats_skills_proficiencies(api):
     assert r.json()["proficiencies"] == "Daggers"
     r = c.patch("/api/character/proficiencies", json={}, headers=h)
     assert r.json()["proficiencies"] is None
+
+
+# ---------- edit a stack / buy ----------
+
+
+def test_edit_item_endpoint(api):
+    c, h = _bob_client(api)
+    sheet = c.get("/api/character", headers=h).json()
+    idol = _stack(sheet, "held", "Idol")["id"]
+    rope = _stack(sheet, "stash", "Rope")["id"]
+    r = c.patch(f"/api/character/items/{idol}", headers=h,
+                json={"name": "Gold Idol", "slots_each": 2, "quantity": 2, "notes": "heavy"})
+    assert r.status_code == 200
+    gold = _stack(r.json(), "held", "Gold Idol")
+    assert (gold["quantity"], gold["gear_slots_each"], gold["description"]) == (2, 2, "heavy")
+    # catalog stacks: quantity and notes only
+    r = c.patch(f"/api/character/items/{rope}", headers=h, json={"quantity": 3, "notes": "hemp"})
+    rope_out = _stack(r.json(), "stash", "Rope")
+    assert (rope_out["quantity"], rope_out["notes"]) == (3, "hemp")
+    bad = c.patch(f"/api/character/items/{rope}", headers=h, json={"name": "Cord"})
+    assert bad.status_code == 400 and "can't be renamed" in bad.json()["detail"]
+    over = c.patch(f"/api/character/items/{idol}", headers=h, json={"quantity": 40})
+    assert over.status_code == 400 and "would need" in over.json()["detail"]
+    assert c.patch("/api/character/items/9999", headers=h, json={"quantity": 1}).status_code == 404
+    # someone else's stack is not yours to edit
+    _make_amy(c)
+    amy = auth(login(c, "u2")["token"])
+    assert c.patch(f"/api/character/items/{idol}", headers=amy,
+                   json={"quantity": 1}).status_code == 404
+    assert c.patch(f"/api/character/items/{idol}", json={"quantity": 1}).status_code == 401
+
+
+def _make_amy(client):
+    with session_scope() as s:
+        characters.save_identity(s, "u2", name="Amy")
+
+
+def test_buy_endpoint(api):
+    c, h = _bob_client(api)
+    with session_scope() as s:
+        torch = Item(name="Torch", gear_slots=1, bundle_size=1,
+                     item_type=ITEM_TYPE_COMMON, value_cp=10)
+        cellar = Location(name="Cellar", kind="inventory", max_gear_slots=5.0)
+        s.add_all([torch, cellar])
+        s.flush()
+        torch_id, cellar_id = torch.id, cellar.id
+        get_or_create_coffer(s).balance_cp = 50
+    sheet = c.get("/api/character", headers=h).json()
+    held_id = sheet["held"]["location_id"]
+
+    r = c.post(f"/api/items/{torch_id}/buy", headers=h, json={
+        "quantity": 2, "pay_from": "character", "destination_location_id": held_id})
+    assert r.status_code == 200
+    assert r.json()["gold_cp"] == 1030 and _stack(r.json(), "held", "Torch")["quantity"] == 2
+
+    r = c.post(f"/api/items/{torch_id}/buy", headers=h, json={
+        "quantity": 3, "pay_from": "guild", "destination_location_id": cellar_id})
+    assert r.status_code == 200 and r.json()["gold_cp"] == 1030  # own gold untouched
+    guild = c.get("/api/guild", headers=h).json()
+    assert guild["coffers"]["balance_cp"] == 20
+    assert guild["locations"][0]["items"][0]["quantity"] == 3
+
+    short = c.post(f"/api/items/{torch_id}/buy", headers=h, json={
+        "quantity": 3, "pay_from": "guild", "destination_location_id": cellar_id})
+    assert short.status_code == 400 and "Short by" in short.json()["detail"]
+    full = c.post(f"/api/items/{torch_id}/buy", headers=h, json={
+        "quantity": 99, "pay_from": "character", "destination_location_id": held_id})
+    assert full.status_code == 400 and "would need" in full.json()["detail"]
+    assert c.get("/api/character", headers=h).json()["gold_cp"] == 1030
+    assert c.post(f"/api/items/{torch_id}/buy", headers=h, json={
+        "quantity": 1, "pay_from": "bank", "destination_location_id": held_id}).status_code == 422
+    assert c.post("/api/items/9999/buy", headers=h, json={
+        "quantity": 1, "pay_from": "guild", "destination_location_id": held_id}).status_code == 400
+    assert c.post(f"/api/items/{torch_id}/buy", json={
+        "quantity": 1, "pay_from": "guild", "destination_location_id": held_id}).status_code == 401
