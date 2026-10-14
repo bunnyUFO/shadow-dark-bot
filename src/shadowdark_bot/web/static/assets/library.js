@@ -225,7 +225,7 @@ function catalogRow(i, buy, effects) {
 export async function renderGuild(app, me) {
   const draw = (g) => {
     const y = window.scrollY;
-    drawGuild(app, g, me?.has_character ? guildEditOpts(me, draw) : null);
+    drawGuild(app, g, me ? guildEditOpts(me, draw, g.party) : null);
     window.scrollTo(0, y);
   };
   draw(await api("/guild"));
@@ -246,20 +246,23 @@ function drawGuild(app, g, ed) {
         h("span", { class: "tile-note" }, "magic items available"),
       ),
     ),
-    card("treasury", "Magic item treasury", { aside: h("span", { class: "slots" }, `${available} available`) },
+    card("treasury", "Magic item treasury", { aside: h("span", { class: "slots" }, `${available} available`), collapsible: true },
       g.treasury.length === 0
         ? h("p", { class: "muted" }, "Empty. Add magical items in Discord with /treasury add.")
         : h("ul", { class: "rows" }, g.treasury.map((t) => treasuryRow(t, ed?.treasuryAction(t)))),
     ),
     g.locations.length === 0
       ? h("p", { class: "card muted" }, "No guild storage locations yet. Create one in Discord with /inventory.")
-      : g.locations.map((loc) => storeCard(loc.name, loc, "Empty.",
-          ed ? { opts: { itemActions: (item) => ed.takeAction(loc, item) } } : {})),
+      : g.locations.map((loc) => storeCard(loc.name, loc, "Empty.", {
+          cardKey: `guild-location-${loc.location_id}`,
+          collapsible: true,
+          opts: ed?.takeAction ? { itemActions: (item) => ed.takeAction(loc, item) } : undefined,
+        })),
   );
 }
 
 function treasuryRow(t, action) {
-  const who = t.borrower ? (t.borrower.name ?? "a player") : null;
+  const who = t.borrower ? t.borrower.name : null;
   return h("li", {},
     h("details", { class: "row" },
       h("summary", {},

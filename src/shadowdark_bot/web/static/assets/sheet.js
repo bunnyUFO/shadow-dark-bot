@@ -334,8 +334,8 @@ export function storeCard(label, store, empty, ctx = {}) {
   const full = store.used_slots >= store.max_slots;
   const aside = h("span", { class: full ? "slots full" : "slots" },
     `${slots(store.used_slots)} / ${slots(store.max_slots)} slots`);
-  return card(ctx.key ?? `store-${store.id ?? label}`, label,
-    { aside, tools: ctx.opts?.tools?.(ctx.key, ctx.c) },
+  return card(ctx.cardKey ?? ctx.key ?? `store-${store.id ?? label}`, label,
+    { aside, tools: ctx.opts?.tools?.(ctx.key, ctx.c), collapsible: ctx.collapsible ?? false },
     store.description && !ctx.key ? h("p", { class: "store-desc muted" }, store.description) : null,
     h("div", {
       class: "meter",

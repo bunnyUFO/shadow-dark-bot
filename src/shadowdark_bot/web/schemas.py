@@ -30,7 +30,7 @@ from shadowdark_bot.rules import (
     spellcasting_modifier,
     xp_needed,
 )
-from shadowdark_bot.services import characters
+from shadowdark_bot.services import characters, guild as guild_service
 
 
 class UserOut(BaseModel):
@@ -170,8 +170,10 @@ class CatalogItemOut(BaseModel):
 
 
 class BorrowerOut(BaseModel):
-    user_id: str
-    name: str | None  # their character's name, if they have one
+    user_id: str  # "" when lent to a free-text name
+    # Character name -> Discord display name -> name stored on the loan ->
+    # "Unknown player"; never empty.
+    name: str
     borrowed_at: datetime
     notes: str | None
 
@@ -189,8 +191,14 @@ class CoffersOut(BaseModel):
     balance: str
 
 
+class PartyMemberOut(BaseModel):
+    user_id: str
+    name: str
+
+
 class GuildOut(BaseModel):
     coffers: CoffersOut
+    party: list[PartyMemberOut]  # every character, for "borrow for…"
     locations: list[StoreOut]  # shared guild storage (not characters' held/stash)
     treasury: list[TreasuryEntryOut]
 
@@ -207,6 +215,13 @@ class GiveTargetOut(BaseModel):
 
 class GoldIn(BaseModel):
     gold: str  # "12gp 5sp 3cp", same grammar as the bot's Gold modal
+
+
+class BorrowIn(BaseModel):
+    # Neither set = borrow for yourself. `for_user_id` = another character's
+    # owner; `name` = a free-text borrower (ledger only, no inventory).
+    for_user_id: str | None = None
+    name: str | None = None
 
 
 class CarryIn(BaseModel):
@@ -482,7 +497,9 @@ def character_sheet(
     )
 
 
-def guild_overview(session: Session) -> GuildOut:
+def guild_overview(
+    session: Session, resolve_name: guild_service.NameResolver | None = None
+) -> GuildOut:
     """Coffers, every shared storage location with its contents, and the magic
     item treasury with who has each borrowed instance."""
     coffer = session.scalar(select(Coffer).limit(1))
@@ -512,6 +529,11 @@ def guild_overview(session: Session) -> GuildOut:
             )
         ).all()
     }
+    party = session.execute(
+        select(PlayerCharacter.user_id, PlayerCharacter.name).order_by(
+            PlayerCharacter.name, PlayerCharacter.user_id
+        )
+    ).all()
 
     treasury = []
     for e in entries:
@@ -524,7 +546,9 @@ def guild_overview(session: Session) -> GuildOut:
                 status=e.status,
                 borrower=BorrowerOut(
                     user_id=borrow.borrower_id,
-                    name=names.get(borrow.borrower_id),
+                    name=guild_service.borrower_name(
+                        borrow, names.get(borrow.borrower_id), resolve_name
+                    ),
                     borrowed_at=borrow.borrowed_at,
                     notes=borrow.notes,
                 )
@@ -534,6 +558,7 @@ def guild_overview(session: Session) -> GuildOut:
         )
 
     return GuildOut(
+        party=[PartyMemberOut(user_id=u, name=n) for u, n in party],
         coffers=CoffersOut(balance_cp=balance, balance=format_cp(balance) or "0cp"),
         locations=[_store_out(session, loc) for loc in locations],
         treasury=treasury,

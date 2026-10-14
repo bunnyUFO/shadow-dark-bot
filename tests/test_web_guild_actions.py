@@ -88,10 +88,9 @@ def test_borrow_and_return_treasury_item(api):
 
     again = api.post(f"/api/guild/treasury/{ids['ring']}/borrow", headers=alice)
     assert again.status_code == 400 and "already borrowed" in again.json()["detail"]
-    notmine = api.post(f"/api/guild/treasury/{ids['ring']}/return", headers=alice)
-    assert notmine.status_code == 400 and "Only the person" in notmine.json()["detail"]
 
-    r = api.post(f"/api/guild/treasury/{ids['ring']}/return", headers=bob)
+    # anyone can return it, not just the borrower
+    r = api.post(f"/api/guild/treasury/{ids['ring']}/return", headers=alice)
     assert r.status_code == 200 and r.json()["treasury"][0]["status"] == "available"
     held = api.get("/api/character", headers=bob).json()["held"]["items"]
     assert all(i["name"] != "Ring" for i in held)

@@ -30,6 +30,8 @@ from shadowdark_bot.services import characters, creatures, effects
 BRANNOC_ID = "900000000000000001"
 YSOLDE_ID = "900000000000000002"
 ALDRIC_ID = "900000000000000003"
+# Has borrowed a treasury item but has no character sheet (shows as "Unknown player").
+STRANGER_ID = "900000000000000099"
 
 # (name, type, gear_slots, bundle_size, value_cp, description)
 CATALOG: list[tuple[str, str, float, int, int | None, str | None]] = [
@@ -51,6 +53,7 @@ CATALOG: list[tuple[str, str, float, int, int | None, str | None]] = [
     ("Ring of Feather Falling", "magical", 1, 1, None, None),
     ("Wand of Sleep", "magical", 1, 1, None, None),
     ("Cloak of Elvenkind", "magical", 1, 1, None, None),
+    ("Boots of Silence", "magical", 1, 1, None, None),
 ]
 
 
@@ -201,8 +204,13 @@ def _seed_guild(session: Session) -> None:
         location_id=treasury.id, item_id=items["Ring of Feather Falling"].id,
         status="borrowed",
     )
+    boots = TreasuryEntry(
+        location_id=treasury.id, item_id=items["Boots of Silence"].id,
+        status="borrowed",
+    )
     session.add_all([
         ring,
+        boots,
         TreasuryEntry(
             location_id=treasury.id, item_id=items["Wand of Sleep"].id,
             tag="3 charges", status="available",
@@ -219,6 +227,7 @@ def _seed_guild(session: Session) -> None:
             notes="For the cliff descent",
         )
     )
+    session.add(Borrow(treasury_entry_id=boots.id, borrower_id=STRANGER_ID))
     # Same effect as the treasury cog's borrow: the item lands in held items.
     characters.carry(
         session, BRANNOC_ID, item_name="Ring of Feather Falling", quantity=1,

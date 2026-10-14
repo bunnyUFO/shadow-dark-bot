@@ -78,11 +78,13 @@ def test_seed_content(seeded):
             "Pack Mule": 4.0,
         }
         entries = s.scalars(select(TreasuryEntry)).all()
-        assert len(entries) == 3
+        assert len(entries) == 4
         borrowed = [e for e in entries if e.status == "borrowed"]
-        assert len(borrowed) == 1
+        assert len(borrowed) == 2
+        ring_entry = next(e for e in borrowed if e.item.name == "Ring of Feather Falling")
+        borrowed = [ring_entry]
         borrow = s.scalars(
-            select(Borrow).where(Borrow.treasury_entry_id == borrowed[0].id)
+            select(Borrow).where(Borrow.treasury_entry_id == ring_entry.id)
         ).one()
         assert borrow.borrower_id == BRANNOC_ID and borrow.returned_at is None
         ring = [
@@ -149,7 +151,7 @@ def test_seed_through_the_local_app(seeded):
     guild = client.get("/api/guild", headers={"Authorization": f"Bearer {token}"}).json()
     assert guild["coffers"]["balance_cp"] == 15240
     borrowers = [t["borrower"]["name"] for t in guild["treasury"] if t["borrower"]]
-    assert borrowers == ["Brannoc Ashfall"]
+    assert sorted(borrowers) == ["Brannoc Ashfall", "Unknown player"]
 
 
 def test_ready_for_give_capacity_error(seeded):

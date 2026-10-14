@@ -73,6 +73,7 @@ from shadowdark_bot.web.schemas import (
     character_sheet,
     character_summary,
     guild_overview,
+    BorrowIn,
     spell_out,
 )
 
@@ -143,6 +144,7 @@ def create_app(
     is_allowed_member: MembershipCheck | None = None,
     public_base_url: str = "",
     static_dir: Path | None = STATIC_DIR,
+    resolve_name: guild_service.NameResolver | None = None,
 ) -> FastAPI:
     if mode == "discord" and (oauth is None or is_allowed_member is None):
         raise ValueError("discord mode needs oauth and is_allowed_member")
@@ -331,7 +333,7 @@ def create_app(
     def guild(user: User) -> GuildOut:
         """Guild coffers, shared storage locations and the magic item treasury."""
         with session_scope() as session:
-            return guild_overview(session)
+            return guild_overview(session, resolve_name)
 
     # ---------- editing ----------
     # Every write returns the full updated sheet (same body as GET /api/character).
@@ -545,21 +547,31 @@ def create_app(
                 quantity=body.quantity,
                 role=body.to,
             )
-        return _guild()
+        return _guild(resolve_name)
 
     @app.post("/api/guild/treasury/{entry_id}/borrow")
-    def borrow_treasury(entry_id: int, user: User) -> GuildOut:
+    def borrow_treasury(
+        entry_id: int, user: User, body: BorrowIn | None = None
+    ) -> GuildOut:
+        """Borrow for yourself (no body), for another character (`for_user_id`)
+        or for someone by name (`name`, ledger only). Anyone signed in may do
+        any of these, character or not."""
+        body = body or BorrowIn()
         with session_scope() as session:
-            characters.require_character(session, user.user_id)
-            guild_service.borrow(session, entry_id, user.user_id)
-        return _guild()
+            if body.name is not None:
+                guild_service.borrow_for_name(session, entry_id, body.name)
+            else:
+                target = body.for_user_id or user.user_id
+                characters.require_character(session, target)
+                guild_service.borrow(session, entry_id, target)
+        return _guild(resolve_name)
 
     @app.post("/api/guild/treasury/{entry_id}/return")
     def return_treasury(entry_id: int, user: User) -> GuildOut:
+        """Anyone may mark an item returned, like /treasury in Discord."""
         with session_scope() as session:
-            characters.require_character(session, user.user_id)
-            guild_service.return_borrow(session, entry_id, only_borrower=user.user_id)
-        return _guild()
+            guild_service.return_borrow(session, entry_id)
+        return _guild(resolve_name)
 
     # ---------- edit a stack / buy from the catalog ----------
 
@@ -624,10 +636,10 @@ def _my_sheet(user_id: str) -> CharacterSheetOut:
         return character_sheet(session, char, include_stash=True)
 
 
-def _guild() -> GuildOut:
+def _guild(resolve_name: guild_service.NameResolver | None = None) -> GuildOut:
     """The guild overview in a fresh session, after a guild action committed."""
     with session_scope() as session:
-        return guild_overview(session)
+        return guild_overview(session, resolve_name)
 
 
 def _own_entry_role(session, user_id: str, entry_id: int) -> str:

@@ -19,6 +19,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from shadowdark_bot.config import Settings
+from shadowdark_bot.services.guild import NameResolver
 from shadowdark_bot.web.app import MembershipCheck, create_app
 from shadowdark_bot.web.auth import DiscordOAuth, SessionSigner
 
@@ -60,6 +61,27 @@ def bot_membership_check(bot: discord.Client, guild_ids: set[int]) -> Membership
     return is_allowed_member
 
 
+def bot_name_resolver(bot: discord.Client, guild_ids: set[int]) -> NameResolver:
+    """Display names from the bot's caches (no network): the member in an
+    allowed guild first, then the plain user cache. Which users are cached
+    depends on the Server Members intent; unknown users return None."""
+
+    def resolve(user_id: str) -> str | None:
+        try:
+            uid = int(user_id)
+        except ValueError:
+            return None
+        for gid in guild_ids:
+            guild = bot.get_guild(gid)
+            member = guild.get_member(uid) if guild is not None else None
+            if member is not None:
+                return member.display_name
+        user = bot.get_user(uid)
+        return user.display_name if user is not None else None
+
+    return resolve
+
+
 def build_public_app(bot: discord.Client, settings: Settings) -> FastAPI:
     return create_app(
         mode="discord",
@@ -71,6 +93,7 @@ def build_public_app(bot: discord.Client, settings: Settings) -> FastAPI:
         oauth=DiscordOAuth(settings.DISCORD_CLIENT_ID, settings.DISCORD_CLIENT_SECRET),
         is_allowed_member=bot_membership_check(bot, settings.allowed_guild_ids),
         public_base_url=settings.PUBLIC_BASE_URL,
+        resolve_name=bot_name_resolver(bot, settings.allowed_guild_ids),
     )
 
 

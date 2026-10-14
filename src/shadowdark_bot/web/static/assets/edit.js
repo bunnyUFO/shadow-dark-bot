@@ -460,33 +460,57 @@ function effectDialog(effect, write) {
 
 // ---------- Guild page actions ----------
 // Guild writes return the refreshed /api/guild body, handed to redraw().
-// Only offered when the viewer has a character (callers check me.has_character).
+// Taking from storage needs a character of your own; borrowing and returning
+// treasury items do not (anyone can lend to a character or a name, and anyone
+// can mark an item returned).
 
-export function guildEditOpts(me, redraw) {
+export function guildEditOpts(me, redraw, party = []) {
   const write = async (path, body) => redraw(await api(path, { method: "POST", body }));
 
-  const takeAction = (loc, item) => btn("Take", () => openForm({
-    title: `Take ${item.name}`,
-    message: `${item.quantity} in ${loc.name}.`,
-    fields: [
-      { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1, max: item.quantity },
-      { name: "to", label: "Put in", type: "select", value: "held", options: [["held", "Carrying"], ["stash", "Stash"]] },
-    ],
-    submitLabel: "Take",
-    onSubmit: (v) => write(`/guild/locations/${loc.location_id}/items/${item.id}/take`,
-      { quantity: v.quantity ?? 1, to: v.to }),
-  }));
+  const takeAction = me.has_character
+    ? (loc, item) => btn("Take", () => openForm({
+        title: `Take ${item.name}`,
+        message: `${item.quantity} in ${loc.name}.`,
+        fields: [
+          { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1, max: item.quantity },
+          { name: "to", label: "Put in", type: "select", value: "held", options: [["held", "Carrying"], ["stash", "Stash"]] },
+        ],
+        submitLabel: "Take",
+        onSubmit: (v) => write(`/guild/locations/${loc.location_id}/items/${item.id}/take`,
+          { quantity: v.quantity ?? 1, to: v.to }),
+      }))
+    : null;
 
-  // Available -> Borrow; mine -> Return; someone else's -> nothing (the row shows who).
-  const treasuryAction = (t) => {
-    if (t.status === "available") {
-      return btn("Borrow", () => write(`/guild/treasury/${t.id}/borrow`).catch(showFailure("Borrow")));
-    }
-    if (t.borrower?.user_id === me.user_id) {
-      return btn("Return", () => write(`/guild/treasury/${t.id}/return`).catch(showFailure("Return")));
-    }
-    return null;
+  // "Borrow for": yourself (if you have a character), another character, or a
+  // free-text name (ledger only, nothing lands in an inventory).
+  const borrowDialog = (t) => {
+    const others = party.filter((p) => p.user_id !== me.user_id);
+    const options = [
+      ...(me.has_character ? [["me", "Me"]] : []),
+      ...others.map((p) => [`u:${p.user_id}`, p.name]),
+      ["other", "Someone else\u2026"],
+    ];
+    openForm({
+      title: `Borrow ${t.item.name}`,
+      fields: [
+        { name: "who", label: "Borrow for", type: "select", value: options[0][0], options },
+        { name: "name", label: "Name", type: "text", required: true, showWhen: ["who", "other"],
+          hint: "Who is taking it? Only noted in the treasury list." },
+      ],
+      submitLabel: "Borrow",
+      onSubmit: (v) => {
+        const body = v.who === "me" ? undefined
+          : v.who === "other" ? { name: v.name }
+          : { for_user_id: v.who.slice(2) };
+        return write(`/guild/treasury/${t.id}/borrow`, body);
+      },
+    });
   };
+
+  // Available -> Borrow; borrowed -> Return, for anyone (the row shows who has it).
+  const treasuryAction = (t) => t.status === "available"
+    ? btn("Borrow", () => borrowDialog(t))
+    : btn("Return", () => write(`/guild/treasury/${t.id}/return`).catch(showFailure("Return")));
 
   return { takeAction, treasuryAction };
 }

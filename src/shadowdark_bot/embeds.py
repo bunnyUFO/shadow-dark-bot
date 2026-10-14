@@ -21,6 +21,7 @@ from shadowdark_bot.models import (
     Spell,
     TreasuryEntry,
 )
+from shadowdark_bot.services.guild import borrower_mention
 from shadowdark_bot.rules import (
     ABILITIES,
     ability_modifier,
@@ -244,7 +245,7 @@ def build_treasury_info_embed(
     if open_borrow is not None:
         timesince = format_timesince(open_borrow.borrowed_at)
         lines.append(
-            f"**Status:** Borrowed by <@{open_borrow.borrower_id}>, {timesince}"
+            f"**Status:** Borrowed by {borrower_mention(open_borrow.borrower_id, open_borrow.borrower_name)}, {timesince}"
         )
         if open_borrow.notes:
             lines.append(f"_Notes: {open_borrow.notes}_")
@@ -261,7 +262,7 @@ def _format_treasury_line(entry: TreasuryEntry, borrow_row: Borrow | None) -> st
         label += f" ({entry.tag})"
     if borrow_row is not None:
         label += (
-            f" — <@{borrow_row.borrower_id}>, "
+            f" — {borrower_mention(borrow_row.borrower_id, borrow_row.borrower_name)}, "
             f"{format_timesince(borrow_row.borrowed_at)}"
         )
         if borrow_row.notes:
