@@ -536,12 +536,13 @@ def _build_catalog_list_payload(
             first = page_items[0].name
             last = page_items[-1].name
             range_str = first if first == last else f"{first} → {last}"
-            embed.set_footer(
-                text=(
-                    f"Dropdown page {page + 1} of {total_pages} · "
-                    f"{range_str} · use type: to narrow."
-                )
+            embed.add_field(
+                name=f"Page {page + 1} of {total_pages}",
+                value=range_str,
+                inline=False,
             )
+            if type_val is None:
+                embed.set_footer(text="Use type: to narrow.")
     return embed, CatalogListView(page_names, type_val, page, total_pages)
 
 
