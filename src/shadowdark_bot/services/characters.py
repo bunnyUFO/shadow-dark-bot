@@ -622,6 +622,51 @@ def give_target_error(
     return None
 
 
+def move_stack(
+    session: Session, entry: InventoryEntry, target: Location, quantity: int
+) -> None:
+    """Move `quantity` copies of `entry` into `target`, merging with a matching
+    stack there. Capacity-checked (bundle-aware); raises CharacterError when the
+    target is full. The caller has validated the destination and the quantity."""
+    # Capacity check on the target.
+    gear_slots, bundle = entry.effective_gear_slots, entry.effective_bundle_size
+    if entry.item_id is not None:
+        tstack = storage.find_catalog_stack(session, target.id, entry.item_id)
+    else:
+        tstack = storage.find_freeform_stack(session, target.id, entry.display_name)
+    texisting = tstack.quantity if tstack else 0
+    delta = stack_slots(texisting + quantity, gear_slots, bundle) - stack_slots(
+        texisting, gear_slots, bundle
+    )
+    tused = storage.used_slots(storage.location_entries(session, target.id))
+    if tused + delta > target.max_gear_slots:
+        raise CharacterError(
+            f"**{target.name}** holds "
+            f"{fmt_slots(tused)}/{fmt_slots(target.max_gear_slots)} slots; "
+            f"this would need {fmt_slots(delta)} more."
+        )
+
+    # Snapshot the source stack before mutating it.
+    src_item = entry.item
+    src_name = entry.name
+    src_slots = entry.slots_each if entry.slots_each is not None else 1.0
+    src_bundle = entry.bundle_size if entry.bundle_size is not None else 1
+    src_notes = entry.notes
+    entry.quantity -= quantity
+    if entry.quantity == 0:
+        session.delete(entry)
+    storage.add_stack(
+        session,
+        target,
+        quantity=quantity,
+        item=src_item,
+        freeform_name=None if src_item is not None else src_name,
+        slots_each=src_slots,
+        bundle_size=src_bundle,
+        notes=None if src_item is not None else src_notes,
+    )
+
+
 @dataclass
 class GiveResult:
     display_name: str
@@ -657,45 +702,8 @@ def give(
             f"You only have {entry.quantity}× **{entry.display_name}**."
         )
 
-    # Capacity check on the target.
-    gear_slots, bundle = entry.effective_gear_slots, entry.effective_bundle_size
-    if entry.item_id is not None:
-        tstack = storage.find_catalog_stack(session, target.id, entry.item_id)
-    else:
-        tstack = storage.find_freeform_stack(session, target.id, entry.display_name)
-    texisting = tstack.quantity if tstack else 0
-    delta = stack_slots(texisting + give_qty, gear_slots, bundle) - stack_slots(
-        texisting, gear_slots, bundle
-    )
-    tused = storage.used_slots(storage.location_entries(session, target.id))
-    if tused + delta > target.max_gear_slots:
-        raise CharacterError(
-            f"**{target.name}** holds "
-            f"{fmt_slots(tused)}/{fmt_slots(target.max_gear_slots)} slots; "
-            f"this would need {fmt_slots(delta)} more."
-        )
-
-    # Snapshot the source stack before mutating it.
-    src_item = entry.item
-    src_name = entry.name
-    src_slots = entry.slots_each if entry.slots_each is not None else 1.0
-    src_bundle = entry.bundle_size if entry.bundle_size is not None else 1
-    src_notes = entry.notes
     display = entry.display_name
-
-    entry.quantity -= give_qty
-    if entry.quantity == 0:
-        session.delete(entry)
-    storage.add_stack(
-        session,
-        target,
-        quantity=give_qty,
-        item=src_item,
-        freeform_name=None if src_item is not None else src_name,
-        slots_each=src_slots,
-        bundle_size=src_bundle,
-        notes=None if src_item is not None else src_notes,
-    )
+    move_stack(session, entry, target, give_qty)
     if char is not None:
         touch(char)
     session.flush()

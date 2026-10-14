@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
@@ -7,7 +6,6 @@ from discord.ext import commands
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from shadowdark_bot import storage
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import (
     build_treasury_info_embed,
@@ -19,9 +17,10 @@ from shadowdark_bot.models import (
     Borrow,
     Item,
     Location,
-    PlayerCharacter,
     TreasuryEntry,
 )
+from shadowdark_bot.services import guild as treasury_service
+from shadowdark_bot.services.characters import CharacterError
 from shadowdark_bot.sharing import ShareableView, ShareButton
 
 log = logging.getLogger("shadowdark_bot.treasury")
@@ -305,52 +304,6 @@ def _build_entry_detail_payload(
     return embed, TreasuryEntryDetailView(entry_id, status)
 
 
-def _naive_utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _add_borrowed_to_inventory(
-    session: Session, borrower_id: str, item_id: int
-) -> None:
-    """If the borrower has a character, add one of the borrowed catalog item to
-    their held location (merging into an existing stack). No-op otherwise — the
-    borrow is still recorded in the ledger either way."""
-    char = session.scalar(
-        select(PlayerCharacter).where(PlayerCharacter.user_id == borrower_id)
-    )
-    if char is None:
-        return
-    held, _stash = storage.ensure_character_locations(session, char)
-    item = session.get(Item, item_id)
-    if item is None:
-        return
-    storage.add_stack(session, held, quantity=1, item=item)
-    char.updated_at = _naive_utcnow()
-
-
-def _remove_borrowed_from_inventory(
-    session: Session, borrower_id: str, item_id: int
-) -> None:
-    """If the borrower's held location carries the returned catalog item, drop
-    one (removing the stack when it empties)."""
-    char = session.scalar(
-        select(PlayerCharacter).where(PlayerCharacter.user_id == borrower_id)
-    )
-    if char is None:
-        return
-    held = storage.held_location(session, borrower_id)
-    if held is None:
-        return
-    stack = storage.find_catalog_stack(session, held.id, item_id)
-    if stack is None:
-        return
-    if stack.quantity <= 1:
-        session.delete(stack)
-    else:
-        stack.quantity -= 1
-    char.updated_at = _naive_utcnow()
-
-
 async def _do_borrow(
     interaction: discord.Interaction,
     entry_id: int,
@@ -359,40 +312,22 @@ async def _do_borrow(
     """Mark a treasury entry as borrowed and refresh the ephemeral detail view."""
     failure = f"**Failed to borrow #{entry_id}.**"
     with session_scope() as session:
-        entry = session.get(TreasuryEntry, entry_id)
-        if entry is None:
-            await interaction.response.send_message(
-                f"{failure}\nNo treasury entry with id {entry_id}.", ephemeral=True
-            )
-            return
-        session.refresh(entry, attribute_names=["item"])
-        if entry.status == STATUS_BORROWED:
-            open_borrow = session.scalar(
-                select(Borrow).where(
-                    Borrow.treasury_entry_id == entry.id,
-                    Borrow.returned_at.is_(None),
-                )
-            )
+        try:
+            treasury_service.borrow(session, entry_id, str(borrower.id))
+        except treasury_service.AlreadyBorrowed as err:
             current_borrower = (
-                f"<@{open_borrow.borrower_id}>" if open_borrow else "someone"
+                f"<@{err.borrower_id}>" if err.borrower_id else "someone"
             )
             await interaction.response.send_message(
                 f"{failure}\n#{entry_id} is already borrowed by {current_borrower}.",
                 ephemeral=True,
             )
             return
-
-        entry.status = STATUS_BORROWED
-        session.add(
-            Borrow(
-                treasury_entry_id=entry.id,
-                borrower_id=str(borrower.id),
+        except CharacterError as err:
+            await interaction.response.send_message(
+                f"{failure}\n{err}", ephemeral=True
             )
-        )
-        # If the borrower has a character, mirror the item into their carried
-        # inventory. Either way the borrow is recorded above.
-        _add_borrowed_to_inventory(session, str(borrower.id), entry.item_id)
-        session.flush()
+            return
 
     detail = _build_entry_detail_payload(entry_id)
     if detail is not None:
@@ -404,33 +339,13 @@ async def _do_return(interaction: discord.Interaction, entry_id: int) -> None:
     """Mark a treasury entry as returned and refresh the ephemeral detail view."""
     failure = f"**Failed to return #{entry_id}.**"
     with session_scope() as session:
-        entry = session.get(TreasuryEntry, entry_id)
-        if entry is None:
+        try:
+            treasury_service.return_borrow(session, entry_id)
+        except CharacterError as err:
             await interaction.response.send_message(
-                f"{failure}\nNo treasury entry with id {entry_id}.", ephemeral=True
+                f"{failure}\n{err}", ephemeral=True
             )
             return
-        if entry.status != STATUS_BORROWED:
-            await interaction.response.send_message(
-                f"{failure}\n#{entry_id} isn't currently borrowed.", ephemeral=True
-            )
-            return
-        open_borrow = session.scalar(
-            select(Borrow).where(
-                Borrow.treasury_entry_id == entry.id,
-                Borrow.returned_at.is_(None),
-            )
-        )
-        if open_borrow is None:
-            await interaction.response.send_message(
-                f"{failure}\n#{entry_id} has no open borrow record.", ephemeral=True
-            )
-            return
-
-        open_borrow.returned_at = _naive_utcnow()
-        entry.status = STATUS_AVAILABLE
-        # Mirror the return into the borrower's character inventory, if any.
-        _remove_borrowed_from_inventory(session, open_borrow.borrower_id, entry.item_id)
 
     detail = _build_entry_detail_payload(entry_id)
     if detail is not None:
