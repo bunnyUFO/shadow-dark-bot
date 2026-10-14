@@ -64,6 +64,7 @@ class KnownSpellOut(BaseModel):
     name: str
     tier: int | None
     spell: SpellOut | None  # reference text, when linked to the built-in list
+    lost: bool = False  # failed casting check: unavailable until rest
 
 
 class ItemStackOut(BaseModel):
@@ -79,6 +80,27 @@ class ItemStackOut(BaseModel):
     value_cp: int | None
     description: str | None
     notes: str | None
+
+
+class EffectOut(BaseModel):
+    id: int
+    name: str
+    max_rounds: int | None  # None: no duration, lasts until removed
+    rounds_used: int
+    rounds_left: int | None
+    ended: bool
+    bonuses: dict[str, str]  # stat -> "+3" | "-1" | "=14"
+
+
+class StatOut(BaseModel):
+    """One stat after active effects. `base` is the unmodified value (for AC the
+    armour plus DEX modifier; for an ability, its modifier); `sources` names the
+    active effects that changed it."""
+
+    base: int
+    total: int
+    boosted: bool
+    sources: list[dict[str, str]]  # {"effect": name, "change": "+3"}
 
 
 class StoreOut(BaseModel):
@@ -113,6 +135,10 @@ class CharacterSheetOut(BaseModel):
     languages: str | None
     talents: str | None
     additional_info: str | None
+    effects: list[EffectOut] = []
+    # ac, hp, str..cha with active effects applied (display only; base fields
+    # above stay the stored values)
+    effective: dict[str, StatOut] = {}
     updated_at: datetime
 
 
@@ -210,6 +236,25 @@ class TakeIn(BaseModel):
 
 class LearnSpellIn(BaseModel):
     spell_id: int
+
+
+class SpellLostIn(BaseModel):
+    lost: bool
+
+
+class EffectIn(BaseModel):
+    name: str
+    max_rounds: int | None = None  # omit/null: no duration
+    bonuses: dict[str, str | None] = {}  # stat -> "+3" | "-1" | "=14"
+
+
+class EffectPatchIn(BaseModel):
+    """Only the fields sent are changed."""
+
+    name: str | None = None
+    max_rounds: int | None = None
+    rounds_used: int | None = None
+    bonuses: dict[str, str | None] | None = None
 
 
 class IdentityIn(BaseModel):
@@ -331,7 +376,52 @@ def character_sheet(
     if char.armor_class is not None:
         armor_class = char.armor_class + ability_modifier(char.dex_score)
 
+    effects = list(char.effects)
+    effective: dict[str, StatOut] = {}
+
+    def apply(key: str, base: int) -> StatOut:
+        res = characters.resolve_stat(effects, key, base)
+        out = StatOut(
+            base=res.base,
+            total=res.total,
+            boosted=bool(res.sources),
+            sources=[{"effect": n, "change": c} for n, c in res.sources],
+        )
+        effective[key] = out
+        return out
+
+    for key, _label in ABILITIES:
+        apply(key, ability_modifier(getattr(char, f"{key}_score")))
+    # AC is armour + DEX modifier; a DEX effect therefore flows into AC unless
+    # an effect sets AC outright.
+    if armor_class is not None:
+        apply("ac", char.armor_class + effective["dex"].total)
+        ac = effective["ac"]
+        ac.base = armor_class
+        if ac.total != ac.base:
+            ac.boosted = True
+            if not any(s["change"].startswith("=") for s in ac.sources):
+                ac.sources = [
+                    {"effect": s["effect"], "change": f"{s['change']} DEX"}
+                    for s in effective["dex"].sources
+                ] + ac.sources
+    if char.max_hp is not None:
+        apply("hp", char.max_hp)
+
     return CharacterSheetOut(
+        effects=[
+            EffectOut(
+                id=e.id,
+                name=e.name,
+                max_rounds=e.max_rounds,
+                rounds_used=e.rounds_used,
+                rounds_left=None if e.max_rounds is None else e.max_rounds - e.rounds_used,
+                ended=e.ended,
+                bonuses=e.bonus_map(),
+            )
+            for e in effects
+        ],
+        effective=effective,
         user_id=char.user_id,
         name=char.name,
         char_class=char.char_class,
@@ -359,6 +449,7 @@ def character_sheet(
                 id=cs.id,
                 name=cs.display_name,
                 tier=cs.display_tier,
+                lost=cs.lost,
                 spell=spell_out(cs.spell) if cs.spell is not None else None,
             )
             for cs in characters.sorted_spells(char)

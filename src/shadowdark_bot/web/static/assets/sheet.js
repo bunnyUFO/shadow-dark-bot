@@ -68,25 +68,40 @@ export function card(key, title, { aside, tools } = {}, ...body) {
 
 // ---------- combat ----------
 
-function statTile(label, value, note) {
-  return h("div", { class: "tile" },
+function statTile(label, value, note, boosted = false) {
+  return h("div", { class: boosted ? "tile boosted" : "tile" },
     h("span", { class: "tile-label" }, label),
     h("span", { class: "tile-value" }, value),
     note ? h("span", { class: "tile-note" }, note) : null,
   );
 }
 
+// "Mage Armor =14, Haste +2": which active effects changed a stat.
+function sourceText(stat) {
+  return stat.sources.map((s) => `${s.effect} ${s.change}`).join(", ");
+}
+
+const BONUS_LABELS = { ac: "AC", hp: "HP", str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA" };
+
 function combatTab(c, opts) {
   const tools = (key) => opts.tools?.(key, c);
+  const eff = c.effective ?? {};
+  const acStat = eff.ac;
+  const hpStat = eff.hp;
   const ac = c.armor_class === null
     ? statTile("AC", "—")
-    : statTile("AC", c.armor_class, `${c.armor_class_base} + DEX`);
+    : acStat?.boosted
+      ? statTile("AC", acStat.total, `${acStat.base} base · ${sourceText(acStat)}`, true)
+      : statTile("AC", c.armor_class, `${c.armor_class_base} + DEX`);
+  const hp = hpStat?.boosted
+    ? statTile("HP", hpStat.total, `${hpStat.base} base · ${sourceText(hpStat)}`, true)
+    : statTile("HP", c.max_hp ?? "—");
   const cast = c.spellcasting;
   const profTools = tools("proficiencies");
   return [
     card("vitals", "Hit points & armour", { tools: tools("vitals") },
       h("div", { class: "tiles" },
-        statTile("HP", c.max_hp ?? "—"),
+        hp,
         ac,
         statTile("Level", c.level),
         cast
@@ -99,15 +114,21 @@ function combatTab(c, opts) {
           : null,
       ),
     ),
+    effectsCard(c, opts),
     card("abilities", "Abilities", { tools: tools("abilities") },
       h("div", { class: "abilities" },
-        c.abilities.map((a) =>
-          h("div", { class: "ability" },
+        c.abilities.map((a) => {
+          const st = eff[a.key];
+          const boosted = st?.boosted;
+          return h("div", { class: boosted ? "ability boosted" : "ability", title: boosted ? sourceText(st) : null },
             h("span", { class: "ability-label" }, a.label),
-            h("span", { class: "ability-mod" }, signed(a.modifier)),
+            h("span", { class: "ability-mod" }, signed(boosted ? st.total : a.modifier)),
             h("span", { class: "ability-score" }, a.score),
-          ),
-        ),
+            boosted
+              ? h("span", { class: "ability-note" }, `${signed(st.base)} base · ${sourceText(st)}`)
+              : null,
+          );
+        }),
       ),
     ),
     c.proficiencies || profTools
@@ -118,6 +139,75 @@ function combatTab(c, opts) {
   ];
 }
 
+// ---------- effects ----------
+
+// Hidden entirely on read-only views when nothing is running. Round boxes tick
+// instantly (optimistic) and revert if the write fails.
+function effectsCard(c, opts) {
+  const tools = opts.tools?.("effects", c);
+  const list = c.effects ?? [];
+  if (!list.length && !tools) return null;
+  return card("effects", "Effects", { tools },
+    list.length === 0
+      ? h("p", { class: "muted" }, "Nothing running. Add a spell, potion or blessing to track it.")
+      : h("ul", { class: "rows effects" }, list.map((e) => effectRow(e, c, opts))),
+  );
+}
+
+function bonusChips(e) {
+  const entries = Object.entries(e.bonuses ?? {});
+  if (!entries.length) return null;
+  return h("ul", { class: "chips bonus-chips" },
+    entries.map(([k, v]) => h("li", {}, `${BONUS_LABELS[k] ?? k} ${v}`)));
+}
+
+function effectRow(e, c, opts) {
+  const timed = e.max_rounds !== null;
+  const interactive = timed && !!opts.tickEffect;
+  let used = e.rounds_used;
+  const label = h("span", { class: "row-meta effect-left" });
+  const boxes = timed
+    ? Array.from({ length: e.max_rounds }, (_, k) => {
+        const n = k + 1;
+        return h(interactive ? "button" : "span", {
+          class: "round-box",
+          type: interactive ? "button" : null,
+          role: interactive ? "checkbox" : null,
+          "aria-label": `Round ${n}`,
+          onClick: interactive ? () => tick(n) : null,
+        });
+      })
+    : [];
+  const li = h("li", { class: "effect" });
+  const paint = (u) => {
+    used = u;
+    const left = timed ? e.max_rounds - u : null;
+    li.classList.toggle("ended", timed && left === 0);
+    label.textContent = !timed ? "Until removed" : left === 0 ? "Ended" : `${left} round${left === 1 ? "" : "s"} left`;
+    boxes.forEach((b, k) => {
+      const on = k < u;
+      b.classList.toggle("on", on);
+      if (interactive) b.setAttribute("aria-checked", String(on));
+    });
+  };
+  const tick = (n) => {
+    const prev = used;
+    paint(n === used ? n - 1 : n);
+    Promise.resolve(opts.tickEffect(e, used)).catch(() => paint(prev));
+  };
+  paint(used);
+  li.append(...[
+    h("div", { class: "effect-head" },
+      h("span", { class: "row-name" }, e.name),
+      label,
+    ),
+    bonusChips(e),
+    timed ? h("div", { class: "rounds", role: "group", "aria-label": `${e.name} rounds` }, boxes) : null,
+    opts.effectActions ? h("div", { class: "row-actions" }, opts.effectActions(e, c)) : null,
+  ].filter(Boolean));
+  return li;
+}
+
 function spellsCard(c, opts) {
   if (!c.spells.length && !c.spellcasting) return null;
   const byTier = new Map();
@@ -126,21 +216,25 @@ function spellsCard(c, opts) {
     if (!byTier.has(key)) byTier.set(key, []);
     byTier.get(key).push(s);
   }
-  return card("spells", "Spells", { tools: opts.tools?.("spells", c) },
+  const lostCount = c.spells.filter((s) => s.lost).length;
+  const aside = opts.spellToggle ? "Tick = available" : lostCount ? `${lostCount} lost` : null;
+  return card("spells", "Spells", { aside, tools: opts.tools?.("spells", c) },
     c.spells.length === 0
       ? h("p", { class: "muted" }, "No spells known yet.")
       : [...byTier.entries()].map(([tier, spells]) => [
           h("h3", { class: "tier" }, tier ? `Tier ${tier}` : "Other"),
-          h("ul", { class: "rows" }, spells.map((s) => spellRow(s, opts.spellActions?.(s, c)))),
+          h("ul", { class: "rows" }, spells.map((s) => spellRow(s, opts.spellActions?.(s, c), opts.spellToggle?.(s, c)))),
         ]),
   );
 }
 
-function spellRow(s, actions) {
+function spellRow(s, actions, toggle) {
   const ref = s.spell;
-  return h("li", {},
+  return h("li", { class: [s.lost && "lost", toggle && "has-toggle"].filter(Boolean).join(" ") || null },
+    toggle ?? null,
     h("details", { class: "row" },
-      h("summary", {}, h("span", { class: "row-name" }, s.name)),
+      h("summary", {}, h("span", { class: "row-name" }, s.name),
+        h("span", { class: "lost-badge" }, "Lost")),
       h("div", { class: "row-body" },
         ref
           ? [

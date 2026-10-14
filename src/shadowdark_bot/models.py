@@ -1,7 +1,9 @@
+import json
 from datetime import date as date_type
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -305,6 +307,11 @@ class PlayerCharacter(Base):
     spells: Mapped[list["CharacterSpell"]] = relationship(
         back_populates="character", cascade="all, delete-orphan"
     )
+    effects: Mapped[list["CharacterEffect"]] = relationship(
+        back_populates="character",
+        cascade="all, delete-orphan",
+        order_by="CharacterEffect.id",
+    )
 
 
 class Spell(Base):
@@ -354,6 +361,10 @@ class CharacterSpell(Base):
     spell_id: Mapped[int | None] = mapped_column(ForeignKey("spells.id"))
     name: Mapped[str | None] = mapped_column(String)
     tier: Mapped[int | None] = mapped_column(Integer)
+    # A failed spellcasting check makes the spell unavailable until rest.
+    lost: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     added_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()
     )
@@ -376,6 +387,49 @@ class CharacterSpell(Base):
         if self.spell_id is not None and self.spell is not None:
             return self.spell.tier
         return self.tier
+
+
+# Stats an effect can change temporarily. Shown on the sheet only; never
+# written into the base stats.
+EFFECT_BONUS_KEYS = ("ac", "hp", "str", "dex", "con", "int", "wis", "cha")
+
+
+class CharacterEffect(Base):
+    """A timed (or open-ended) effect on a character, e.g. Light for 6 rounds
+    or Mage Armor (+3 AC) until removed. `max_rounds` NULL means no duration."""
+
+    __tablename__ = "character_effects"
+    __table_args__ = (
+        CheckConstraint(
+            "max_rounds IS NULL OR (max_rounds >= 1 AND max_rounds <= 100)",
+            name="ck_effects_rounds_range",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("player_characters.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    max_rounds: Mapped[int | None] = mapped_column(Integer)
+    rounds_used: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    # JSON object of temporary stat changes, e.g. {"ac": "=14", "dex": "+2"}:
+    # "+N"/"-N" adds, "=N" sets. NULL when the effect changes no stat.
+    bonuses: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+    character: Mapped[PlayerCharacter] = relationship(back_populates="effects")
+
+    @property
+    def ended(self) -> bool:
+        return self.max_rounds is not None and self.rounds_used >= self.max_rounds
+
+    def bonus_map(self) -> dict[str, str]:
+        return json.loads(self.bonuses) if self.bonuses else {}
 
 
 class Creature(Base):

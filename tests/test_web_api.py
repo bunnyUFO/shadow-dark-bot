@@ -835,3 +835,64 @@ def test_buy_endpoint(api):
         "quantity": 1, "pay_from": "guild", "destination_location_id": held_id}).status_code == 400
     assert c.post(f"/api/items/{torch_id}/buy", json={
         "quantity": 1, "pay_from": "guild", "destination_location_id": held_id}).status_code == 401
+
+
+# ---------- effects and lost spells ----------
+
+
+def test_effects_api(api):
+    c, h = _bob_client(api)
+    assert c.get("/api/character", headers=h).json()["effects"] == []
+    r = c.post("/api/character/effects", headers=h, json={"name": "Light", "max_rounds": 6})
+    assert r.status_code == 200
+    eff = r.json()["effects"][0]
+    assert (eff["name"], eff["max_rounds"], eff["rounds_left"], eff["ended"]) == ("Light", 6, 6, False)
+    url = f"/api/character/effects/{eff['id']}"
+    r = c.patch(url, headers=h, json={"rounds_used": 3})
+    assert r.json()["effects"][0]["rounds_left"] == 3
+    assert c.patch(url, headers=h, json={"rounds_used": 7}).status_code == 400
+    assert c.patch(url, headers=h, json={"rounds_used": -1}).status_code == 400
+    r = c.patch(url, headers=h, json={"rounds_used": 6})
+    assert r.json()["effects"][0]["ended"] is True
+    r = c.patch(url, headers=h, json={"rounds_used": 5})
+    assert r.json()["effects"][0]["ended"] is False
+    assert c.post("/api/character/effects", headers=h, json={"name": " ", "max_rounds": 3}).status_code == 400
+    assert c.post("/api/character/effects", headers=h, json={"name": "x", "max_rounds": 101}).status_code == 400
+    assert c.post("/api/character/effects", headers=h, json={"name": "x", "bonuses": {"ac": "huh"}}).status_code == 400
+    r = c.patch(url, headers=h, json={"name": "Torchlight", "bonuses": {"ac": "=14"}})
+    assert r.json()["effects"][0]["name"] == "Torchlight"
+    assert r.json()["effective"]["ac"]["total"] == 14
+    assert r.json()["armor_class"] == 13  # base fields untouched
+
+    # another user can neither see nor touch it
+    other = auth(login(c, "u2")["token"])
+    assert c.patch(url, headers=other, json={"rounds_used": 1}).status_code == 404
+    assert c.delete(url, headers=other).status_code == 404
+
+    r = c.delete(url, headers=h)
+    assert r.status_code == 200 and r.json()["effects"] == []
+    assert r.json()["effective"]["ac"]["total"] == 13
+    assert c.delete(url, headers=h).status_code == 404
+
+
+def test_effects_visible_on_party_view(api):
+    c, h = _bob_client(api)
+    c.post("/api/character/effects", headers=h, json={"name": "Light", "max_rounds": 6})
+    other = auth(login(c, "u2")["token"])
+    sheet = c.get("/api/characters/u1", headers=other).json()
+    assert [e["name"] for e in sheet["effects"]] == ["Light"]
+
+
+def test_spell_lost_and_rest_api(api):
+    c, h = _bob_client(api)
+    sheet = c.get("/api/character", headers=h).json()
+    assert [k["lost"] for k in sheet["spells"]] == [False, False]
+    ids = [k["id"] for k in sheet["spells"]]
+    r = c.patch(f"/api/character/spells/{ids[0]}", headers=h, json={"lost": True})
+    assert r.status_code == 200 and [k["lost"] for k in r.json()["spells"]] == [True, False]
+    c.patch(f"/api/character/spells/{ids[1]}", headers=h, json={"lost": True})
+    other = auth(login(c, "u2")["token"])
+    assert c.patch(f"/api/character/spells/{ids[0]}", headers=other, json={"lost": False}).status_code == 404
+    assert c.patch("/api/character/spells/99999", headers=h, json={"lost": True}).status_code == 404
+    r = c.post("/api/character/spells/rest", headers=h)
+    assert r.status_code == 200 and [k["lost"] for k in r.json()["spells"]] == [False, False]
