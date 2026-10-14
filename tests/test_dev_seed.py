@@ -144,7 +144,7 @@ def test_seed_through_the_local_app(seeded):
         resp = client.get("/api/character", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
         spell_counts[pick["name"]] = len(resp.json()["spells"])
-    assert spell_counts == {"Brannoc Ashfall": 0, "Brother Aldric": 3, "Ysolde Vane": 5}
+    assert spell_counts == {"Brannoc Ashfall": 0, "Brother Aldric": 3, "Ysolde Vane": 6}
 
     guild = client.get("/api/guild", headers={"Authorization": f"Bearer {token}"}).json()
     assert guild["coffers"]["balance_cp"] == 15240

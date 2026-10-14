@@ -79,7 +79,7 @@ async function route() {
   if (section === "guild") return renderGuild(app, me);
   if (section === "items") return renderItems(app, { canBuy: me.has_character });
   if (section === "spells") return renderSpells(app);
-  if (section === "effects") return renderEffects(app, a ? decodeURIComponent(a) : null);
+  if (section === "effects") return renderEffects(app, a ? decodeURIComponent(a) : null, me);
   if (section === "creatures" && a) return renderCreature(app, decodeURIComponent(a));
   if (section === "creatures") return renderCreatures(app);
   return renderMySheet(tabOr(a));

@@ -450,7 +450,8 @@ def create_app(
     def add_effect(body: EffectIn, user: User) -> CharacterSheetOut:
         with session_scope() as session:
             characters.add_effect(
-                session, user.user_id, body.name, body.max_rounds, body.bonuses
+                session, user.user_id, body.name, body.max_rounds, body.bonuses,
+                template_id=body.template_id,
             )
         return _my_sheet(user.user_id)
 
