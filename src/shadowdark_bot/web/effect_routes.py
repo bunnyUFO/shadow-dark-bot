@@ -26,6 +26,16 @@ class EffectIn(BaseModel):
     bonuses: dict[str, str | None] | None = None
 
 
+class ApplyIn(BaseModel):
+    target_user_id: str | None = None  # omitted = the caller's own character
+
+
+class ApplyOut(BaseModel):
+    target_user_id: str
+    target_name: str
+    effect_name: str
+
+
 class LinkIn(BaseModel):
     kind: str
     target_id: int
@@ -120,6 +130,17 @@ def register(app: FastAPI, User) -> None:
         with session_scope() as session:
             name = effects.delete_template(session, template_id)
         return {"deleted": name}
+
+    @app.post("/api/effects/{template_id}/apply")
+    def apply_effect(template_id: int, body: ApplyIn, user: User) -> ApplyOut:
+        """Add a copy of this effect to a character's sheet (yours by default).
+        The only edit allowed on another player's sheet, and only an add."""
+        target = body.target_user_id or user.user_id
+        with session_scope() as session:
+            char, eff = effects.apply_template(session, template_id, target)
+            return ApplyOut(
+                target_user_id=target, target_name=char.name, effect_name=eff.name
+            )
 
     @app.post("/api/effects/{template_id}/links")
     def add_link(template_id: int, body: LinkIn, user: User) -> EffectOut:
