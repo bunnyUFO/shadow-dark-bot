@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from shadowdark_bot.currency import format_cp, parse_to_cp, parse_value_string
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import build_item_embed
+from shadowdark_bot.services import effects
 from shadowdark_bot.sharing import ShareButton, ShareableView
 from shadowdark_bot.models import (
     ITEM_TYPE_ARMOR,
@@ -207,6 +208,7 @@ class ItemsDatabase(commands.Cog):
                 )
                 return
 
+            effects.drop_links_for(session, "item", item.id)
             session.delete(item)
             await interaction.response.send_message(
                 f"Removed **{clean_name}** from the catalog.",

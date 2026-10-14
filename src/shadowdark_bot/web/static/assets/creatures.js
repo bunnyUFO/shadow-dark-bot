@@ -5,6 +5,7 @@
 import { api } from "./api.js";
 import { h, mount, signed } from "./dom.js";
 import { openForm } from "./edit.js";
+import { libraryLink, linkedEffects } from "./effects.js";
 import { card, pageHead } from "./sheet.js";
 
 const filters = { q: "" }; // survives navigating away and back within a visit
@@ -48,7 +49,7 @@ export async function renderCreatures(app) {
     );
   };
   mount(app,
-    pageHead("Creatures", "What we've met out there"),
+    pageHead("Creatures", ["What we've met out there \u00b7 ", libraryLink()]),
     h("div", { class: "filters" },
       h("input", {
         type: "search", class: "search", value: filters.q, placeholder: "Search creatures",
@@ -77,19 +78,24 @@ function creatureRow(c) {
 // ---------- detail ----------
 
 export async function renderCreature(app, id) {
-  const draw = (c) => {
+  const draw = (c, effects) => {
     const y = window.scrollY;
     mount(app,
       h("p", { class: "banner" }, h("a", { href: "#/creatures" }, "← Creatures")),
-      statBlock(c, draw),
+      statBlock(c, (saved) => draw(saved, effects)),
+      effects.length ? card("effects", "Effects", {}, linkedEffects(effects)) : null,
       c.special_abilities ? textCard("abilities", "Special abilities", c.special_abilities) : null,
       c.description ? textCard("description", "Description", c.description) : null,
       c.notes ? textCard("notes", "Notes", c.notes) : null,
-      encountersCard(c, draw),
+      encountersCard(c, (saved) => draw(saved, effects)),
     );
     window.scrollTo(0, y);
   };
-  draw(await api(`/creatures/${encodeURIComponent(id)}`));
+  const [creature, effects] = await Promise.all([
+    api(`/creatures/${encodeURIComponent(id)}`),
+    api(`/effects?kind=creature&target_id=${encodeURIComponent(id)}`).catch(() => []),
+  ]);
+  draw(creature, effects);
 }
 
 const textCard = (key, title, text) => card(key, title, {}, h("p", { class: "prose" }, text));

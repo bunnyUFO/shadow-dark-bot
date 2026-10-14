@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from shadowdark_bot.models import Creature, CreatureEncounter
+from shadowdark_bot.services import effects
 from shadowdark_bot.services.characters import CharacterError, CharacterNotFound
 
 ALIGNMENTS = ("L", "N", "C")
@@ -154,6 +155,7 @@ def delete_creature(session: Session, creature_id: int) -> str:
     """Delete a creature and its encounters; returns its name."""
     creature = get_creature(session, creature_id)
     name = creature.name
+    effects.drop_links_for(session, "creature", creature.id)
     session.delete(creature)
     session.flush()
     return name

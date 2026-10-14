@@ -38,7 +38,7 @@ from shadowdark_bot.models import (
 )
 from shadowdark_bot.services import characters, guild as guild_service
 from shadowdark_bot.services.characters import CharacterError, CharacterNotFound
-from shadowdark_bot.web import creature_routes
+from shadowdark_bot.web import creature_routes, effect_routes
 from shadowdark_bot.web.auth import (
     SCOPES,
     DiscordOAuth,
@@ -595,6 +595,7 @@ def create_app(
 
     # ---------- creatures (bestiary) ----------
     creature_routes.register(app, User)
+    effect_routes.register(app, User)
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"])
     def api_not_found(path: str) -> None:
