@@ -25,7 +25,9 @@ from shadowdark_bot.services.characters import (
     MAX_EFFECT_ROUNDS,
     CharacterError,
     CharacterNotFound,
+    add_effect,
     clean_bonuses,
+    require_character,
 )
 
 DESCRIPTION_MAX = 2000
@@ -238,3 +240,17 @@ def drop_links_for(session: Session, kind: str, target_id: int) -> int:
         )
     )
     return result.rowcount or 0
+
+
+def apply_template(session: Session, template_id: int, target_user_id: str):
+    """Add a copy of a library effect to a character's sheet and return
+    (character, character effect). This is the one write allowed on someone
+    else's sheet: it only ever adds, and the owner can tick or remove it.
+    Unknown template or a target without a character raise a not-found error."""
+    template = get_template(session, template_id)
+    char = require_character(session, target_user_id)
+    eff = add_effect(
+        session, target_user_id, template.name, template.max_rounds,
+        template.bonus_map(), template_id=template.id,
+    )
+    return char, eff
