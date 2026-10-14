@@ -10,6 +10,7 @@ Error reasons use Discord-style Markdown (`**bold**`) since that is the wording
 players already see in the bot.
 """
 
+import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -21,10 +22,12 @@ from sqlalchemy.orm import Session, selectinload
 from shadowdark_bot import storage
 from shadowdark_bot.currency import format_cp
 from shadowdark_bot.models import (
+    EFFECT_BONUS_KEYS,
     ITEM_TYPE_MAGICAL,
     LOCATION_ROLE_HELD,
     LOCATION_ROLE_STASH,
     Borrow,
+    CharacterEffect,
     CharacterSpell,
     InventoryEntry,
     Item,
@@ -985,3 +988,191 @@ def forget_spell(session: Session, user_id: str, cs_id: int) -> str:
     touch(char)
     session.flush()
     return display
+
+
+def set_spell_lost(
+    session: Session, user_id: str, cs_id: int, lost: bool
+) -> CharacterSpell:
+    """Mark a known spell lost (failed casting check) or available again."""
+    char = require_character(session, user_id)
+    cs = find_known_spell(char, cs_id)
+    if cs is None:
+        raise CharacterNotFound("You don't know that spell.")
+    cs.lost = lost
+    touch(char)
+    session.flush()
+    return cs
+
+
+def rest(session: Session, user_id: str) -> int:
+    """A rest restores every lost spell. Returns how many came back."""
+    char = require_character(session, user_id)
+    lost = [s for s in char.spells if s.lost]
+    for s in lost:
+        s.lost = False
+    if lost:
+        touch(char)
+        session.flush()
+    return len(lost)
+
+
+# ---------- Effects (durations and temporary stat changes) ----------
+
+MAX_EFFECT_ROUNDS = 100
+EFFECT_NAME_MAX = 60
+_BONUS_RE = re.compile(r"^([+\-=])\s*(\d{1,3})$")
+# Largest |N| for "+N"/"-N" per stat (default 10), and the range for "=N".
+_ADD_LIMIT = {"hp": 99}
+_SET_RANGE = {"ac": (0, 40), "hp": (0, 999)}
+
+
+def parse_bonus(key: str, raw: object) -> str | None:
+    """Normalise one bonus entry: "+3", "-1" or "=14" (a bare number adds).
+    Blank means no change. Raises CharacterError when invalid."""
+    text = str(raw if raw is not None else "").strip().replace("−", "-")
+    if not text:
+        return None
+    if text.isdigit():
+        text = "+" + text
+    m = _BONUS_RE.match(text)
+    if m is None:
+        raise CharacterError(
+            f"{key.upper()}: use +2 to add, -1 to subtract or =14 to set."
+        )
+    op, n = m.group(1), int(m.group(2))
+    if op == "=":
+        lo, hi = _SET_RANGE.get(key, (-10, 10))
+        if not lo <= n <= hi:
+            raise CharacterError(f"{key.upper()}: =N must be {lo} to {hi}.")
+        return f"={n}"
+    limit = _ADD_LIMIT.get(key, 10)
+    if n > limit:
+        raise CharacterError(f"{key.upper()}: adjust by at most {limit}.")
+    return f"{op}{n}"
+
+
+def clean_bonuses(raw: dict | None) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for key, value in (raw or {}).items():
+        if key not in EFFECT_BONUS_KEYS:
+            raise CharacterError(f"Unknown stat {key!r}.")
+        parsed = parse_bonus(key, value)
+        if parsed is not None:
+            out[key] = parsed
+    return out
+
+
+def _clean_name(name: str | None) -> str:
+    name = (name or "").strip()
+    if not name:
+        raise CharacterError("Give the effect a name.")
+    if len(name) > EFFECT_NAME_MAX:
+        raise CharacterError(f"Effect names are at most {EFFECT_NAME_MAX} characters.")
+    return name
+
+
+def _clean_rounds(n: int | None) -> int | None:
+    if n is None:
+        return None
+    if not 1 <= n <= MAX_EFFECT_ROUNDS:
+        raise CharacterError(f"Rounds must be 1 to {MAX_EFFECT_ROUNDS}.")
+    return n
+
+
+def find_effect(char: PlayerCharacter, effect_id: int) -> CharacterEffect | None:
+    return next((e for e in char.effects if e.id == effect_id), None)
+
+
+def _own_effect(char: PlayerCharacter, effect_id: int) -> CharacterEffect:
+    eff = find_effect(char, effect_id)
+    if eff is None:
+        raise CharacterNotFound("That effect is no longer there.")
+    return eff
+
+
+def add_effect(
+    session: Session,
+    user_id: str,
+    name: str,
+    max_rounds: int | None = None,
+    bonuses: dict | None = None,
+) -> CharacterEffect:
+    char = require_character(session, user_id)
+    cleaned = clean_bonuses(bonuses)
+    eff = CharacterEffect(
+        name=_clean_name(name),
+        max_rounds=_clean_rounds(max_rounds),
+        bonuses=json.dumps(cleaned) if cleaned else None,
+    )
+    char.effects.append(eff)
+    touch(char)
+    session.flush()
+    return eff
+
+
+def update_effect(
+    session: Session, user_id: str, effect_id: int, **fields
+) -> CharacterEffect:
+    """Change only the fields passed: name, max_rounds (None = no duration),
+    rounds_used, bonuses (replaces the whole set)."""
+    char = require_character(session, user_id)
+    eff = _own_effect(char, effect_id)
+    if "name" in fields:
+        eff.name = _clean_name(fields["name"])
+    if "max_rounds" in fields:
+        eff.max_rounds = _clean_rounds(fields["max_rounds"])
+        eff.rounds_used = (
+            0 if eff.max_rounds is None else min(eff.rounds_used, eff.max_rounds)
+        )
+    if "bonuses" in fields:
+        cleaned = clean_bonuses(fields["bonuses"])
+        eff.bonuses = json.dumps(cleaned) if cleaned else None
+    if "rounds_used" in fields:
+        used = fields["rounds_used"]
+        if eff.max_rounds is None:
+            raise CharacterError("This effect has no duration to tick.")
+        if used is None or not 0 <= used <= eff.max_rounds:
+            raise CharacterError(f"Rounds used must be 0 to {eff.max_rounds}.")
+        eff.rounds_used = used
+    touch(char)
+    session.flush()
+    return eff
+
+
+def remove_effect(session: Session, user_id: str, effect_id: int) -> str:
+    char = require_character(session, user_id)
+    eff = _own_effect(char, effect_id)
+    name = eff.name
+    char.effects.remove(eff)
+    touch(char)
+    session.flush()
+    return name
+
+
+@dataclass
+class StatResult:
+    base: int
+    total: int
+    # (effect name, "+3" / "=14") for each active effect that changes this stat
+    sources: list[tuple[str, str]] = field(default_factory=list)
+
+
+def resolve_stat(effects: Sequence[CharacterEffect], key: str, base: int) -> StatResult:
+    """Apply active effects to one stat: the highest "=N" replaces the base,
+    then every "+N"/"-N" is added. Ended effects are ignored."""
+    sets: list[int] = []
+    adds = 0
+    sources: list[tuple[str, str]] = []
+    for e in effects:
+        if e.ended:
+            continue
+        text = e.bonus_map().get(key)
+        if not text:
+            continue
+        sources.append((e.name, text))
+        if text.startswith("="):
+            sets.append(int(text[1:]))
+        else:
+            adds += int(text)
+    start = max(sets) if sets else base
+    return StatResult(base=base, total=start + adds, sources=sources)

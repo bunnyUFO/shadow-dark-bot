@@ -71,6 +71,9 @@ class _Sample:
     freeform: list[tuple[str, int, float, str | None]] = field(default_factory=list)
     stash: list[tuple[str, int]] = field(default_factory=list)
     spells: list[str] = field(default_factory=list)
+    lost_spells: list[str] = field(default_factory=list)
+    # (name, max rounds, rounds used, bonuses)
+    effects: list[tuple[str, int | None, int, dict]] = field(default_factory=list)
     proficiencies: str | None = None
     languages: str | None = None
     talents: str | None = None
@@ -102,6 +105,8 @@ PARTY = [
         freeform=[("Spellbook", 1, 1.0, "Bound in grey leather")],
         stash=[("Potion of Healing", 1)],
         spells=["Magic Missile", "Sleep", "Light", "Detect Magic", "Misty Step"],
+        lost_spells=["Sleep"],
+        effects=[("Light", 6, 2, {})],
         languages="Common, Elvish, Draconic",
     ),
     _Sample(
@@ -143,6 +148,15 @@ def _seed_character(session: Session, s: _Sample) -> None:
         )
     for spell in s.spells:
         characters.learn_spell(session, s.user_id, spell)
+    known = {
+        k.display_name: k for k in characters.require_character(session, s.user_id).spells
+    }
+    for spell in s.lost_spells:
+        characters.set_spell_lost(session, s.user_id, known[spell].id, True)
+    for name, rounds, used, bonuses in s.effects:
+        eff = characters.add_effect(session, s.user_id, name, rounds, bonuses)
+        if used:
+            characters.update_effect(session, s.user_id, eff.id, rounds_used=used)
 
 
 def _seed_guild(session: Session) -> None:

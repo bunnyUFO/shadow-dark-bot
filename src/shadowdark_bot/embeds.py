@@ -310,7 +310,9 @@ def _spell_list_value(spells: list[CharacterSpell]) -> str | None:
         return None
     by_tier: dict[int | None, list[str]] = {}
     for s in spells:
-        by_tier.setdefault(s.display_tier, []).append(s.display_name)
+        by_tier.setdefault(s.display_tier, []).append(
+            f"~~{s.display_name}~~" if s.lost else s.display_name
+        )
     parts: list[str] = []
     for tier in sorted(by_tier, key=lambda t: (t is None, t or 0)):
         label = f"Tier {tier}" if tier is not None else "Other"

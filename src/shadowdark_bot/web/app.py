@@ -52,6 +52,9 @@ from shadowdark_bot.web.schemas import (
     BuyIn,
     CarryIn,
     EditStackIn,
+    EffectIn,
+    EffectPatchIn,
+    SpellLostIn,
     CharacterSummaryOut,
     GiveIn,
     GiveTargetOut,
@@ -427,6 +430,41 @@ def create_app(
             if characters.find_known_spell(char, known_id) is None:
                 raise CharacterNotFound("You don't know that spell.")
             characters.forget_spell(session, user.user_id, known_id)
+        return _my_sheet(user.user_id)
+
+    # Registered before /spells/{known_id} routes so "rest" is never an id.
+    @app.post("/api/character/spells/rest")
+    def rest(user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.rest(session, user.user_id)
+        return _my_sheet(user.user_id)
+
+    @app.patch("/api/character/spells/{known_id}")
+    def set_spell_lost(known_id: int, body: SpellLostIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.set_spell_lost(session, user.user_id, known_id, body.lost)
+        return _my_sheet(user.user_id)
+
+    @app.post("/api/character/effects")
+    def add_effect(body: EffectIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.add_effect(
+                session, user.user_id, body.name, body.max_rounds, body.bonuses
+            )
+        return _my_sheet(user.user_id)
+
+    @app.patch("/api/character/effects/{effect_id}")
+    def edit_effect(effect_id: int, body: EffectPatchIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.update_effect(
+                session, user.user_id, effect_id, **body.model_dump(exclude_unset=True)
+            )
+        return _my_sheet(user.user_id)
+
+    @app.delete("/api/character/effects/{effect_id}")
+    def delete_effect(effect_id: int, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.remove_effect(session, user.user_id, effect_id)
         return _my_sheet(user.user_id)
 
     @app.patch("/api/character/identity")
