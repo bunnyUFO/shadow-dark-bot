@@ -71,7 +71,7 @@ async function route() {
   if (section === "party" && a) return renderOtherSheet(decodeURIComponent(a), tabOr(b));
   if (section === "party") return renderParty();
   if (section === "guild") return renderGuild(app);
-  if (section === "items") return renderItems(app);
+  if (section === "items") return renderItems(app, { canBuy: me.has_character });
   if (section === "spells") return renderSpells(app);
   return renderMySheet(tabOr(a));
 }

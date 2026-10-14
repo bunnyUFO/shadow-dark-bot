@@ -3,6 +3,7 @@
 
 import { api } from "./api.js";
 import { h, mount, slots } from "./dom.js";
+import { buyDialog } from "./edit.js";
 import { card, coins, pageHead, storeCard } from "./sheet.js";
 
 // Filters survive navigating away and back within a visit.
@@ -146,13 +147,21 @@ function spellRefRow(s) {
 
 // ---------- item catalog ----------
 
-export async function renderItems(app) {
+export async function renderItems(app, { canBuy = false } = {}) {
   const items = await api("/items?limit=1000");
   const list = h("div", {});
-  const redraw = () => drawItems(list, items);
+  const notice = h("p", { class: "banner notice", role: "status", hidden: true });
+  const say = (text) => {
+    notice.textContent = text;
+    notice.hidden = false;
+    notice.scrollIntoView({ block: "nearest" });
+  };
+  const buy = canBuy ? (item) => buyDialog(item, say) : null;
+  const redraw = () => drawItems(list, items, buy);
   const present = new Set(items.map((i) => i.item_type));
   mount(app,
     pageHead("Items", "Catalog"),
+    notice,
     h("div", { class: "filters" },
       searchBox(itemFilters.q, "Search items", (v) => { itemFilters.q = v; redraw(); }),
       chipGroup("Type", [["", "All types"], ...ITEM_TYPES.filter(([t]) => present.has(t))],
@@ -163,7 +172,7 @@ export async function renderItems(app) {
   redraw();
 }
 
-function drawItems(list, items) {
+function drawItems(list, items, buy) {
   const q = itemFilters.q.trim().toLowerCase();
   const shown = items.filter((i) =>
     (!q || i.name.toLowerCase().includes(q)) && (!itemFilters.type || i.item_type === itemFilters.type),
@@ -173,7 +182,7 @@ function drawItems(list, items) {
     shown.length === 0
       ? h("p", { class: "card muted" },
           items.length ? "No items match those filters." : "The catalog is empty. Add items in Discord with /items add.")
-      : h("section", { class: "card" }, h("ul", { class: "rows" }, shown.map(catalogRow))),
+      : h("section", { class: "card" }, h("ul", { class: "rows" }, shown.map((i) => catalogRow(i, buy)))),
   );
 }
 
@@ -181,7 +190,7 @@ function slotText(gearSlots, bundle) {
   return bundle > 1 ? `${slots(gearSlots)} sl / ${bundle}` : `${slots(gearSlots)} sl`;
 }
 
-function catalogRow(i) {
+function catalogRow(i, buy) {
   return h("li", {},
     h("details", { class: "row" },
       h("summary", {},
@@ -198,6 +207,10 @@ function catalogRow(i) {
           fact("Value", i.value_cp !== null ? coins(i.value_cp) : null),
         ),
         i.description ? h("p", { class: "prose" }, i.description) : null,
+        buy && i.value_cp > 0
+          ? h("div", { class: "row-actions" },
+              h("button", { type: "button", class: "tool", onclick: () => buy(i) }, "Buy"))
+          : null,
       ),
     ),
   );

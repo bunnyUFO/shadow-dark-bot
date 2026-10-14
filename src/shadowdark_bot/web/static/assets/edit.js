@@ -3,15 +3,20 @@
 // which is handed to redraw().
 
 import { api } from "./api.js";
-import { h } from "./dom.js";
+import { h, slots } from "./dom.js";
+import { coins } from "./sheet.js";
 
 export const cleanDetail = (s) => String(s ?? "").replace(/\*\*/g, "");
+
+function selectOptions(options = [], value = "") {
+  return options.map(([v, l]) =>
+    h("option", { value: v, selected: String(v) === String(value ?? "") || null }, l));
+}
 
 function control(f, listId) {
   const common = { name: f.name, id: `f-${f.name}`, required: f.required || null };
   if (f.type === "select") {
-    return h("select", common, (f.options ?? []).map(([v, l]) =>
-      h("option", { value: v, selected: String(v) === String(f.value ?? "") || null }, l)));
+    return h("select", { ...common, size: f.size ?? null }, selectOptions(f.options, f.value));
   }
   if (f.type === "textarea") {
     const t = h("textarea", { ...common, rows: 4 });
@@ -33,6 +38,7 @@ export function openForm({ title, message, fields = [], submitLabel = "Save", da
   const dialog = h("dialog", { class: "sheet-form" });
   const error = h("p", { class: "form-error", role: "alert" });
   const controls = [];
+  const rowFor = new Map();
   const rows = fields.map((f, i) => {
     let listId = null;
     let list = null;
@@ -42,11 +48,39 @@ export function openForm({ title, message, fields = [], submitLabel = "Save", da
     }
     const el = control(f, listId);
     controls.push([f, el]);
-    return h("div", { class: "field" },
+    // A select with `filter` gets a search box above it that narrows the options
+    // (a tappable list that works on phones, unlike <datalist>).
+    const search = f.type === "select" && f.filter
+      ? h("input", {
+          type: "search", placeholder: f.filter, "aria-label": f.filter, autocomplete: "off",
+          oninput: (e) => {
+            const q = e.target.value.trim().toLowerCase();
+            const keep = el.value;
+            el.replaceChildren(...selectOptions(
+              (f.options ?? []).filter(([, l]) => !q || String(l).toLowerCase().includes(q)), keep));
+          },
+        })
+      : null;
+    const row = h("div", { class: "field" },
       h("label", { for: `f-${f.name}` }, f.label),
-      el, list,
+      search, el, list,
       f.hint ? h("small", { class: "muted" }, f.hint) : null);
+    rowFor.set(f, row);
+    return row;
   });
+  // `showWhen: [otherField, value]` hides a field (and drops it from validation
+  // and the submitted values) unless the other field has that value.
+  const applyVisibility = () => {
+    for (const [f, el] of controls) {
+      if (!f.showWhen) continue;
+      const other = controls.find(([g]) => g.name === f.showWhen[0])?.[1];
+      const hidden = other?.value !== f.showWhen[1];
+      rowFor.get(f).hidden = hidden;
+      el.disabled = hidden;
+    }
+  };
+  for (const [, el] of controls) el.addEventListener("change", applyVisibility);
+  applyVisibility();
   const submit = onSubmit
     ? h("button", { type: "submit", class: danger ? "primary danger" : "primary" }, submitLabel)
     : null;
@@ -61,6 +95,7 @@ export function openForm({ title, message, fields = [], submitLabel = "Save", da
     if (!onSubmit) return;
     const values = {};
     for (const [f, el] of controls) {
+      if (el.disabled) continue;
       values[f.name] = f.type === "number" ? (el.value === "" ? null : Number(el.value)) : el.value;
     }
     submit.disabled = true;
@@ -83,10 +118,13 @@ export function openForm({ title, message, fields = [], submitLabel = "Save", da
 }
 
 let catalogPromise = null;
-function catalogNames() {
+function catalogItems() {
   catalogPromise ??= api("/items?limit=1000")
-    .then((r) => (Array.isArray(r) ? r : r.items ?? []).map((i) => i.name))
-    .catch(() => []);
+    .then((r) => (Array.isArray(r) ? r : r.items ?? []))
+    .catch(() => {
+      catalogPromise = null; // try again next time
+      return [];
+    });
   return catalogPromise;
 }
 
@@ -104,19 +142,7 @@ export function editOpts(c, redraw) {
       }));
     }
     if (key === "held" || key === "stash") {
-      return btn("Add", async () => {
-        const names = await catalogNames();
-        openForm({
-          title: "Add item",
-          fields: [
-            { name: "name", label: "Item", type: "text", suggestions: names, required: true },
-            { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1 },
-            { name: "to", label: "Put in", type: "select", value: key, options: [["held", "Carrying"], ["stash", "Stash"]] },
-          ],
-          submitLabel: "Add",
-          onSubmit: (v) => write("/character/items", "POST", { name: v.name, quantity: v.quantity ?? 1, to: v.to }),
-        });
-      });
+      return btn("Add", () => addItemDialog(key, write));
     }
     if (key === "spells" && c.spellcasting) {
       return btn("Learn", async () => {
@@ -202,6 +228,7 @@ export function editOpts(c, redraw) {
   };
 
   const itemActions = (item) => [
+    btn("Edit", () => editItemDialog(item, write)),
     btn("Give", async () => {
       try {
         const res = await api(`/character/items/${item.id}/give-targets`);
@@ -241,4 +268,105 @@ export function editOpts(c, redraw) {
   }));
 
   return { tools, itemActions, spellActions };
+}
+
+// ---------- add / edit an item (a block of its own) ----------
+
+async function addItemDialog(role, write) {
+  const items = await catalogItems();
+  const catalogOptions = items.map((i) => [
+    i.name,
+    `${i.name} · ${slots(i.gear_slots)} sl${i.bundle_size > 1 ? ` per ${i.bundle_size}` : ""}`,
+  ]);
+  const hasCatalog = catalogOptions.length > 0;
+  openForm({
+    title: "Add item",
+    fields: [
+      { name: "mode", label: "Kind of item", type: "select", value: hasCatalog ? "catalog" : "custom",
+        options: hasCatalog ? [["catalog", "From catalog"], ["custom", "Custom"]] : [["custom", "Custom"]] },
+      { name: "catalog_name", label: "Catalog item", type: "select", required: true, size: 6,
+        filter: "Search the catalog", options: catalogOptions, showWhen: ["mode", "catalog"] },
+      { name: "name", label: "Name", type: "text", required: true, showWhen: ["mode", "custom"] },
+      { name: "slots_each", label: "Gear slots each", type: "number", value: 1, min: 0, step: "any",
+        showWhen: ["mode", "custom"] },
+      { name: "notes", label: "Notes", type: "textarea", showWhen: ["mode", "custom"] },
+      { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1, required: true },
+      { name: "to", label: "Put in", type: "select", value: role, options: [["held", "Carrying"], ["stash", "Stash"]] },
+    ],
+    submitLabel: "Add",
+    onSubmit: (v) => write("/character/items", "POST", v.mode === "catalog"
+      ? { name: v.catalog_name, quantity: v.quantity ?? 1, to: v.to }
+      : { name: v.name, quantity: v.quantity ?? 1, to: v.to, slots_each: v.slots_each ?? 1, notes: v.notes || null }),
+  });
+}
+
+function editItemDialog(item, write) {
+  const catalog = item.source === "catalog";
+  const notes = catalog ? item.notes : item.description;
+  openForm({
+    title: `Edit ${item.name}`,
+    message: catalog ? "Name and size come from the catalog." : null,
+    fields: [
+      ...(catalog ? [] : [
+        { name: "name", label: "Name", type: "text", value: item.name, required: true },
+        { name: "slots_each", label: "Gear slots each", type: "number", value: item.gear_slots_each,
+          min: 0, step: "any", required: true },
+      ]),
+      { name: "quantity", label: "Quantity", type: "number", value: item.quantity, min: 1, required: true },
+      { name: "notes", label: "Notes", type: "textarea", value: notes ?? "" },
+    ],
+    onSubmit: (v) => write(`/character/items/${item.id}`, "PATCH", catalog
+      ? { quantity: v.quantity, notes: v.notes }
+      : { name: v.name, slots_each: v.slots_each, quantity: v.quantity, notes: v.notes }),
+  });
+}
+
+// ---------- buy from the catalog (a block of its own) ----------
+
+const price = (cp) => coins(cp);
+
+// Opens the buy dialog for a catalog item; `onBought(message)` gets a short
+// confirmation once the purchase went through.
+export async function buyDialog(item, onBought) {
+  let guild;
+  try {
+    guild = await api("/guild");
+  } catch {
+    guild = { coffers: { balance_cp: 0, balance: "0cp" }, locations: [] };
+  }
+  const me = await api("/character");
+  const places = [
+    [`held:${me.held.location_id}`, "Carrying"],
+    [`stash:${me.stash.location_id}`, "Stash"],
+    ...(item.item_type === "magical" ? [] : guild.locations.map((l) => [`guild:${l.location_id}`, `Guild: ${l.name}`])),
+  ];
+  const total = h("strong", {});
+  const dialog = openForm({
+    title: `Buy ${item.name}`,
+    message: `${price(item.value_cp)} each. You have ${me.gold || "0cp"}; the coffers hold ${guild.coffers.balance || "0cp"}.`,
+    fields: [
+      { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1, required: true },
+      { name: "pay_from", label: "Pay with", type: "select", value: "character",
+        options: [["character", "My gold"], ["guild", "Guild coffers"]] },
+      { name: "dest", label: "Put in", type: "select", value: places[0][0], options: places },
+    ],
+    submitLabel: "Buy",
+    onSubmit: async (v) => {
+      const qty = v.quantity ?? 1;
+      const [, locId] = v.dest.split(":");
+      await api(`/items/${item.id}/buy`, { method: "POST", body: {
+        quantity: qty, pay_from: v.pay_from, destination_location_id: Number(locId) } });
+      const where = places.find(([val]) => val === v.dest)[1];
+      onBought(`Bought ${qty > 1 ? `${qty}× ` : ""}${item.name} for ${price(item.value_cp * qty)}`
+        + ` — paid from ${v.pay_from === "guild" ? "guild coffers" : "your gold"}, put in ${where}.`);
+    },
+  });
+  // live total under the quantity field
+  const qtyInput = dialog.querySelector("#f-quantity");
+  const form = dialog.querySelector("form");
+  const line = h("p", { class: "form-total" }, "Total: ", total);
+  form.insertBefore(line, form.querySelector(".form-actions"));
+  const update = () => { total.textContent = price(item.value_cp * Math.max(1, Number(qtyInput.value) || 1)); };
+  qtyInput.addEventListener("input", update);
+  update();
 }

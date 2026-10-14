@@ -214,9 +214,10 @@ function itemRow(i, actions) {
         ),
         i.description ? h("p", { class: "prose" }, i.description) : null,
         i.notes ? h("p", { class: "prose muted" }, i.notes) : null,
+        // Inside the expanded row so three buttons never squeeze the name on a phone.
+        h("div", { class: "row-actions" }, actions ?? null),
       ),
     ),
-    h("span", { class: "row-actions" }, actions ?? null),
   );
 }
 
