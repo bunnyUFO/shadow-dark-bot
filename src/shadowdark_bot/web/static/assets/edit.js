@@ -242,3 +242,38 @@ export function editOpts(c, redraw) {
 
   return { tools, itemActions, spellActions };
 }
+
+// ---------- Guild page actions ----------
+// Guild writes return the refreshed /api/guild body, handed to redraw().
+// Only offered when the viewer has a character (callers check me.has_character).
+
+export function guildEditOpts(me, redraw) {
+  const write = async (path, body) => redraw(await api(path, { method: "POST", body }));
+
+  const takeAction = (loc, item) => btn("Take", () => openForm({
+    title: `Take ${item.name}`,
+    message: `${item.quantity} in ${loc.name}.`,
+    fields: [
+      { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1, max: item.quantity },
+      { name: "to", label: "Put in", type: "select", value: "held", options: [["held", "Carrying"], ["stash", "Stash"]] },
+    ],
+    submitLabel: "Take",
+    onSubmit: (v) => write(`/guild/locations/${loc.location_id}/items/${item.id}/take`,
+      { quantity: v.quantity ?? 1, to: v.to }),
+  }));
+
+  // Available -> Borrow; mine -> Return; someone else's -> nothing (the row shows who).
+  const treasuryAction = (t) => {
+    if (t.status === "available") {
+      return btn("Borrow", () => write(`/guild/treasury/${t.id}/borrow`).catch(showFailure("Borrow")));
+    }
+    if (t.borrower?.user_id === me.user_id) {
+      return btn("Return", () => write(`/guild/treasury/${t.id}/return`).catch(showFailure("Return")));
+    }
+    return null;
+  };
+
+  return { takeAction, treasuryAction };
+}
+
+const showFailure = (title) => (err) => openForm({ title, message: cleanDetail(err.message) });

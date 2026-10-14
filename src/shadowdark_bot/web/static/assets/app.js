@@ -70,7 +70,7 @@ async function route() {
   window.scrollTo(0, 0);
   if (section === "party" && a) return renderOtherSheet(decodeURIComponent(a), tabOr(b));
   if (section === "party") return renderParty();
-  if (section === "guild") return renderGuild(app);
+  if (section === "guild") return renderGuild(app, me);
   if (section === "items") return renderItems(app);
   if (section === "spells") return renderSpells(app);
   return renderMySheet(tabOr(a));

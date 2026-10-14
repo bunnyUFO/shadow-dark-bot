@@ -1,8 +1,10 @@
 // Guild-wide sections: the spell reference, the item catalog, and guild storage
-// (coffers, shared locations, magic item treasury). Read-only.
+// (coffers, shared locations, magic item treasury). Take / Borrow / Return
+// appear only for viewers with a character.
 
 import { api } from "./api.js";
 import { h, mount, slots } from "./dom.js";
+import { guildEditOpts } from "./edit.js";
 import { card, coins, pageHead, storeCard } from "./sheet.js";
 
 // Filters survive navigating away and back within a visit.
@@ -205,8 +207,16 @@ function catalogRow(i) {
 
 // ---------- guild storage ----------
 
-export async function renderGuild(app) {
-  const g = await api("/guild");
+export async function renderGuild(app, me) {
+  const draw = (g) => {
+    const y = window.scrollY;
+    drawGuild(app, g, me?.has_character ? guildEditOpts(me, draw) : null);
+    window.scrollTo(0, y);
+  };
+  draw(await api("/guild"));
+}
+
+function drawGuild(app, g, ed) {
   const available = g.treasury.filter((t) => t.status === "available").length;
   mount(app,
     pageHead("Guild", "Shared with everyone in this server"),
@@ -224,15 +234,16 @@ export async function renderGuild(app) {
     card("treasury", "Magic item treasury", { aside: h("span", { class: "slots" }, `${available} available`) },
       g.treasury.length === 0
         ? h("p", { class: "muted" }, "Empty. Add magical items in Discord with /treasury add.")
-        : h("ul", { class: "rows" }, g.treasury.map(treasuryRow)),
+        : h("ul", { class: "rows" }, g.treasury.map((t) => treasuryRow(t, ed?.treasuryAction(t)))),
     ),
     g.locations.length === 0
       ? h("p", { class: "card muted" }, "No guild storage locations yet. Create one in Discord with /inventory.")
-      : g.locations.map((loc) => storeCard(loc.name, loc, "Empty.")),
+      : g.locations.map((loc) => storeCard(loc.name, loc, "Empty.",
+          ed ? { opts: { itemActions: (item) => ed.takeAction(loc, item) } } : {})),
   );
 }
 
-function treasuryRow(t) {
+function treasuryRow(t, action) {
   const who = t.borrower ? (t.borrower.name ?? "a player") : null;
   return h("li", {},
     h("details", { class: "row" },
@@ -253,6 +264,7 @@ function treasuryRow(t) {
         t.item.description ? h("p", { class: "prose" }, t.item.description) : null,
       ),
     ),
+    h("span", { class: "row-actions" }, action ?? null),
   );
 }
 
