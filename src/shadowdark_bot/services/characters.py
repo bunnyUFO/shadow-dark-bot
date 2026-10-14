@@ -29,6 +29,7 @@ from shadowdark_bot.models import (
     Borrow,
     CharacterEffect,
     CharacterSpell,
+    EffectTemplate,
     InventoryEntry,
     Item,
     Location,
@@ -1114,13 +1115,20 @@ def add_effect(
     name: str,
     max_rounds: int | None = None,
     bonuses: dict | None = None,
+    template_id: int | None = None,
 ) -> CharacterEffect:
+    """Add an effect to the sheet. `template_id` records which library effect
+    it was copied from (an unknown id is ignored); the values given are what
+    is stored, so tweaks never touch the template."""
     char = require_character(session, user_id)
     cleaned = clean_bonuses(bonuses)
+    if template_id is not None and session.get(EffectTemplate, template_id) is None:
+        template_id = None
     eff = CharacterEffect(
         name=_clean_name(name),
         max_rounds=_clean_rounds(max_rounds),
         bonuses=json.dumps(cleaned) if cleaned else None,
+        template_id=template_id,
     )
     char.effects.append(eff)
     touch(char)

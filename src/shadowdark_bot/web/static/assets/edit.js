@@ -4,13 +4,32 @@
 
 import { api } from "./api.js";
 import { h, slots } from "./dom.js";
+import { suggestedIds } from "./suggest.js";
 import { coins } from "./sheet.js";
 
 export const cleanDetail = (s) => String(s ?? "").replace(/\*\*/g, "");
 
+// options: [value, label, group?]; consecutive options with the same group
+// are wrapped in an <optgroup>.
 function selectOptions(options = [], value = "") {
-  return options.map(([v, l]) =>
-    h("option", { value: v, selected: String(v) === String(value ?? "") || null }, l));
+  const out = [];
+  let group = null;
+  let wrap = null;
+  for (const [v, l, g] of options) {
+    const opt = h("option", { value: v, selected: String(v) === String(value ?? "") || null }, l);
+    if (!g) {
+      group = null;
+      out.push(opt);
+      continue;
+    }
+    if (g !== group) {
+      group = g;
+      wrap = h("optgroup", { label: g });
+      out.push(wrap);
+    }
+    wrap.appendChild(opt);
+  }
+  return out;
 }
 
 function control(f, listId) {
@@ -145,7 +164,7 @@ export function editOpts(c, redraw) {
       return btn("Add", () => addItemDialog(key, write));
     }
     if (key === "effects") {
-      return btn("Add", () => effectDialog(null, write));
+      return btn("Add", () => addEffectDialog(c, write).catch(showFailure("Effect")));
     }
     if (key === "spells") {
       const rest = c.spells.some((s) => s.lost)
@@ -356,6 +375,49 @@ export function bonusesFrom(v) {
   const bonuses = {};
   for (const [key] of BONUS_FIELDS) bonuses[key] = v[`b_${key}`] ?? "";
   return bonuses;
+}
+
+// Add an effect: copy one from the library (suggested ones first: linked to a
+// spell you know or an item you carry), tweak it, or type a custom one. The
+// result is always a copy on your sheet; the library entry is never changed.
+async function addEffectDialog(c, write) {
+  let templates = [];
+  try {
+    templates = await api("/effects");
+  } catch { /* offer the custom form only */ }
+  const suggested = suggestedIds(templates, c);
+  const summary = (t) => [
+    t.name,
+    t.max_rounds === null ? null : `${t.max_rounds} rd`,
+    Object.entries(t.bonuses).map(([k, v]) => `${k.toUpperCase()} ${v}`).join(" "),
+  ].filter(Boolean).join(" \u00b7 ");
+  const ordered = [...templates.filter((t) => suggested.has(t.id)), ...templates.filter((t) => !suggested.has(t.id))];
+  const options = ordered.map((t) => [t.id, summary(t), suggested.has(t.id) ? "Suggested" : "Library"]);
+  const modes = options.length
+    ? [["library", "From the library"], ["custom", "Custom (not saved to the library)"]]
+    : [["custom", "Custom (not saved to the library)"]];
+  const dialog = openForm({
+    title: "Add effect",
+    message: options.length ? "Pick a library effect to fill the fields in, then change anything you like." : null,
+    fields: [
+      { name: "mode", label: "Effect", type: "select", value: modes[0][0], options: modes },
+      { name: "template", label: "Library effect", type: "select", size: 6,
+        filter: "Search the library", options, showWhen: ["mode", "library"] },
+      ...effectFields(null),
+    ],
+    submitLabel: "Add",
+    onSubmit: (v) => write("/character/effects", "POST", {
+      name: v.name, max_rounds: v.max_rounds, bonuses: bonusesFrom(v),
+      template_id: v.mode === "library" && v.template ? Number(v.template) : null,
+    }),
+  });
+  dialog.querySelector("#f-template")?.addEventListener("change", (ev) => {
+    const t = templates.find((x) => String(x.id) === ev.target.value);
+    if (!t) return;
+    dialog.querySelector("#f-name").value = t.name;
+    dialog.querySelector("#f-max_rounds").value = t.max_rounds ?? "";
+    for (const [key] of BONUS_FIELDS) dialog.querySelector(`#f-b_${key}`).value = t.bonuses[key] ?? "";
+  });
 }
 
 function effectDialog(effect, write) {

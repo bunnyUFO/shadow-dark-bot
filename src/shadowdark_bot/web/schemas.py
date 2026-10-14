@@ -95,6 +95,7 @@ class EffectOut(BaseModel):
     rounds_left: int | None
     ended: bool
     bonuses: dict[str, str]  # stat -> "+3" | "-1" | "=14"
+    template_id: int | None = None  # the library effect it was copied from
 
 
 class StatOut(BaseModel):
@@ -253,6 +254,7 @@ class EffectIn(BaseModel):
     name: str
     max_rounds: int | None = None  # omit/null: no duration
     bonuses: dict[str, str | None] = {}  # stat -> "+3" | "-1" | "=14"
+    template_id: int | None = None  # set when copied from the effects library
 
 
 class EffectPatchIn(BaseModel):
@@ -430,6 +432,7 @@ def character_sheet(
                 rounds_left=None if e.max_rounds is None else e.max_rounds - e.rounds_used,
                 ended=e.ended,
                 bonuses=e.bonus_map(),
+                template_id=e.template_id,
             )
             for e in effects
         ],

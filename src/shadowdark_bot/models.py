@@ -422,6 +422,11 @@ class CharacterEffect(Base):
     # JSON object of temporary stat changes, e.g. {"ac": "=14", "dex": "+2"}:
     # "+N"/"-N" adds, "=N" sets. NULL when the effect changes no stat.
     bonuses: Mapped[str | None] = mapped_column(Text)
+    # The library template this was copied from, for reference only: the copy
+    # is independent, and the link is cleared if the template is deleted.
+    template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("effect_templates.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()
     )

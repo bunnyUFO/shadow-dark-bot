@@ -56,8 +56,8 @@ export async function effectsBySource() {
 
 // ---------- list ----------
 
-export async function renderEffects(app, id) {
-  if (id) return renderEffect(app, id);
+export async function renderEffects(app, id, me = null) {
+  if (id) return renderEffect(app, id, me);
   const all = await api("/effects");
   const list = h("div", {});
   const draw = () => {
@@ -102,13 +102,29 @@ function effectRow(e) {
 
 // ---------- detail ----------
 
-async function renderEffect(app, id) {
+async function renderEffect(app, id, me) {
+  const notice = h("p", { class: "banner notice", role: "status", hidden: true });
+  const say = (text) => {
+    notice.textContent = text;
+    notice.hidden = false;
+    notice.scrollIntoView({ block: "nearest" });
+  };
+  // A copy lands on your sheet; the library entry stays as it is.
+  const apply = (e) => api("/character/effects", {
+    method: "POST",
+    body: { name: e.name, max_rounds: e.max_rounds, bonuses: e.bonuses, template_id: e.id },
+  }).then(
+    () => say(`${e.name} added to your sheet.`),
+    (err) => say(err.message),
+  );
   const draw = (e) => {
     const y = window.scrollY;
     mount(app,
       h("p", { class: "banner" }, h("a", { href: "#/effects" }, "← Effects")),
+      notice,
       card("effect", e.name, {
         tools: [
+          me?.has_character ? btn("Apply to me", () => apply(e)) : null,
           btn("Edit", () => openEffectForm(e, draw)),
           btn("Delete", () => openForm({
             title: "Delete effect",
