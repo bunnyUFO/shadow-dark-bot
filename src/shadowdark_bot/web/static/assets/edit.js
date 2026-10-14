@@ -144,26 +144,14 @@ export function editOpts(c, redraw) {
     if (key === "held" || key === "stash") {
       return btn("Add", () => addItemDialog(key, write));
     }
-    if (key === "spells" && c.spellcasting) {
-      return btn("Learn", async () => {
-        try {
-          const cls = c.spellcasting.ability === "wis" ? "priest" : "wizard";
-          const res = await api(`/spells?class=${cls}`);
-          const list = Array.isArray(res) ? res : res.spells ?? res.items ?? [];
-          const known = new Set(c.spells.map((s) => s.spell?.id));
-          const avail = list.filter((s) => !known.has(s.id));
-          if (!avail.length) return openForm({ title: "Learn spell", message: "You know every spell on your list." });
-          openForm({
-            title: "Learn spell",
-            fields: [{ name: "spell_id", label: "Spell", type: "select",
-              options: avail.map((s) => [s.id, `${s.name} (tier ${s.tier})`]) }],
-            submitLabel: "Learn",
-            onSubmit: (v) => write("/character/spells", "POST", { spell_id: Number(v.spell_id) }),
-          });
-        } catch (err) {
-          openForm({ title: "Learn spell", message: cleanDetail(err.message) });
-        }
-      });
+    if (key === "effects") {
+      return btn("Add", () => effectDialog(null, write));
+    }
+    if (key === "spells") {
+      const rest = c.spells.some((s) => s.lost)
+        ? btn("Rest", () => write("/character/spells/rest", "POST").catch(showFailure("Rest")))
+        : null;
+      return [rest, c.spellcasting ? btn("Learn", learnSpell) : null];
     }
     if (key === "identity" || key === "background") {
       return btn("Edit", () => openForm({
@@ -183,6 +171,30 @@ export function editOpts(c, redraw) {
         }),
       }));
     }
+    return moreTools(key);
+  };
+
+  const learnSpell = async () => {
+        try {
+          const cls = c.spellcasting.ability === "wis" ? "priest" : "wizard";
+          const res = await api(`/spells?class=${cls}`);
+          const list = Array.isArray(res) ? res : res.spells ?? res.items ?? [];
+          const known = new Set(c.spells.map((s) => s.spell?.id));
+          const avail = list.filter((s) => !known.has(s.id));
+          if (!avail.length) return openForm({ title: "Learn spell", message: "You know every spell on your list." });
+          openForm({
+            title: "Learn spell",
+            fields: [{ name: "spell_id", label: "Spell", type: "select",
+              options: avail.map((s) => [s.id, `${s.name} (tier ${s.tier})`]) }],
+            submitLabel: "Learn",
+            onSubmit: (v) => write("/character/spells", "POST", { spell_id: Number(v.spell_id) }),
+          });
+        } catch (err) {
+          openForm({ title: "Learn spell", message: cleanDetail(err.message) });
+        }
+  };
+
+  const moreTools = (key) => {
     if (key === "vitals" || key === "abilities") {
       return btn("Edit", () => openForm({
         title: "Edit stats",
@@ -267,7 +279,76 @@ export function editOpts(c, redraw) {
     onSubmit: () => write(`/character/spells/${s.id}`, "DELETE"),
   }));
 
-  return { tools, itemActions, spellActions };
+  // A checkbox-style toggle: ticked = available, unticked = lost until rest.
+  // Updates the row at once, redraws from the reply, reverts on failure.
+  const spellToggle = (s) => {
+    const box = h("input", { type: "checkbox", checked: !s.lost || null });
+    const label = h("label", { class: "avail", title: "Available" }, box,
+      h("span", { class: "visually-hidden" }, `${s.name} available`));
+    box.addEventListener("change", async () => {
+      const li = label.closest("li");
+      li?.classList.toggle("lost", !box.checked);
+      try {
+        await write(`/character/spells/${s.id}`, "PATCH", { lost: !box.checked });
+      } catch (err) {
+        box.checked = !s.lost;
+        li?.classList.toggle("lost", s.lost);
+        showFailure("Spell")(err);
+      }
+    });
+    return label;
+  };
+
+  const tickEffect = async (e, used) => {
+    try {
+      await write(`/character/effects/${e.id}`, "PATCH", { rounds_used: used });
+    } catch (err) {
+      showFailure("Effect")(err);
+      throw err; // lets the row revert its boxes
+    }
+  };
+
+  const effectActions = (e) => [
+    btn("Edit", () => effectDialog(e, write)),
+    e.max_rounds !== null && e.rounds_used > 0
+      ? btn("Reset", () => write(`/character/effects/${e.id}`, "PATCH", { rounds_used: 0 })
+          .catch(showFailure("Effect")))
+      : null,
+    btn("Remove", () => write(`/character/effects/${e.id}`, "DELETE").catch(showFailure("Effect"))),
+  ];
+
+  return { tools, itemActions, spellActions, spellToggle, tickEffect, effectActions };
+}
+
+// ---------- add / edit an effect ----------
+
+const BONUS_FIELDS = [
+  ["ac", "AC"], ["hp", "Max HP"], ["str", "STR modifier"], ["dex", "DEX modifier"],
+  ["con", "CON modifier"], ["int", "INT modifier"], ["wis", "WIS modifier"], ["cha", "CHA modifier"],
+];
+
+function effectDialog(effect, write) {
+  openForm({
+    title: effect ? `Edit ${effect.name}` : "Add effect",
+    fields: [
+      { name: "name", label: "Name", type: "text", value: effect?.name, required: true },
+      { name: "max_rounds", label: "Max rounds", type: "number", min: 1, max: 100,
+        value: effect?.max_rounds, hint: "Leave blank for no duration" },
+      ...BONUS_FIELDS.map(([key, label]) => ({
+        name: `b_${key}`, label, type: "text", value: effect?.bonuses?.[key] ?? "",
+        hint: key === "ac" ? "+2 adds, -1 subtracts, =14 sets" : null,
+      })),
+    ],
+    submitLabel: effect ? "Save" : "Add",
+    onSubmit: (v) => {
+      const bonuses = {};
+      for (const [key] of BONUS_FIELDS) bonuses[key] = v[`b_${key}`] ?? "";
+      const body = { name: v.name, max_rounds: v.max_rounds, bonuses };
+      return effect
+        ? write(`/character/effects/${effect.id}`, "PATCH", body)
+        : write("/character/effects", "POST", body);
+    },
+  });
 }
 
 // ---------- Guild page actions ----------
