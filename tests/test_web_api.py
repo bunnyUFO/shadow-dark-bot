@@ -551,7 +551,7 @@ def test_guild_overview(api):
 def test_guild_overview_empty(api):
     token = login(api, "u1")["token"]
     g = api.get("/api/guild", headers=auth(token)).json()
-    assert g == {"coffers": {"balance_cp": 0, "balance": "0cp"}, "locations": [], "treasury": []}
+    assert g == {"coffers": {"balance_cp": 0, "balance": "0cp"}, "locations": [], "treasury": [], "party": []}
 
 
 def test_item_catalog_type_filter_and_limit(api):

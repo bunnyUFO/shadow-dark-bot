@@ -199,6 +199,9 @@ class TreasuryEntry(Base):
     item: Mapped[Item] = relationship()
 
 
+FREE_TEXT_BORROWER = ""
+
+
 class Borrow(Base):
     __tablename__ = "borrows"
 
@@ -206,7 +209,12 @@ class Borrow(Base):
     treasury_entry_id: Mapped[int] = mapped_column(
         ForeignKey("treasury_entries.id"), nullable=False
     )
+    # Discord user id, or FREE_TEXT_BORROWER ("") when the item went to someone
+    # without a Discord account in the bot; then `borrower_name` says who.
     borrower_id: Mapped[str] = mapped_column(String, nullable=False)
+    # Free-text name (for FREE_TEXT_BORROWER rows) or a snapshot of the Discord
+    # display name taken when borrowed through the bot (last-resort fallback).
+    borrower_name: Mapped[str | None] = mapped_column(String)
     borrowed_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()
     )

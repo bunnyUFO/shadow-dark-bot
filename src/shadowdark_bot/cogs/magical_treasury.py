@@ -119,7 +119,11 @@ class MagicalTreasury(commands.Cog):
                     )
                 )
                 borrower_str = (
-                    f"<@{open_borrow.borrower_id}>" if open_borrow else "someone"
+                    treasury_service.borrower_mention(
+                        open_borrow.borrower_id, open_borrow.borrower_name
+                    )
+                    if open_borrow
+                    else "someone"
                 )
                 await interaction.response.send_message(
                     f"{failure}\n#{entry_id} is currently borrowed by {borrower_str}. "
@@ -313,10 +317,15 @@ async def _do_borrow(
     failure = f"**Failed to borrow #{entry_id}.**"
     with session_scope() as session:
         try:
-            treasury_service.borrow(session, entry_id, str(borrower.id))
+            treasury_service.borrow(
+                session,
+                entry_id,
+                str(borrower.id),
+                borrower_name=borrower.display_name,
+            )
         except treasury_service.AlreadyBorrowed as err:
-            current_borrower = (
-                f"<@{err.borrower_id}>" if err.borrower_id else "someone"
+            current_borrower = treasury_service.borrower_mention(
+                err.borrower_id, err.borrower_name
             )
             await interaction.response.send_message(
                 f"{failure}\n#{entry_id} is already borrowed by {current_borrower}.",
