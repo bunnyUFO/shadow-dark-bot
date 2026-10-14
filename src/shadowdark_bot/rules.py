@@ -38,6 +38,11 @@ def ability_modifier(score: int) -> int:
     return (score - 10) // 2
 
 
+def xp_needed(level: int) -> int:
+    """XP to reach the next level: current level x 10."""
+    return level * 10
+
+
 def format_modifier(mod: int) -> str:
     """Render a modifier with an explicit sign, e.g. ``+1``, ``+0``, ``−2``
     (using a true minus sign for clean alignment in embeds)."""

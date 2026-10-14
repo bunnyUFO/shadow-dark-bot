@@ -896,3 +896,29 @@ def test_spell_lost_and_rest_api(api):
     assert c.patch("/api/character/spells/99999", headers=h, json={"lost": True}).status_code == 404
     r = c.post("/api/character/spells/rest", headers=h)
     assert r.status_code == 200 and [k["lost"] for k in r.json()["spells"]] == [False, False]
+
+
+# ---------- XP ----------
+
+
+def test_xp_api(api):
+    c, h = _bob_client(api)  # Bob is level 2: next level at 20 XP
+    sheet = c.get("/api/character", headers=h).json()
+    assert (sheet["xp"], sheet["xp_needed"]) == (0, 20)
+    r = c.post("/api/character/xp", headers=h, json={"add": 7})
+    assert r.status_code == 200 and r.json()["xp"] == 7
+    r = c.post("/api/character/xp", headers=h, json={"add": 20})
+    assert r.json()["xp"] == 27 and r.json()["level"] == 2  # never auto-levels
+    r = c.post("/api/character/xp", headers=h, json={"add": -10})
+    assert r.json()["xp"] == 17
+    assert c.post("/api/character/xp", headers=h, json={"add": -18}).status_code == 400
+    assert c.get("/api/character", headers=h).json()["xp"] == 17
+    # the stats form sets it outright; omitting it leaves it alone
+    stats = {"scores": [15, 14, 10, 16, 10, 10], "level": 3, "max_hp": 8, "armor_class": 11}
+    r = c.patch("/api/character/stats", headers=h, json={**stats, "xp": 4})
+    assert (r.json()["xp"], r.json()["xp_needed"]) == (4, 30)
+    assert c.patch("/api/character/stats", headers=h, json=stats).json()["xp"] == 4
+    assert c.patch("/api/character/stats", headers=h, json={**stats, "xp": -1}).status_code == 400
+    # visible, but not writable, from the party view
+    other = auth(login(c, "u2")["token"])
+    assert c.get("/api/characters/u1", headers=other).json()["xp"] == 4

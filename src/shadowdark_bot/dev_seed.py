@@ -78,6 +78,7 @@ class _Sample:
     languages: str | None = None
     talents: str | None = None
     additional_info: str | None = None
+    xp: int = 0
 
 
 PARTY = [
@@ -94,6 +95,7 @@ PARTY = [
         languages="Common",
         talents="Weapon mastery (longsword)",
         additional_info="Owes the Ragged Hound 3 gp.",
+        xp=12,
     ),
     _Sample(
         YSOLDE_ID, "Ysolde Vane", "Wizard", "Apprentice", "Elf", "Neutral",
@@ -108,6 +110,7 @@ PARTY = [
         lost_spells=["Sleep"],
         effects=[("Light", 6, 2, {})],
         languages="Common, Elvish, Draconic",
+        xp=20,
     ),
     _Sample(
         ALDRIC_ID, "Brother Aldric", "Priest", None, "Dwarf", "Lawful",
@@ -115,6 +118,7 @@ PARTY = [
         held=[("Leather Armor", 1), ("Torch", 1)],
         freeform=[("Holy Symbol", 1, 1.0, None)],
         spells=["Cure Wounds", "Protection From Evil", "Turn Undead"],
+        xp=3,
     ),
 ]
 
@@ -127,7 +131,7 @@ def _seed_character(session: Session, s: _Sample) -> None:
     # Stats first: STR sets the held capacity, and spells need spell_ability.
     characters.update_stats(
         session, s.user_id, scores=s.scores, level=s.level, max_hp=s.max_hp,
-        armor_class=s.armor_class, spell_ability=s.spell_ability,
+        armor_class=s.armor_class, spell_ability=s.spell_ability, xp=s.xp,
     )
     characters.set_gold(session, s.user_id, s.gold_cp)
     characters.set_proficiencies(session, s.user_id, s.proficiencies)

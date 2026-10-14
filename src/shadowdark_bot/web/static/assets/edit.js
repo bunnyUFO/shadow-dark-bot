@@ -194,14 +194,24 @@ export function editOpts(c, redraw) {
         }
   };
 
+  const addXp = () => openForm({
+    title: "Add XP",
+    message: `You have ${c.xp} of ${c.xp_needed} XP. Use a negative number to remove XP.`,
+    fields: [{ name: "add", label: "XP to add", type: "number", step: 1, required: true }],
+    submitLabel: "Add",
+    onSubmit: (v) => write("/character/xp", "POST", { add: v.add ?? 0 }),
+  });
+
   const moreTools = (key) => {
     if (key === "vitals" || key === "abilities") {
-      return btn("Edit", () => openForm({
+      const edit = btn("Edit", () => openForm({
         title: "Edit stats",
         fields: [
           ...c.abilities.map((a) => ({ name: "score_" + a.key, label: a.label, type: "number",
             value: a.score, min: 1, max: 30, required: true })),
           { name: "level", label: "Level", type: "number", value: c.level, min: 1, required: true },
+          { name: "xp", label: "XP", type: "number", value: c.xp, min: 0, required: true,
+            hint: `${c.xp_needed} needed for the next level` },
           { name: "max_hp", label: "Max HP", type: "number", value: c.max_hp, min: 0 },
           { name: "armor_class", label: "Base AC (without DEX)", type: "number", value: c.armor_class_base },
           { name: "spell_ability", label: "Spellcasting stat", type: "select",
@@ -211,10 +221,11 @@ export function editOpts(c, redraw) {
         ],
         onSubmit: (v) => write("/character/stats", "PATCH", {
           scores: c.abilities.map((a) => v["score_" + a.key]),
-          level: v.level, max_hp: v.max_hp, armor_class: v.armor_class,
+          level: v.level, xp: v.xp, max_hp: v.max_hp, armor_class: v.armor_class,
           spell_ability: v.spell_ability, spell_check_bonus: v.spell_check_bonus ?? 0,
         }),
       }));
+      return key === "vitals" ? [btn("+XP", addXp), edit] : edit;
     }
     if (key === "languages" || key === "talents" || key === "additional") {
       return btn("Edit", () => openForm({

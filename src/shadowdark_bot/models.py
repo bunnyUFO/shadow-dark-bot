@@ -250,6 +250,7 @@ class PlayerCharacter(Base):
     __tablename__ = "player_characters"
     __table_args__ = (
         CheckConstraint("level >= 1", name="ck_characters_level_positive"),
+        CheckConstraint("xp >= 0", name="ck_characters_xp_nonneg"),
         CheckConstraint(
             "spell_ability IN ('int', 'wis')", name="ck_characters_spell_ability"
         ),
@@ -266,6 +267,9 @@ class PlayerCharacter(Base):
     languages: Mapped[str | None] = mapped_column(String)
     level: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"
+    )
+    xp: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
     )
     max_hp: Mapped[int | None] = mapped_column(Integer)
     armor_class: Mapped[int | None] = mapped_column(Integer)

@@ -27,6 +27,7 @@ from shadowdark_bot.rules import (
     fmt_slots,  # re-exported: cogs import it from here
     format_modifier,
     spellcasting_modifier,
+    xp_needed,
 )
 
 _ITEM_TYPE_DISPLAY: dict[str, tuple[str, discord.Color]] = {
@@ -349,7 +350,7 @@ def build_character_spells_embed(
 
 def _character_header(char: PlayerCharacter) -> tuple[str, str]:
     """(title, subtitle) shown at the top of every character-sheet tab."""
-    subtitle = f"Level {char.level}"
+    subtitle = f"Level {char.level} (XP {char.xp}/{xp_needed(char.level)})"
     if char.ancestry:
         subtitle += f" {char.ancestry}"
     if char.char_class:
