@@ -2,6 +2,7 @@
 // /api/characters/{id}) with the same three tabs as the Discord sheet.
 
 import { h, signed, slots } from "./dom.js";
+import { usedAfterTap } from "./rounds.js";
 
 export const TABS = [
   ["combat", "Combat"],
@@ -55,15 +56,55 @@ export function pageHead(title, meta) {
 
 // A sheet card: <section data-section=key> with a head row of title, aside
 // text and a tools slot (empty and hidden until something fills it).
-export function card(key, title, { aside, tools } = {}, ...body) {
-  return h("section", { class: "card", "data-section": key },
-    h("div", { class: "card-head" },
-      h("h2", {}, title),
-      h("span", { class: "card-aside" }, aside ?? null),
-      h("span", { class: "card-tools" }, tools ?? null),
-    ),
-    ...body,
+// With `collapsible`, tapping the title row folds the body away (the tools stay
+// beside it and don't toggle); the state is remembered per card key.
+export function card(key, title, { aside, tools, collapsible = false } = {}, ...body) {
+  if (!collapsible) {
+    return h("section", { class: "card", "data-section": key },
+      h("div", { class: "card-head" },
+        h("h2", {}, title),
+        h("span", { class: "card-aside" }, aside ?? null),
+        h("span", { class: "card-tools" }, tools ?? null),
+      ),
+      ...body,
+    );
+  }
+  const open = !isCollapsed(key);
+  const bodyEl = h("div", { class: "card-body", id: `card-body-${key}`, hidden: open ? null : true }, ...body);
+  const toggle = h("button", {
+    type: "button", class: "card-toggle", "aria-expanded": String(open), "aria-controls": bodyEl.id,
+  },
+    h("span", { class: "chevron", "aria-hidden": "true" }),
+    h("h2", {}, title),
+    h("span", { class: "card-aside" }, aside ?? null),
   );
+  const section = h("section", { class: open ? "card collapsible" : "card collapsible collapsed", "data-section": key },
+    h("div", { class: "card-head" }, toggle, h("span", { class: "card-tools" }, tools ?? null)),
+    bodyEl,
+  );
+  toggle.addEventListener("click", () => {
+    const nowOpen = bodyEl.hidden; // currently hidden -> opening
+    bodyEl.hidden = !nowOpen;
+    toggle.setAttribute("aria-expanded", String(nowOpen));
+    section.classList.toggle("collapsed", !nowOpen);
+    setCollapsed(key, !nowOpen);
+  });
+  return section;
+}
+
+const COLLAPSE_KEY = "sd.collapsed.";
+function isCollapsed(key) {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY + key) === "1";
+  } catch {
+    return false;
+  }
+}
+function setCollapsed(key, on) {
+  try {
+    if (on) localStorage.setItem(COLLAPSE_KEY + key, "1");
+    else localStorage.removeItem(COLLAPSE_KEY + key);
+  } catch { /* storage unavailable: just don't remember */ }
 }
 
 // ---------- combat ----------
@@ -131,7 +172,6 @@ function combatTab(c, opts) {
       ),
       xpMeter(c),
     ),
-    effectsCard(c, opts),
     card("abilities", "Abilities", { tools: tools("abilities") },
       h("div", { class: "abilities" },
         c.abilities.map((a) => {
@@ -153,6 +193,7 @@ function combatTab(c, opts) {
           c.proficiencies ? h("p", { class: "prose" }, c.proficiencies) : h("p", { class: "muted" }, "—"))
       : null,
     spellsCard(c, opts),
+    effectsCard(c, opts),
   ];
 }
 
@@ -164,7 +205,7 @@ function effectsCard(c, opts) {
   const tools = opts.tools?.("effects", c);
   const list = c.effects ?? [];
   if (!list.length && !tools) return null;
-  return card("effects", "Effects", { tools },
+  return card("effects", "Effects", { tools, collapsible: true },
     list.length === 0
       ? h("p", { class: "muted" }, "Nothing running. Add a spell, potion or blessing to track it.")
       : h("ul", { class: "rows effects" }, list.map((e) => effectRow(e, c, opts))),
@@ -181,7 +222,7 @@ function bonusChips(e) {
 function effectRow(e, c, opts) {
   const timed = e.max_rounds !== null;
   const interactive = timed && !!opts.tickEffect;
-  let used = e.rounds_used;
+  let used = e.rounds_used; // filled boxes = rounds left = max - used
   const label = h("span", { class: "row-meta effect-left" });
   const boxes = timed
     ? Array.from({ length: e.max_rounds }, (_, k) => {
@@ -202,14 +243,16 @@ function effectRow(e, c, opts) {
     li.classList.toggle("ended", timed && left === 0);
     label.textContent = !timed ? "Until removed" : left === 0 ? "Ended" : `${left} round${left === 1 ? "" : "s"} left`;
     boxes.forEach((b, k) => {
-      const on = k < u;
+      const on = k < e.max_rounds - u;
       b.classList.toggle("on", on);
       if (interactive) b.setAttribute("aria-checked", String(on));
     });
   };
+  // A filled box spends one round from the right, whichever filled box was
+  // tapped; an empty box refills from the left up to and including itself.
   const tick = (n) => {
     const prev = used;
-    paint(n === used ? n - 1 : n);
+    paint(usedAfterTap(e.max_rounds, used, n));
     Promise.resolve(opts.tickEffect(e, used)).catch(() => paint(prev));
   };
   paint(used);
@@ -235,7 +278,7 @@ function spellsCard(c, opts) {
   }
   const lostCount = c.spells.filter((s) => s.lost).length;
   const aside = opts.spellToggle ? "Tick = available" : lostCount ? `${lostCount} lost` : null;
-  return card("spells", "Spells", { aside, tools: opts.tools?.("spells", c) },
+  return card("spells", "Spells", { aside, tools: opts.tools?.("spells", c), collapsible: true },
     c.spells.length === 0
       ? h("p", { class: "muted" }, "No spells known yet.")
       : [...byTier.entries()].map(([tier, spells]) => [

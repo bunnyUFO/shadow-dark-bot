@@ -119,6 +119,22 @@ main {
 .card-aside { font-size: 0.9rem; color: var(--muted); }
 .card-aside:empty, .card-tools:empty, .row-actions:empty { display: none; }
 .card-tools { display: flex; gap: 6px; }
+.card-toggle {
+  flex: 1; min-width: 0; min-height: 44px;
+  display: flex; align-items: center; gap: 8px;
+  margin: -8px 0; padding: 0;
+  background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.card-toggle h2 { flex: 1; }
+.card-head:has(.card-toggle) { align-items: center; }
+.chevron {
+  flex: none; width: 8px; height: 8px;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg); transition: transform 0.15s; margin: 0 4px 3px 2px;
+}
+.card.collapsed .chevron { transform: rotate(-45deg); margin: 0 4px 0 0; }
+.card.collapsed .card-head { margin-bottom: 0; }
+.card-body[hidden] { display: none; }
 .card.error { border-color: var(--danger); }
 .card.error h2 { color: var(--danger); }
 
