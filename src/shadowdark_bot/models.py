@@ -494,3 +494,70 @@ class CreatureEncounter(Base):
     )
 
     creature: Mapped[Creature] = relationship(back_populates="encounters")
+
+
+EFFECT_LINK_KINDS: tuple[str, ...] = ("item", "spell", "creature")
+
+
+class EffectTemplate(Base):
+    """A reusable effect (name, optional duration, stat changes) in the shared
+    library. Characters get a copy when they apply one; editing a template never
+    changes effects already on a sheet. Names are unique ignoring case."""
+
+    __tablename__ = "effect_templates"
+    __table_args__ = (
+        CheckConstraint(
+            "max_rounds IS NULL OR (max_rounds >= 1 AND max_rounds <= 100)",
+            name="ck_effect_templates_rounds_range",
+        ),
+        Index("uq_effect_templates_name_ci", text("lower(name)"), unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    max_rounds: Mapped[int | None] = mapped_column(Integer)
+    # Same JSON format as CharacterEffect.bonuses, e.g. {"ac": "=14"}.
+    bonuses: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+    links: Mapped[list["EffectTemplateLink"]] = relationship(
+        back_populates="template",
+        cascade="all, delete-orphan",
+        order_by="EffectTemplateLink.id",
+    )
+
+    def bonus_map(self) -> dict[str, str]:
+        return json.loads(self.bonuses) if self.bonuses else {}
+
+
+class EffectTemplateLink(Base):
+    """Ties a template to the item, spell or creature it comes from. The target
+    is polymorphic (no foreign key); the service checks it exists and clears
+    links when a target is deleted."""
+
+    __tablename__ = "effect_template_links"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('item', 'spell', 'creature')", name="ck_effect_links_kind"
+        ),
+        UniqueConstraint(
+            "template_id", "kind", "target_id", name="uq_effect_template_link"
+        ),
+        Index("ix_effect_links_target", "kind", "target_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    template_id: Mapped[int] = mapped_column(
+        ForeignKey("effect_templates.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    target_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    template: Mapped[EffectTemplate] = relationship(back_populates="links")

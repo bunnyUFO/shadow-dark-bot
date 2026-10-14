@@ -18,12 +18,14 @@ from shadowdark_bot.models import (
     LOCATION_ROLE_STASH,
     Borrow,
     Coffer,
+    Creature,
     Item,
     Location,
     PlayerCharacter,
+    Spell,
     TreasuryEntry,
 )
-from shadowdark_bot.services import characters, creatures
+from shadowdark_bot.services import characters, creatures, effects
 
 BRANNOC_ID = "900000000000000001"
 YSOLDE_ID = "900000000000000002"
@@ -45,6 +47,7 @@ CATALOG: list[tuple[str, str, float, int, int | None, str | None]] = [
     ("Flask of Oil", "common", 1, 1, 50, None),
     ("Scroll of Light", "scroll", 1, 1, 2500, None),
     ("Potion of Healing", "potion", 1, 1, 5000, None),
+    ("Potion of Giant Strength", "potion", 1, 1, 15000, "Your muscles swell for a short while."),
     ("Ring of Feather Falling", "magical", 1, 1, None, None),
     ("Wand of Sleep", "magical", 1, 1, None, None),
     ("Cloak of Elvenkind", "magical", 1, 1, None, None),
@@ -253,6 +256,37 @@ def _seed_creatures(session: Session) -> None:
     )
 
 
+def _seed_effects(session: Session) -> None:
+    """A few library effects, each linked to something that causes it."""
+
+    def link(template, kind, model, name):
+        target = session.scalar(select(model).where(model.name == name))
+        if target is not None:  # a missing target just leaves the effect unlinked
+            effects.add_link(session, template.id, kind, target.id)
+
+    mage_armor = effects.create_template(
+        session, YSOLDE_ID, name="Mage Armor", max_rounds=10, bonuses={"ac": "=14"},
+        description="An invisible layer of magical force. Your AC becomes 14.",
+    )
+    link(mage_armor, "spell", Spell, "Mage Armor")
+    shield = effects.create_template(
+        session, ALDRIC_ID, name="Shield of Faith", max_rounds=5, bonuses={"ac": "+2"},
+        description="A shimmering field of faith turns aside blows.",
+    )
+    link(shield, "spell", Spell, "Shield of Faith")
+    strength = effects.create_template(
+        session, BRANNOC_ID, name="Giant Strength", max_rounds=10, bonuses={"str": "+3"},
+        description="Drunk from a potion: your STR modifier rises for a few rounds.",
+    )
+    link(strength, "item", Item, "Potion of Giant Strength")
+    frightened = effects.create_template(
+        session, BRANNOC_ID, name="Frightened", max_rounds=3,
+        bonuses={"str": "-1", "dex": "-1"},
+        description="Shaken by a goblin's war cry. Fights worse for a few rounds.",
+    )
+    link(frightened, "creature", Creature, "Goblin")
+
+
 def seed_sample_data(session: Session) -> bool:
     """Seed the sample party and guild. Returns False (writing nothing) if any
     character already exists. Needs the reference spells seeded first."""
@@ -270,4 +304,5 @@ def seed_sample_data(session: Session) -> bool:
         _seed_character(session, sample)
     _seed_guild(session)
     _seed_creatures(session)
+    _seed_effects(session)
     return True

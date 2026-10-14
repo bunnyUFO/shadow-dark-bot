@@ -128,7 +128,7 @@ function catalogItems() {
   return catalogPromise;
 }
 
-const btn = (label, onClick) => h("button", { type: "button", class: "tool", onClick }, label);
+export const btn = (label, onClick) => h("button", { type: "button", class: "tool", onClick }, label);
 
 export function editOpts(c, redraw) {
   const write = async (path, method, body) => redraw(await api(path, { method, body }));
@@ -333,28 +333,38 @@ export function editOpts(c, redraw) {
 
 // ---------- add / edit an effect ----------
 
-const BONUS_FIELDS = [
+export const BONUS_FIELDS = [
   ["ac", "AC"], ["hp", "Max HP"], ["str", "STR modifier"], ["dex", "DEX modifier"],
   ["con", "CON modifier"], ["int", "INT modifier"], ["wis", "WIS modifier"], ["cha", "CHA modifier"],
 ];
 
+// The shared form fields for an effect (name, duration, stat changes) and the
+// reverse step, used by the sheet's effects and the effects library.
+export function effectFields(effect) {
+  return [
+    { name: "name", label: "Name", type: "text", value: effect?.name, required: true },
+    { name: "max_rounds", label: "Max rounds", type: "number", min: 1, max: 100,
+      value: effect?.max_rounds, hint: "Leave blank for no duration" },
+    ...BONUS_FIELDS.map(([key, label]) => ({
+      name: `b_${key}`, label, type: "text", value: effect?.bonuses?.[key] ?? "",
+      hint: key === "ac" ? "+2 adds, -1 subtracts, =14 sets" : null,
+    })),
+  ];
+}
+
+export function bonusesFrom(v) {
+  const bonuses = {};
+  for (const [key] of BONUS_FIELDS) bonuses[key] = v[`b_${key}`] ?? "";
+  return bonuses;
+}
+
 function effectDialog(effect, write) {
   openForm({
     title: effect ? `Edit ${effect.name}` : "Add effect",
-    fields: [
-      { name: "name", label: "Name", type: "text", value: effect?.name, required: true },
-      { name: "max_rounds", label: "Max rounds", type: "number", min: 1, max: 100,
-        value: effect?.max_rounds, hint: "Leave blank for no duration" },
-      ...BONUS_FIELDS.map(([key, label]) => ({
-        name: `b_${key}`, label, type: "text", value: effect?.bonuses?.[key] ?? "",
-        hint: key === "ac" ? "+2 adds, -1 subtracts, =14 sets" : null,
-      })),
-    ],
+    fields: effectFields(effect),
     submitLabel: effect ? "Save" : "Add",
     onSubmit: (v) => {
-      const bonuses = {};
-      for (const [key] of BONUS_FIELDS) bonuses[key] = v[`b_${key}`] ?? "";
-      const body = { name: v.name, max_rounds: v.max_rounds, bonuses };
+      const body = { name: v.name, max_rounds: v.max_rounds, bonuses: bonusesFrom(v) };
       return effect
         ? write(`/character/effects/${effect.id}`, "PATCH", body)
         : write("/character/effects", "POST", body);
@@ -395,7 +405,7 @@ export function guildEditOpts(me, redraw) {
   return { takeAction, treasuryAction };
 }
 
-const showFailure = (title) => (err) => openForm({ title, message: cleanDetail(err.message) });
+export const showFailure = (title) => (err) => openForm({ title, message: cleanDetail(err.message) });
 
 // ---------- add / edit an item (a block of its own) ----------
 

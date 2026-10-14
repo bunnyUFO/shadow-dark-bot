@@ -209,6 +209,7 @@ function effectsCard(c, opts) {
     list.length === 0
       ? h("p", { class: "muted" }, "Nothing running. Add a spell, potion or blessing to track it.")
       : h("ul", { class: "rows effects" }, list.map((e) => effectRow(e, c, opts))),
+    h("p", { class: "card-foot" }, h("a", { href: "#/effects" }, "Effects library \u2192")),
   );
 }
 

@@ -5,6 +5,7 @@
 import { api } from "./api.js";
 import { h, mount, slots } from "./dom.js";
 import { buyDialog, guildEditOpts } from "./edit.js";
+import { effectsBySource, libraryLink, linkedEffects } from "./effects.js";
 import { card, coins, pageHead, storeCard } from "./sheet.js";
 
 // Filters survive navigating away and back within a visit.
@@ -79,12 +80,12 @@ const countLine = (shown, total, noun) =>
 // ---------- spells ----------
 
 export async function renderSpells(app) {
-  const spells = await api("/spells");
+  const [spells, linked] = await Promise.all([api("/spells"), effectsBySource()]);
   const list = h("div", {});
-  const redraw = () => drawSpells(list, spells);
+  const redraw = () => drawSpells(list, spells, linked);
   const tiers = [...new Set(spells.map((s) => s.tier))].sort((a, b) => a - b);
   mount(app,
-    pageHead("Spells", "Reference"),
+    pageHead("Spells", ["Reference \u00b7 ", libraryLink()]),
     h("div", { class: "filters" },
       searchBox(spellFilters.q, "Search spells", (v) => { spellFilters.q = v; redraw(); }),
       chipGroup("Class", [["", "All classes"], ["wizard", "Wizard"], ["priest", "Priest"]],
@@ -99,7 +100,7 @@ export async function renderSpells(app) {
   redraw();
 }
 
-function drawSpells(list, spells) {
+function drawSpells(list, spells, linked) {
   const q = spellFilters.q.trim().toLowerCase();
   const shown = spells.filter((s) =>
     (!q || s.name.toLowerCase().includes(q))
@@ -118,13 +119,13 @@ function drawSpells(list, spells) {
       ? h("p", { class: "card muted" }, "No spells match those filters.")
       : [...byTier.entries()].map(([tier, group]) =>
           card(`tier-${tier}`, `Tier ${tier}`, {},
-            h("ul", { class: "rows" }, group.map(spellRefRow)),
+            h("ul", { class: "rows" }, group.map((s) => spellRefRow(s, linked.get(`spell:${s.id}`)))),
           ),
         ),
   );
 }
 
-function spellRefRow(s) {
+function spellRefRow(s, effects) {
   const classes = s.classes.map((c) => c[0].toUpperCase() + c.slice(1)).join(" / ");
   return h("li", {},
     h("details", { class: "row" },
@@ -141,6 +142,7 @@ function spellRefRow(s) {
           fact("Alignment", s.alignment ? `${ALIGN_LABEL[s.alignment]} only` : null),
         ),
         s.description ? h("p", { class: "prose" }, s.description) : null,
+        linkedEffects(effects),
       ),
     ),
   );
@@ -149,7 +151,7 @@ function spellRefRow(s) {
 // ---------- item catalog ----------
 
 export async function renderItems(app, { canBuy = false } = {}) {
-  const items = await api("/items?limit=1000");
+  const [items, linked] = await Promise.all([api("/items?limit=1000"), effectsBySource()]);
   const list = h("div", {});
   const notice = h("p", { class: "banner notice", role: "status", hidden: true });
   const say = (text) => {
@@ -158,10 +160,10 @@ export async function renderItems(app, { canBuy = false } = {}) {
     notice.scrollIntoView({ block: "nearest" });
   };
   const buy = canBuy ? (item) => buyDialog(item, say) : null;
-  const redraw = () => drawItems(list, items, buy);
+  const redraw = () => drawItems(list, items, buy, linked);
   const present = new Set(items.map((i) => i.item_type));
   mount(app,
-    pageHead("Items", "Catalog"),
+    pageHead("Items", ["Catalog \u00b7 ", libraryLink()]),
     notice,
     h("div", { class: "filters" },
       searchBox(itemFilters.q, "Search items", (v) => { itemFilters.q = v; redraw(); }),
@@ -173,7 +175,7 @@ export async function renderItems(app, { canBuy = false } = {}) {
   redraw();
 }
 
-function drawItems(list, items, buy) {
+function drawItems(list, items, buy, linked) {
   const q = itemFilters.q.trim().toLowerCase();
   const shown = items.filter((i) =>
     (!q || i.name.toLowerCase().includes(q)) && (!itemFilters.type || i.item_type === itemFilters.type),
@@ -183,7 +185,7 @@ function drawItems(list, items, buy) {
     shown.length === 0
       ? h("p", { class: "card muted" },
           items.length ? "No items match those filters." : "The catalog is empty. Add items in Discord with /items add.")
-      : h("section", { class: "card" }, h("ul", { class: "rows" }, shown.map((i) => catalogRow(i, buy)))),
+      : h("section", { class: "card" }, h("ul", { class: "rows" }, shown.map((i) => catalogRow(i, buy, linked.get(`item:${i.id}`))))),
   );
 }
 
@@ -191,7 +193,7 @@ function slotText(gearSlots, bundle) {
   return bundle > 1 ? `${slots(gearSlots)} sl / ${bundle}` : `${slots(gearSlots)} sl`;
 }
 
-function catalogRow(i, buy) {
+function catalogRow(i, buy, effects) {
   return h("li", {},
     h("details", { class: "row" },
       h("summary", {},
@@ -208,6 +210,7 @@ function catalogRow(i, buy) {
           fact("Value", i.value_cp !== null ? coins(i.value_cp) : null),
         ),
         i.description ? h("p", { class: "prose" }, i.description) : null,
+        linkedEffects(effects),
         buy && i.value_cp > 0
           ? h("div", { class: "row-actions" },
               h("button", { type: "button", class: "tool", onclick: () => buy(i) }, "Buy"))

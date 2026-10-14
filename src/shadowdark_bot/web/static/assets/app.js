@@ -9,12 +9,15 @@
 //   #/items                 -> the item catalog
 //   #/spells                -> the spell reference
 //   #/creatures[/<id>]      -> the bestiary and a creature's stat block
+//   #/effects[/<id>]        -> the effects library (reached from Spells, Items,
+//                              Creatures and the sheet's Effects card)
 //   /auth/callback?code=…   -> Discord redirect login lands here
 
 import { api, ApiError, getToken, setToken } from "./api.js";
 import { h, mount } from "./dom.js";
 import { renderCreature, renderCreatures } from "./creatures.js";
 import { editOpts } from "./edit.js";
+import { renderEffects } from "./effects.js";
 import { renderGuild, renderItems, renderSpells } from "./library.js";
 import { pageHead, sheetBody, sheetHeader, subtitle, TABS } from "./sheet.js";
 
@@ -76,6 +79,7 @@ async function route() {
   if (section === "guild") return renderGuild(app, me);
   if (section === "items") return renderItems(app, { canBuy: me.has_character });
   if (section === "spells") return renderSpells(app);
+  if (section === "effects") return renderEffects(app, a ? decodeURIComponent(a) : null);
   if (section === "creatures" && a) return renderCreature(app, decodeURIComponent(a));
   if (section === "creatures") return renderCreatures(app);
   return renderMySheet(tabOr(a));

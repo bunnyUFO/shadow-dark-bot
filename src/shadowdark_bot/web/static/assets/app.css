@@ -594,6 +594,15 @@ span.round-box { cursor: default; }
 .effect.ended .row-name { text-decoration: line-through; }
 .effect.ended .effect-left { color: var(--danger); }
 
+/* Effects library */
+.head-link { white-space: nowrap; }
+.card-foot { margin: 10px 0 0; font-size: 0.9rem; }
+.linked-effects { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; }
+.chips li a { text-decoration: none; }
+.creature-row .bonus-chips { margin-top: 4px; }
+.link-rows > li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.link-target { min-width: 0; overflow-wrap: anywhere; }
+
 /* Spells: tick = available. */
 .rows > li.has-toggle { grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; }
 .avail {
