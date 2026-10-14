@@ -7,6 +7,7 @@ turns ids into JS numbers. Later milestones reuse this data; keep it stable.
 """
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,7 +23,7 @@ from shadowdark_bot.models import (
     PlayerCharacter,
     TreasuryEntry,
 )
-from shadowdark_bot.services import characters
+from shadowdark_bot.services import characters, creatures
 
 BRANNOC_ID = "900000000000000001"
 YSOLDE_ID = "900000000000000002"
@@ -204,6 +205,36 @@ def _seed_guild(session: Session) -> None:
     session.flush()
 
 
+def _seed_creatures(session: Session) -> None:
+    """A bestiary with one fully known, one partly known and one unknown creature."""
+    today = date.today()
+    goblin = creatures.create_creature(
+        session, BRANNOC_ID, name="Goblin", level=1, ac=11, hp=5,
+        attacks="1 club +1 (1d4)", movement="near", str_mod=-1, dex_mod=1,
+        con_mod=0, int_mod=-1, wis_mod=-1, cha_mod=-2, alignment="C",
+        special_abilities="Keen Senses. Can't be surprised.",
+        description="Small, wiry and loud. They swarm.",
+        notes="Ambushed us on the road to Highcliff.",
+    )
+    creatures.add_encounter(session, BRANNOC_ID, goblin.id, {
+        "date": (today - timedelta(days=21)).isoformat(), "session": "Session 4",
+        "place": "Highcliff road", "outcome": "Drove them off; one fled.",
+    })
+    creatures.add_encounter(session, YSOLDE_ID, goblin.id, {
+        "date": (today - timedelta(days=7)).isoformat(), "session": "Session 6",
+        "place": "The old mine", "outcome": "Killed three, took a crude map.",
+    })
+    creatures.create_creature(
+        session, YSOLDE_ID, name="Cave crawler", level=3, ac=13,
+        attacks="2 claw +3 (1d6)", movement="near (climb)", dex_mod=2, alignment="N",
+        description="Pale and many-legged. Hunts by sound.",
+    )
+    creatures.create_creature(
+        session, ALDRIC_ID, name="Pale thing in the well",
+        notes="Heard it breathing. Nobody looked down.",
+    )
+
+
 def seed_sample_data(session: Session) -> bool:
     """Seed the sample party and guild. Returns False (writing nothing) if any
     character already exists. Needs the reference spells seeded first."""
@@ -220,4 +251,5 @@ def seed_sample_data(session: Session) -> bool:
     for sample in PARTY:
         _seed_character(session, sample)
     _seed_guild(session)
+    _seed_creatures(session)
     return True

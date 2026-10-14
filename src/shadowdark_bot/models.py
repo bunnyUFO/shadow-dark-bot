@@ -1,7 +1,9 @@
+from datetime import date as date_type
 from datetime import datetime
 
 from sqlalchemy import (
     CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -374,3 +376,63 @@ class CharacterSpell(Base):
         if self.spell_id is not None and self.spell is not None:
             return self.spell.tier
         return self.tier
+
+
+class Creature(Base):
+    """A monster the party has met. Every stat is nullable: NULL means unknown
+    (shown as "?"), since players often only learn a creature's numbers over
+    several encounters. The name may be a placeholder description."""
+
+    __tablename__ = "creatures"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    level: Mapped[int | None] = mapped_column(Integer)
+    ac: Mapped[int | None] = mapped_column(Integer)
+    hp: Mapped[int | None] = mapped_column(Integer)
+    attacks: Mapped[str | None] = mapped_column(Text)
+    movement: Mapped[str | None] = mapped_column(String)
+    str_mod: Mapped[int | None] = mapped_column(Integer)
+    dex_mod: Mapped[int | None] = mapped_column(Integer)
+    con_mod: Mapped[int | None] = mapped_column(Integer)
+    int_mod: Mapped[int | None] = mapped_column(Integer)
+    wis_mod: Mapped[int | None] = mapped_column(Integer)
+    cha_mod: Mapped[int | None] = mapped_column(Integer)
+    alignment: Mapped[str | None] = mapped_column(String)  # 'L' / 'N' / 'C'
+    special_abilities: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+    encounters: Mapped[list["CreatureEncounter"]] = relationship(
+        back_populates="creature",
+        cascade="all, delete-orphan",
+        order_by="CreatureEncounter.date.desc(), CreatureEncounter.id.desc()",
+    )
+
+
+class CreatureEncounter(Base):
+    """One time the party met a creature."""
+
+    __tablename__ = "creature_encounters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    creature_id: Mapped[int] = mapped_column(
+        ForeignKey("creatures.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    date: Mapped[date_type] = mapped_column(Date, nullable=False)
+    session: Mapped[str | None] = mapped_column(String)
+    place: Mapped[str | None] = mapped_column(String)
+    outcome: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+    creature: Mapped[Creature] = relationship(back_populates="encounters")

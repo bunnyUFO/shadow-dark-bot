@@ -38,6 +38,7 @@ from shadowdark_bot.models import (
 )
 from shadowdark_bot.services import characters
 from shadowdark_bot.services.characters import CharacterError, CharacterNotFound
+from shadowdark_bot.web import creature_routes
 from shadowdark_bot.web.auth import (
     SCOPES,
     DiscordOAuth,
@@ -477,6 +478,9 @@ def create_app(
             characters.require_character(session, user.user_id)
             characters.set_proficiencies(session, user.user_id, body.proficiencies)
         return _my_sheet(user.user_id)
+
+    # ---------- creatures (bestiary) ----------
+    creature_routes.register(app, User)
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"])
     def api_not_found(path: str) -> None:
