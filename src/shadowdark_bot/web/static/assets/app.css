@@ -293,6 +293,7 @@ button.primary:hover { filter: brightness(1.08); }
 .rows > li + li { border-top: 1px solid var(--line); }
 .rows > li > details { min-width: 0; }
 .row-actions { padding-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.row-actions .row-action-end { margin-left: auto; }
 
 .row summary {
   display: flex;

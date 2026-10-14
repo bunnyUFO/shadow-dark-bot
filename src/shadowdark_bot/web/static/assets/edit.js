@@ -269,8 +269,31 @@ export function editOpts(c, redraw) {
     return null;
   };
 
+  // Carrying rows get Stash, stash rows get Take: a give to your own other location.
+  const moveAction = (item) => {
+    const inStash = (c.stash?.items ?? []).some((i) => i.id === item.id);
+    const [label, dest, where] = inStash
+      ? ["Take", c.held, "Carrying"]
+      : ["Stash", c.stash, "Stash"];
+    if (!dest) return null;
+    const move = (quantity) => write(`/character/items/${item.id}/give`, "POST",
+      { target_location_id: dest.location_id, quantity });
+    return btn(label, () => {
+      if (item.quantity <= 1) {
+        return move(1).catch((err) => openForm({ title: label, message: cleanDetail(err.message) }));
+      }
+      openForm({
+        title: `${label} ${item.name}`,
+        message: `Move to ${where}.`,
+        fields: [{ name: "quantity", label: "Quantity", type: "number", value: item.quantity, min: 1, max: item.quantity }],
+        submitLabel: label,
+        onSubmit: (v) => move(v.quantity ?? item.quantity),
+      });
+    });
+  };
+
   const itemActions = (item) => [
-    btn("Edit", () => editItemDialog(item, write)),
+    moveAction(item),
     btn("Give", async () => {
       try {
         const res = await api(`/character/items/${item.id}/give-targets`);
@@ -299,6 +322,7 @@ export function editOpts(c, redraw) {
       danger: true,
       onSubmit: (v) => write(`/character/items/${item.id}?quantity=${v.quantity ?? item.quantity}`, "DELETE"),
     })),
+    h("button", { type: "button", class: "tool row-action-end", onClick: () => editItemDialog(item, write) }, "Edit"),
   ];
 
   const spellActions = (s) => btn("Forget", () => openForm({
