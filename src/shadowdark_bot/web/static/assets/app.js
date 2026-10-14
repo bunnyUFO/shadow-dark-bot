@@ -8,10 +8,12 @@
 //   #/guild                 -> coffers, guild storage, magic item treasury
 //   #/items                 -> the item catalog
 //   #/spells                -> the spell reference
+//   #/creatures[/<id>]      -> the bestiary and a creature's stat block
 //   /auth/callback?code=…   -> Discord redirect login lands here
 
 import { api, ApiError, getToken, setToken } from "./api.js";
 import { h, mount } from "./dom.js";
+import { renderCreature, renderCreatures } from "./creatures.js";
 import { editOpts } from "./edit.js";
 import { renderGuild, renderItems, renderSpells } from "./library.js";
 import { pageHead, sheetBody, sheetHeader, subtitle, TABS } from "./sheet.js";
@@ -28,6 +30,7 @@ const SECTIONS = [
   ["guild", "Guild", "\u2302"],
   ["items", "Items", "\u2699"],
   ["spells", "Spells", "\u2726"],
+  ["creatures", "Creatures", "\u2620"],
 ];
 const STATE_KEY = "sd.oauth_state";
 
@@ -73,6 +76,8 @@ async function route() {
   if (section === "guild") return renderGuild(app);
   if (section === "items") return renderItems(app);
   if (section === "spells") return renderSpells(app);
+  if (section === "creatures" && a) return renderCreature(app, decodeURIComponent(a));
+  if (section === "creatures") return renderCreatures(app);
   return renderMySheet(tabOr(a));
 }
 
