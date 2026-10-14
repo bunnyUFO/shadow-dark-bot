@@ -20,6 +20,7 @@ from shadowdark_bot.models import (
 )
 from shadowdark_bot.services import characters
 from shadowdark_bot.services.characters import CharacterError, CharacterNotFound
+from shadowdark_bot.services.coffers import get_or_create_coffer
 
 
 def _create(session, user_id="u1", name="Bob", str_score=None):
@@ -425,3 +426,150 @@ def test_delete_preview_and_delete(dbsession):
         assert characters.delete_character(s, "u1") is False
         with pytest.raises(CharacterNotFound):
             characters.delete_preview(s, "u1")
+
+
+# ---------- edit a stack ----------
+
+
+def test_edit_stack_freeform_rename_slots_notes_and_capacity(dbsession):
+    with session_scope() as s:
+        _create(s, str_score=10)
+        _seed_items(s)
+        characters.carry(s, "u1", item_name="Idol", quantity=2, freeform_slots=0.5)
+        characters.carry(s, "u1", item_name="Gem", quantity=1)
+        eid = _held_entries(s)["Idol"].id
+        r = characters.edit_stack(s, "u1", role=LOCATION_ROLE_HELD, entry_id=eid,
+                                  name=" Golden Idol ", slots_each=2, quantity=3,
+                                  notes="shiny")
+        assert r.display_name == "Golden Idol" and r.used_slots == 7  # 6 + Gem 1
+        e = _held_entries(s)["Golden Idol"]
+        assert (e.slots_each, e.quantity, e.notes) == (2, 3, "shiny")
+        characters.edit_stack(s, "u1", role=LOCATION_ROLE_HELD, entry_id=eid, notes="")
+        assert _held_entries(s)["Golden Idol"].notes is None
+        # growing past the 10-slot pack is refused and changes nothing
+        with pytest.raises(CharacterError, match="would need 6 more"):
+            characters.edit_stack(s, "u1", role=LOCATION_ROLE_HELD, entry_id=eid,
+                                  slots_each=4)
+        assert _held_entries(s)["Golden Idol"].slots_each == 2
+        # shrinking is always allowed; a taken name is not
+        characters.edit_stack(s, "u1", role=LOCATION_ROLE_HELD, entry_id=eid,
+                              slots_each=0)
+        with pytest.raises(CharacterError, match="already have"):
+            characters.edit_stack(s, "u1", role=LOCATION_ROLE_HELD, entry_id=eid,
+                                  name="gem")
+        with pytest.raises(CharacterError, match="empty"):
+            characters.edit_stack(s, "u1", role=LOCATION_ROLE_HELD, entry_id=eid,
+                                  name=" ")
+        with pytest.raises(CharacterError, match="Quantity"):
+            characters.edit_stack(s, "u1", role=LOCATION_ROLE_HELD, entry_id=eid,
+                                  quantity=0)
+
+
+def test_edit_stack_catalog_only_quantity_and_notes(dbsession):
+    with session_scope() as s:
+        _create(s, str_score=10)
+        _seed_items(s)
+        characters.carry(s, "u1", item_name="Rope", quantity=2)
+        eid = _held_entries(s)["Rope"].id
+        with pytest.raises(CharacterError, match="can't be renamed"):
+            characters.edit_stack(s, "u1", role=LOCATION_ROLE_HELD, entry_id=eid,
+                                  name="Cord")
+        with pytest.raises(CharacterError, match="slot size"):
+            characters.edit_stack(s, "u1", role=LOCATION_ROLE_HELD, entry_id=eid,
+                                  slots_each=4)
+        # re-sending the unchanged name/slots (as a form would) is fine
+        characters.edit_stack(s, "u1", role=LOCATION_ROLE_HELD, entry_id=eid,
+                              name="Rope", slots_each=1, quantity=4, notes="50ft")
+        e = _held_entries(s)["Rope"]
+        assert (e.quantity, e.notes) == (4, "50ft")
+        with pytest.raises(CharacterError, match="would need 7 more"):
+            characters.edit_stack(s, "u1", role=LOCATION_ROLE_HELD, entry_id=eid,
+                                  quantity=11)
+        with pytest.raises(CharacterError, match="no longer there"):
+            characters.edit_stack(s, "u1", role=LOCATION_ROLE_STASH, entry_id=eid,
+                                  quantity=1)
+
+
+# ---------- buy ----------
+
+
+def _priced(session):
+    session.add_all([
+        Item(name="Torch", gear_slots=1, bundle_size=1, item_type=ITEM_TYPE_COMMON,
+             value_cp=10),
+        Item(name="Free Thing", gear_slots=1, bundle_size=1,
+             item_type=ITEM_TYPE_COMMON),
+        Item(name="Wand", gear_slots=1, bundle_size=1, item_type=ITEM_TYPE_MAGICAL,
+             value_cp=500),
+    ])
+    session.flush()
+    return {i.name: i.id for i in session.query(Item).all()}
+
+
+def _guild_loc(session, slots=5.0):
+    loc = Location(name="Cellar", kind="inventory", max_gear_slots=slots)
+    session.add(loc)
+    session.flush()
+    return loc
+
+
+def test_buy_with_character_gold(dbsession):
+    with session_scope() as s:
+        _create(s, str_score=10)
+        ids = _priced(s)
+        characters.set_gold(s, "u1", 35)
+        held = storage.held_location(s, "u1")
+        r = characters.buy(s, "u1", item_id=ids["Torch"], quantity=3,
+                           pay_from="character", destination_location_id=held.id)
+        assert (r.total_cp, r.balance_cp) == (30, 5)
+        assert _held_entries(s)["Torch"].quantity == 3
+        assert characters.require_character(s, "u1").gold_cp == 5
+        with pytest.raises(CharacterError, match="Short by 5cp"):
+            characters.buy(s, "u1", item_id=ids["Torch"], quantity=1,
+                           pay_from="character", destination_location_id=held.id)
+        # nothing was taken by the failed attempt
+        assert characters.require_character(s, "u1").gold_cp == 5
+
+
+def test_buy_with_guild_coffers_into_guild_storage(dbsession):
+    with session_scope() as s:
+        _create(s, str_score=10)
+        ids = _priced(s)
+        cellar = _guild_loc(s)
+        get_or_create_coffer(s).balance_cp = 100
+        r = characters.buy(s, "u1", item_id=ids["Torch"], quantity=2,
+                           pay_from="guild", destination_location_id=cellar.id)
+        assert r.balance_cp == 80 and r.destination_name == "Cellar"
+        assert storage.find_catalog_stack(s, cellar.id, ids["Torch"]).quantity == 2
+        with pytest.raises(CharacterError, match="Coffer balance is 8sp.*Short by 1sp"):
+            characters.buy(s, "u1", item_id=ids["Torch"], quantity=9,
+                           pay_from="guild", destination_location_id=cellar.id)
+        with pytest.raises(CharacterError, match="can't go into guild"):
+            characters.buy(s, "u1", item_id=ids["Wand"], quantity=1,
+                           pay_from="guild", destination_location_id=cellar.id)
+
+
+def test_buy_checks_capacity_destination_and_price(dbsession):
+    with session_scope() as s:
+        _create(s, "u1", str_score=10)
+        _create(s, "u2", "Amy")
+        ids = _priced(s)
+        characters.set_gold(s, "u1", 10_000)
+        held = storage.held_location(s, "u1")
+        with pytest.raises(CharacterError, match="would need 11 more"):
+            characters.buy(s, "u1", item_id=ids["Torch"], quantity=11,
+                           pay_from="character", destination_location_id=held.id)
+        assert characters.require_character(s, "u1").gold_cp == 10_000
+        amys = storage.held_location(s, "u2")
+        with pytest.raises(CharacterError, match="your own"):
+            characters.buy(s, "u1", item_id=ids["Torch"], quantity=1,
+                           pay_from="character", destination_location_id=amys.id)
+        with pytest.raises(CharacterError, match="no price"):
+            characters.buy(s, "u1", item_id=ids["Free Thing"], quantity=1,
+                           pay_from="character", destination_location_id=held.id)
+        with pytest.raises(CharacterError, match="Quantity"):
+            characters.buy(s, "u1", item_id=ids["Torch"], quantity=0,
+                           pay_from="character", destination_location_id=held.id)
+        with pytest.raises(CharacterError, match="no longer exists"):
+            characters.buy(s, "u1", item_id=ids["Torch"], quantity=1,
+                           pay_from="character", destination_location_id=9999)

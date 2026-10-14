@@ -48,7 +48,9 @@ from shadowdark_bot.web.auth import (
 from shadowdark_bot.web.schemas import (
     CatalogItemOut,
     CharacterSheetOut,
+    BuyIn,
     CarryIn,
+    EditStackIn,
     CharacterSummaryOut,
     GiveIn,
     GiveTargetOut,
@@ -510,6 +512,39 @@ def create_app(
             characters.require_character(session, user.user_id)
             guild_service.return_borrow(session, entry_id, only_borrower=user.user_id)
         return _guild()
+
+    # ---------- edit a stack / buy from the catalog ----------
+
+    @app.patch("/api/character/items/{entry_id}")
+    def edit_item(entry_id: int, body: EditStackIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            role = _own_entry_role(session, user.user_id, entry_id)
+            characters.edit_stack(
+                session,
+                user.user_id,
+                role=role,
+                entry_id=entry_id,
+                quantity=body.quantity,
+                name=body.name,
+                slots_each=body.slots_each,
+                notes=body.notes,
+            )
+        return _my_sheet(user.user_id)
+
+    @app.post("/api/items/{item_id}/buy")
+    def buy_item(item_id: int, body: BuyIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            characters.buy(
+                session,
+                user.user_id,
+                item_id=item_id,
+                quantity=body.quantity,
+                pay_from=body.pay_from,
+                destination_location_id=body.destination_location_id,
+            )
+        return _my_sheet(user.user_id)
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"])
     def api_not_found(path: str) -> None:
