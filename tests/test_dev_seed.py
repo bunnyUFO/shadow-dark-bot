@@ -25,7 +25,8 @@ from shadowdark_bot.models import (
     PlayerCharacter,
     TreasuryEntry,
 )
-from shadowdark_bot.services import characters
+from shadowdark_bot.services import characters, creatures
+from shadowdark_bot.services import creatures as creatures_service
 from shadowdark_bot.services.characters import CharacterError
 from shadowdark_bot.spell_data import seed_spells
 from shadowdark_bot.web.app import create_app
@@ -90,6 +91,22 @@ def test_seed_content(seeded):
             if e.item_id == borrowed[0].item_id
         ]
         assert ring == ["Ring of Feather Falling"]
+
+
+def test_seed_creatures(seeded):
+    with session_scope() as s:
+        rows = {c.name: (c, n, last) for c, n, last in creatures.list_creatures(s)}
+        assert list(rows) == ["Cave crawler", "Goblin", "Pale thing in the well"]
+        goblin, n, last = rows["Goblin"]
+        assert n == 2 and last is not None
+        assert all(
+            getattr(goblin, f) is not None
+            for f in (*creatures_service.INT_FIELDS, "attacks", "movement", "alignment")
+        )
+        crawler = rows["Cave crawler"][0]
+        assert crawler.ac == 13 and crawler.hp is None and crawler.str_mod is None
+        unknown = rows["Pale thing in the well"][0]
+        assert unknown.level is None and unknown.ac is None and unknown.hp is None
 
 
 def _counts(s):
