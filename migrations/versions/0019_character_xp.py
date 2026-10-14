@@ -18,11 +18,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("player_characters") as batch_op:
-        batch_op.add_column(
-            sa.Column("xp", sa.Integer, nullable=False, server_default="0")
-        )
-        batch_op.create_check_constraint("ck_characters_xp_nonneg", "xp >= 0")
+    # A plain ADD COLUMN, not batch mode: a batch rebuild drops and recreates
+    # player_characters, which fails with foreign_keys=ON once other tables
+    # reference its rows. SQLite allows a named CHECK on an added column.
+    # Drop any temp table left by an earlier failed batch attempt first.
+    op.execute("DROP TABLE IF EXISTS _alembic_tmp_player_characters")
+    op.execute(
+        "ALTER TABLE player_characters ADD COLUMN xp INTEGER NOT NULL DEFAULT 0 "
+        "CONSTRAINT ck_characters_xp_nonneg CHECK (xp >= 0)"
+    )
 
 
 def downgrade() -> None:
