@@ -24,7 +24,12 @@ from shadowdark_bot.models import (
     Spell,
     TreasuryEntry,
 )
-from shadowdark_bot.rules import ABILITIES, ability_modifier, spellcasting_modifier
+from shadowdark_bot.rules import (
+    ABILITIES,
+    ability_modifier,
+    spellcasting_modifier,
+    xp_needed,
+)
 from shadowdark_bot.services import characters
 
 
@@ -121,6 +126,8 @@ class CharacterSheetOut(BaseModel):
     alignment: str | None
     background: str | None
     level: int
+    xp: int
+    xp_needed: int  # XP to reach the next level (level x 10)
     max_hp: int | None
     armor_class_base: int | None
     armor_class: int | None  # base + DEX modifier, as the bot shows it
@@ -269,10 +276,15 @@ class IdentityIn(BaseModel):
 class StatsIn(BaseModel):
     scores: list[int]  # STR DEX CON INT WIS CHA
     level: int
+    xp: int | None = None  # omitted = leave unchanged
     max_hp: int | None = None
     armor_class: int | None = None  # the base AC (sheet's armor_class_base)
     spell_ability: str | None = None
     spell_check_bonus: int = 0
+
+
+class XpIn(BaseModel):
+    add: int  # may be negative
 
 
 class SkillsIn(BaseModel):
@@ -430,6 +442,8 @@ def character_sheet(
         alignment=char.alignment,
         background=char.background,
         level=char.level,
+        xp=char.xp,
+        xp_needed=xp_needed(char.level),
         max_hp=char.max_hp,
         armor_class_base=char.armor_class,
         armor_class=armor_class,

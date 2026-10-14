@@ -76,6 +76,22 @@ function statTile(label, value, note, boosted = false) {
   );
 }
 
+// "XP 7 / 30" with a thin bar; a hint (not an automatic level-up) once full.
+function xpMeter(c) {
+  const need = c.xp_needed;
+  const pct = Math.max(0, Math.min(100, Math.round((c.xp / need) * 100)));
+  return h("div", { class: "xp" },
+    h("div", { class: "xp-line" },
+      h("span", { class: "xp-text" }, `XP ${c.xp} / ${need}`),
+      c.xp >= need ? h("span", { class: "xp-up" }, "Level up!") : null,
+    ),
+    h("div", {
+      class: "xp-bar", role: "progressbar", "aria-label": "XP to next level",
+      "aria-valuemin": "0", "aria-valuemax": String(need), "aria-valuenow": String(Math.min(c.xp, need)),
+    }, h("span", { style: `width:${pct}%` })),
+  );
+}
+
 // "Mage Armor =14, Haste +2": which active effects changed a stat.
 function sourceText(stat) {
   return stat.sources.map((s) => `${s.effect} ${s.change}`).join(", ");
@@ -113,6 +129,7 @@ function combatTab(c, opts) {
             )
           : null,
       ),
+      xpMeter(c),
     ),
     effectsCard(c, opts),
     card("abilities", "Abilities", { tools: tools("abilities") },

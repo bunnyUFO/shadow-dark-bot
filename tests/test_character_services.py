@@ -573,3 +573,21 @@ def test_buy_checks_capacity_destination_and_price(dbsession):
         with pytest.raises(CharacterError, match="no longer exists"):
             characters.buy(s, "u1", item_id=ids["Torch"], quantity=1,
                            pay_from="character", destination_location_id=9999)
+
+
+def test_add_xp_and_stats_xp(dbsession):
+    from shadowdark_bot.rules import xp_needed
+
+    with session_scope() as s:
+        _create(s)
+        assert characters.add_xp(s, "u1", 5).xp == 5
+        assert characters.add_xp(s, "u1", -2).xp == 3
+        with pytest.raises(CharacterError, match="below 0"):
+            characters.add_xp(s, "u1", -4)
+        base = dict(scores=[10] * 6, level=1, max_hp=None, armor_class=None,
+                    spell_ability=None)
+        assert characters.update_stats(s, "u1", **base).xp == 3
+        assert characters.update_stats(s, "u1", **base, xp=12).xp == 12
+        with pytest.raises(CharacterError, match="XP"):
+            characters.update_stats(s, "u1", **base, xp=-1)
+    assert [xp_needed(n) for n in (1, 3, 10)] == [10, 30, 100]

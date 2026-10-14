@@ -66,6 +66,7 @@ from shadowdark_bot.web.schemas import (
     SkillsIn,
     SpellOut,
     StatsIn,
+    XpIn,
     TakeIn,
     UserOut,
     catalog_item_out,
@@ -493,11 +494,18 @@ def create_app(
                 user.user_id,
                 scores=body.scores,
                 level=body.level,
+                xp=body.xp,
                 max_hp=body.max_hp,
                 armor_class=body.armor_class,
                 spell_ability=None if ability in ("", "none") else ability,
                 spell_check_bonus=body.spell_check_bonus,
             )
+        return _my_sheet(user.user_id)
+
+    @app.post("/api/character/xp")
+    def add_xp(body: XpIn, user: User) -> CharacterSheetOut:
+        with session_scope() as session:
+            characters.add_xp(session, user.user_id, body.add)
         return _my_sheet(user.user_id)
 
     @app.patch("/api/character/skills")

@@ -265,9 +265,10 @@ def update_stats(
     armor_class: int | None,
     spell_ability: str | None,
     spell_check_bonus: int = 0,
+    xp: int | None = None,
 ) -> PlayerCharacter:
     """Ability scores (STR DEX CON INT WIS CHA order), level, max HP, base AC,
-    and the spellcasting stat + talent bonus."""
+    and the spellcasting stat + talent bonus. `xp` None leaves XP unchanged."""
     try:
         _check_scores(scores)
     except ValueError as err:
@@ -276,6 +277,8 @@ def update_stats(
         raise CharacterError("Level must be a whole number ≥ 1.")
     if max_hp is not None and max_hp < 0:
         raise CharacterError("Max HP must be ≥ 0.")
+    if xp is not None and xp < 0:
+        raise CharacterError("XP must be ≥ 0.")
     if spell_ability is not None and spell_ability not in SPELL_ABILITIES:
         raise CharacterError("Spellcasting stat must be INT, WIS, or none.")
 
@@ -283,6 +286,8 @@ def update_stats(
     for (key, _), value in zip(ABILITIES, scores, strict=True):
         setattr(char, f"{key}_score", value)
     char.level = level
+    if xp is not None:
+        char.xp = xp
     char.max_hp = max_hp
     char.armor_class = armor_class
     char.spell_ability = spell_ability
@@ -291,6 +296,19 @@ def update_stats(
     session.flush()
     # STR drives held-inventory capacity — keep the held location in sync.
     storage.ensure_character_locations(session, char)
+    return char
+
+
+def add_xp(session: Session, user_id: str, delta: int) -> PlayerCharacter:
+    """Add (or, if negative, remove) XP. The total can't drop below 0; it is
+    never converted to a level automatically."""
+    char = require_character(session, user_id)
+    total = char.xp + delta
+    if total < 0:
+        raise CharacterError(f"XP can't go below 0 (you have {char.xp}).")
+    char.xp = total
+    touch(char)
+    session.flush()
     return char
 
 

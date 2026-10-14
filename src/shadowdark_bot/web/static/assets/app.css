@@ -233,6 +233,13 @@ button.primary:hover { filter: brightness(1.08); }
 .tile-value { font-family: var(--serif); font-size: 1.6rem; line-height: 1.2; }
 .tile-note { font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; }
 
+/* XP meter under the vitals tiles */
+.xp { margin-top: 10px; }
+.xp-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 0.85rem; color: var(--muted); }
+.xp-up { color: var(--torch); font-weight: 600; }
+.xp-bar { height: 5px; margin-top: 4px; border-radius: 3px; background: #101012; border: 1px solid var(--line); overflow: hidden; }
+.xp-bar span { display: block; height: 100%; background: var(--torch); }
+
 /* ---------- abilities ---------- */
 
 .abilities {
