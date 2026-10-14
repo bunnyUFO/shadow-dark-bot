@@ -36,7 +36,7 @@ from shadowdark_bot.models import (
     PlayerCharacter,
     Spell,
 )
-from shadowdark_bot.services import characters
+from shadowdark_bot.services import characters, guild as guild_service
 from shadowdark_bot.services.characters import CharacterError, CharacterNotFound
 from shadowdark_bot.web.auth import (
     SCOPES,
@@ -60,6 +60,7 @@ from shadowdark_bot.web.schemas import (
     SkillsIn,
     SpellOut,
     StatsIn,
+    TakeIn,
     UserOut,
     catalog_item_out,
     character_sheet,
@@ -478,6 +479,38 @@ def create_app(
             characters.set_proficiencies(session, user.user_id, body.proficiencies)
         return _my_sheet(user.user_id)
 
+    # ---------- guild actions ----------
+    # These return the refreshed GuildOut (same body as GET /api/guild).
+
+    @app.post("/api/guild/locations/{location_id}/items/{entry_id}/take")
+    def take_from_guild(
+        location_id: int, entry_id: int, body: TakeIn, user: User
+    ) -> GuildOut:
+        with session_scope() as session:
+            guild_service.take(
+                session,
+                user.user_id,
+                location_id=location_id,
+                entry_id=entry_id,
+                quantity=body.quantity,
+                role=body.to,
+            )
+        return _guild()
+
+    @app.post("/api/guild/treasury/{entry_id}/borrow")
+    def borrow_treasury(entry_id: int, user: User) -> GuildOut:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            guild_service.borrow(session, entry_id, user.user_id)
+        return _guild()
+
+    @app.post("/api/guild/treasury/{entry_id}/return")
+    def return_treasury(entry_id: int, user: User) -> GuildOut:
+        with session_scope() as session:
+            characters.require_character(session, user.user_id)
+            guild_service.return_borrow(session, entry_id, only_borrower=user.user_id)
+        return _guild()
+
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"])
     def api_not_found(path: str) -> None:
         raise HTTPException(status_code=404, detail="Not found.")
@@ -502,6 +535,12 @@ def _my_sheet(user_id: str) -> CharacterSheetOut:
     with session_scope() as session:
         char = characters.require_character(session, user_id)
         return character_sheet(session, char, include_stash=True)
+
+
+def _guild() -> GuildOut:
+    """The guild overview in a fresh session, after a guild action committed."""
+    with session_scope() as session:
+        return guild_overview(session)
 
 
 def _own_entry_role(session, user_id: str, entry_id: int) -> str:

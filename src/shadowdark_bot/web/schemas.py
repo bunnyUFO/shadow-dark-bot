@@ -188,6 +188,11 @@ class GiveIn(BaseModel):
     quantity: int | None = None  # None = the whole stack
 
 
+class TakeIn(BaseModel):
+    quantity: int | None = None  # None = the whole stack
+    to: Literal["held", "stash"] = "held"
+
+
 class LearnSpellIn(BaseModel):
     spell_id: int
 
