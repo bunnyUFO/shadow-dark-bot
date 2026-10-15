@@ -1,0 +1,30 @@
+# Deploys main to the bot's LXC on Bunnylink (CT 200) through the self-hosted
+# runner there (scripts/install-runner.sh): backup, rebuild, roll back if the bot
+# doesn't come up (scripts/deploy.sh).
+#
+# The repo is public, so this must never run for a pull request: it triggers only
+# on pushes to main (which only the owner can make, see the "Protect main"
+# ruleset) and on a manual run, and the job re-checks the branch. The runner can
+# only call the installed deploy command, which accepts commits on origin/main.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-bunnylink
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'bunnyUFO/shadow-dark-bot' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, bunnylink, shadow-dark-bot]
+    timeout-minutes: 20
+    steps:
+      - name: Deploy ${{ github.sha }}
+        run: sudo -n /usr/local/sbin/shadowdark-deploy "$GITHUB_SHA"

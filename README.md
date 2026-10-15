@@ -34,7 +34,9 @@ shadow-dark-bot/
 │
 ├── scripts/                      ← one-shot helpers for Proxmox deploy
 │   ├── install-proxmox.sh        ← host-side LXC installer (curl-pipe-bash from README)
-│   └── update-bot.sh             ← host-side `git pull && docker compose up -d --build` wrapper
+│   ├── install-runner.sh         ← host-side: the GitHub Actions runner that deploys main
+│   ├── deploy.sh                 ← in the LXC: backup, rebuild, roll back if the bot doesn't start
+│   └── update-bot.sh             ← host-side manual deploy (same steps as deploy.sh)
 │
 ├── alembic.ini                   ← config for Alembic, the database-migrations tool
 ├── migrations/                   ← every schema change ever, in version-controlled order
@@ -116,7 +118,7 @@ shadow-dark-bot/
 | **Read what a command does** | `docs/commands.md` |
 | **Run the bot locally** | See "Quick start (local dev)" below |
 | **Deploy to Proxmox** | See "Deploy on Proxmox" below + `docs/deploy-proxmox.md` for full details |
-| **Update a deployed bot** | `bash <(curl -fsSL …/scripts/update-bot.sh)` on the Proxmox host |
+| **Update a deployed bot** | Merge to `main`: the Deploy workflow ships it. By hand: `scripts/update-bot.sh` on the Proxmox host |
 
 ### Background concepts (if you're newer to Python/Discord)
 
@@ -174,7 +176,27 @@ bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/mai
 
 Creates an unprivileged Debian 12 LXC, installs Docker inside, clones this repo, writes `.env` with the bot token (prompted securely), and starts the bot. Default specs: 1 vCPU / 512 MB RAM / 4 GB disk / DHCP on `vmbr0`; everything overridable via env vars. Container auto-starts on Proxmox boot. Extra overrides: `HWADDR` (keep the MAC) and `WEB_PORT`.
 
-Update later with:
+### Automatic deploys
+
+Every push to `main` deploys itself through `.github/workflows/deploy.yml`, on a self-hosted
+GitHub Actions runner inside the LXC. Each deploy backs up the database to `data/backups/`
+(the newest 10 are kept), rebuilds, and waits for the bot to log in. If it doesn't come up, it
+puts the previous commit and the backup back.
+
+Set the runner up once, on the Proxmox host as `root`, from a checkout of this repo:
+
+```bash
+gh api -X POST repos/bunnyUFO/shadow-dark-bot/actions/runners/registration-token --jq .token
+RUNNER_TOKEN=<token> bash scripts/install-runner.sh
+```
+
+The repo is public, so the runner is locked down: it runs as `gh-runner`, which is not in the
+`docker` group and may only run the installed deploy command (`sudo shadowdark-deploy <sha>`),
+which accepts commits on `origin/main` and nothing else. The workflow triggers only on pushes to
+`main` and manual runs, never on pull requests. After changing `scripts/deploy.sh`, re-run
+`install-runner.sh` (no token needed) to install the new copy.
+
+Deploy by hand (same steps, from the Proxmox host):
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/main/scripts/update-bot.sh)
