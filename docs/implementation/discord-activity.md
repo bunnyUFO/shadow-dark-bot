@@ -149,10 +149,10 @@ Follows the existing homelab pattern (see `proxmox-bunnylink/reverse-proxy.md`):
 
 | Step | Detail |
 |---|---|
-| Static IP for CT 200 | Proposed `192.168.1.34`, set in `/etc/pve/lxc/200.conf` (keep `hwaddr`) — it is currently a plain DHCP lease (`.151`) |
+| Static IP for CT 200 | ✅ `192.168.1.36`, set in `/etc/pve/lxc/200.conf` (keep `hwaddr`) |
 | DNS | Route 53 `shadowdark.bunnyufo.net` → **CNAME `home.bunnyufo.net`**, so a home-IP change is one record |
 | Certificate | NPM Let's Encrypt via Route 53 DNS-01; good moment to switch to the planned wildcard `*.bunnyufo.net` |
-| NPM proxy host | `shadowdark.bunnyufo.net` → `http://192.168.1.34:8080`, Force SSL, Websockets on, no frame-blocking headers |
+| NPM proxy host | `shadowdark.bunnyufo.net` → `http://192.168.1.36:8080`, Force SSL, Websockets on, no frame-blocking headers |
 | Compose | Publish `8080:8080`; uvicorn `--proxy-headers --forwarded-allow-ips=192.168.1.11` |
 | Firewall (optional) | Proxmox firewall on CT 200: allow 8080 only from `192.168.1.11` |
 | Resources | Runtime fits 512 MB; an in-image Node build may OOM → bump CT 200 to 1 GB **or** build the frontend in GitHub Actions |
@@ -182,7 +182,10 @@ Order changed (2026-10-03): build and iterate on the **local** app first, then d
 4. **Iterate on the UI** from feedback on the local app.
 5. **Editing** — write endpoints + edit forms (identity, stats, gold, skills, items, spells, give).
 6. **Public hosting** — static IP, DNS, cert, NPM host → port 8080, OAuth settings. Sheet live at `shadowdark.bunnyufo.net`.
-7. **Activity** — enable in the portal, URL mapping, SDK login path (vendor the SDK as one ES module; no build step), App Testers invited.
+7. ✅ **Activity** — enable in the portal, URL mapping, App Testers invited. SDK login in
+   `web/static/assets/activity.js`: launched with `?frame_id=…`, the page signs in on its own
+   through `authorize()` and `/api/auth/exchange` (`flow: "activity"`). The SDK is vendored as
+   one ES module (`assets/vendor/discord-sdk.js`, rebuilt by `scripts/vendor-discord-sdk.sh`).
 8. **Bot integration** — "Open full sheet" button using `interaction.response.launch_activity()`
    (requires bumping `discord.py` to **≥ 2.6**; `pyproject.toml` currently allows 2.4).
 

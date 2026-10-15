@@ -491,6 +491,10 @@ def test_frontend_is_served_for_non_api_paths(dbsession):
     js = client.get("/assets/app.js")
     assert js.status_code == 200 and "javascript" in js.headers["content-type"]
     assert client.get("/assets/nope.js").status_code == 404
+    # the Activity login's vendored SDK (one ES module, no build step)
+    sdk = client.get("/assets/vendor/discord-sdk.js")
+    assert sdk.status_code == 200 and "javascript" in sdk.headers["content-type"]
+    assert "DiscordSDK" in sdk.text
     # unknown API paths stay JSON 404s instead of falling through to the page
     resp = client.get("/api/nope")
     assert resp.status_code == 404 and resp.json() == {"detail": "Not found."}

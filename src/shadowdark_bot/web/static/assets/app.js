@@ -12,7 +12,9 @@
 //   #/effects[/<id>]        -> the effects library (reached from Spells, Items,
 //                              Creatures and the sheet's Effects card)
 //   /auth/callback?code=…   -> Discord redirect login lands here
+//   ?frame_id=…             -> launched as a Discord Activity: log in via the SDK
 
+import { activityCode, inActivity } from "./activity.js";
 import { api, ApiError, getToken, setToken } from "./api.js";
 import { h, mount } from "./dom.js";
 import { renderCreature, renderCreatures } from "./creatures.js";
@@ -60,7 +62,8 @@ window.addEventListener("hashchange", () => route().catch(showError));
 async function route() {
   if (!getToken()) {
     renderNav();
-    return config.mode === "local" ? renderPicker() : renderDiscordLogin();
+    if (config.mode === "local") return renderPicker();
+    return inActivity ? startActivityLogin() : renderDiscordLogin();
   }
   try {
     me = me ?? (await api("/me"));
@@ -107,7 +110,8 @@ function renderNav(active) {
   const switchLabel = config.mode === "local" ? "Switch" : "Log out";
   mount(topnav,
     h("span", { class: "sections" }, links()),
-    h("button", { type: "button", class: "link", onclick: signOut }, switchLabel),
+    // Inside Discord you're always yourself: logging out would just log you back in.
+    inActivity ? null : h("button", { type: "button", class: "link", onclick: signOut }, switchLabel),
   );
   mount(bottomnav, links(true));
 }
@@ -181,6 +185,32 @@ function startDiscordLogin() {
     prompt: "none",
   });
   location.assign(`https://discord.com/oauth2/authorize?${params}`);
+}
+
+// Inside Discord: no redirect, the SDK hands us a code. Starts on its own; a
+// failure (e.g. the user declined Discord's consent dialog) offers a retry.
+async function startActivityLogin() {
+  mount(app, h("p", { class: "loading" }, "Signing in through Discord…"));
+  try {
+    const code = await activityCode(config);
+    const session = await api("/auth/exchange", {
+      method: "POST",
+      body: { code, flow: "activity" },
+    });
+    setToken(session.token);
+    me = null;
+    await route();
+  } catch (err) {
+    console.error(err);
+    mount(app,
+      h("section", { class: "intro" },
+        h("h1", {}, "Shadowdark character sheet"),
+        h("p", { class: "muted" }, err?.message ?? String(err)),
+        h("button", { type: "button", class: "primary", onclick: () => startActivityLogin() },
+          "Try again"),
+      ),
+    );
+  }
 }
 
 async function finishDiscordLogin() {
