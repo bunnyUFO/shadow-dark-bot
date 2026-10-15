@@ -5,7 +5,8 @@
 # The repo is public, so this must never run for a pull request: it triggers only
 # on pushes to main (which only the owner can make, see the "Protect main"
 # ruleset) and on a manual run, and the job re-checks the branch. The runner can
-# only call the installed deploy command, which accepts commits on origin/main.
+# only call the installed deploy command (scripts/deploy-entry.sh), which accepts
+# commits on origin/main and runs that commit's scripts/deploy.sh.
 name: Deploy
 
 on:

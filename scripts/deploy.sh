@@ -10,10 +10,10 @@
 # 4. After a good deploy, prunes unused images and trims the build cache to 1 GB
 #    (every rebuild leaves cache behind; it filled the 4 GB disk once).
 #
-# The GitHub Actions runner calls an installed, root-owned copy of this script
-# (/usr/local/sbin/shadowdark-deploy, see scripts/install-runner.sh) through sudo,
-# so a workflow can deploy a commit of main and do nothing else. Only commits
-# already on origin/main are accepted.
+# The GitHub Actions runner reaches this through sudo and the installed
+# /usr/local/sbin/shadowdark-deploy (scripts/deploy-entry.sh), which runs the
+# deployed commit's own copy of this file. Only commits on origin/main are
+# accepted, by both.
 
 set -euo pipefail
 
