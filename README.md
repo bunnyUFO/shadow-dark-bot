@@ -36,6 +36,7 @@ shadow-dark-bot/
 │   ├── install-proxmox.sh        ← host-side LXC installer (curl-pipe-bash from README)
 │   ├── install-runner.sh         ← host-side: the GitHub Actions runner that deploys main
 │   ├── deploy.sh                 ← in the LXC: backup, rebuild, roll back if the bot doesn't start
+│   ├── deploy-entry.sh           ← the runner's one root command: checks the commit, runs its deploy.sh
 │   └── update-bot.sh             ← host-side manual deploy (same steps as deploy.sh)
 │
 ├── alembic.ini                   ← config for Alembic, the database-migrations tool
@@ -192,9 +193,10 @@ RUNNER_TOKEN=<token> bash scripts/install-runner.sh
 
 The repo is public, so the runner is locked down: it runs as `gh-runner`, which is not in the
 `docker` group and may only run the installed deploy command (`sudo shadowdark-deploy <sha>`),
-which accepts commits on `origin/main` and nothing else. The workflow triggers only on pushes to
-`main` and manual runs, never on pull requests. After changing `scripts/deploy.sh`, re-run
-`install-runner.sh` (no token needed) to install the new copy.
+which accepts commits on `origin/main` and nothing else, then runs that commit's own
+`scripts/deploy.sh`. The workflow triggers only on pushes to `main` and manual runs, never on pull
+requests. Changes to `deploy.sh` ship like any other change; re-run `install-runner.sh` (no token
+needed) only after changing `scripts/deploy-entry.sh`.
 
 Deploy by hand (same steps, from the Proxmox host):
 

@@ -7,11 +7,13 @@
 # 2. Checks out the commit and rebuilds the container; migrations run on startup.
 # 3. Waits for the bot to log in. If it doesn't, puts the previous commit and the
 #    backup back and rebuilds that, so a bad migration can't leave the bot down.
+# 4. After a good deploy, prunes unused images and trims the build cache to 1 GB
+#    (every rebuild leaves cache behind; it filled the 4 GB disk once).
 #
-# The GitHub Actions runner calls an installed, root-owned copy of this script
-# (/usr/local/sbin/shadowdark-deploy, see scripts/install-runner.sh) through sudo,
-# so a workflow can deploy a commit of main and do nothing else. Only commits
-# already on origin/main are accepted.
+# The GitHub Actions runner reaches this through sudo and the installed
+# /usr/local/sbin/shadowdark-deploy (scripts/deploy-entry.sh), which runs the
+# deployed commit's own copy of this file. Only commits on origin/main are
+# accepted, by both.
 
 set -euo pipefail
 
@@ -45,9 +47,13 @@ bot_running() { [ -n "$(docker compose ps --status running -q bot 2>/dev/null)" 
 # Waits until the container started at $1 (a date) logs in. Fails if it never
 # does, e.g. a migration crashes and the container keeps restarting.
 wait_ready() {
-  local since="$1" deadline=$((SECONDS + READY_TIMEOUT))
+  local since="$1" deadline=$((SECONDS + READY_TIMEOUT)) logs
   while [ $SECONDS -lt $deadline ]; do
-    if docker compose logs --since "$since" bot 2>/dev/null | grep -q "$READY_LINE"; then
+    # Read the logs whole, then search: piping into `grep -q` stops reading at the
+    # first match, and with pipefail the cut-off `docker compose logs` fails the
+    # test, so a bot that did log in could be rolled back.
+    logs="$(docker compose logs --since "$since" bot 2>/dev/null || true)"
+    if grep -qF "$READY_LINE" <<<"$logs"; then
       sleep 10  # still up a moment later, not a crash loop
       bot_running && return 0
     fi
@@ -85,6 +91,13 @@ docker compose up -d --build
 step "Waiting for the bot to log in (up to ${READY_TIMEOUT}s)"
 if wait_ready "$STARTED"; then
   docker compose logs --since "$STARTED" bot | tail -n 15
+  # Only after a good deploy (a failed one keeps everything for the rollback):
+  # drop unused images, and trim the build cache to the newest 1 GB so the next
+  # build still reuses the installed-packages layer.
+  step "Cleaning up Docker"
+  docker image prune -f >/dev/null
+  docker builder prune -f --max-used-space 1GB | tail -n 1
+  df -h / | tail -n 1
   echo
   echo "Deployed ${SHA:0:7}."
   exit 0

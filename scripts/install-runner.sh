@@ -4,8 +4,9 @@
 # Run as root on the Proxmox host, once. It sets up, inside the bot's LXC:
 #   - the official actions/runner, as user gh-runner, registered to this repo with
 #     the labels bunnylink,shadow-dark-bot and run as a systemd service;
-#   - /usr/local/sbin/shadowdark-deploy, a root-owned copy of scripts/deploy.sh,
-#     and a sudo rule letting gh-runner run that one command and nothing else.
+#   - /usr/local/sbin/shadowdark-deploy (scripts/deploy-entry.sh), root-owned,
+#     and a sudo rule letting gh-runner run that one command and nothing else. It
+#     takes a commit on origin/main and runs that commit's scripts/deploy.sh.
 #
 # gh-runner is deliberately NOT in the docker group (that would be root in all
 # but name). The repo is public, so the runner can deploy a commit of main and
@@ -15,8 +16,9 @@
 #   gh api -X POST repos/bunnyUFO/shadow-dark-bot/actions/runners/registration-token --jq .token
 #   RUNNER_TOKEN=<token> bash scripts/install-runner.sh
 #
-# Re-run it to update the installed deploy script after scripts/deploy.sh changes
-# (RUNNER_TOKEN is then only needed if the runner isn't registered yet).
+# Changes to scripts/deploy.sh need nothing: each deploy runs the deployed
+# commit's copy. Re-run this only after changing scripts/deploy-entry.sh or this
+# file (RUNNER_TOKEN is only needed if the runner isn't registered yet).
 
 set -euo pipefail
 
@@ -43,7 +45,9 @@ in_ct "command -v sudo >/dev/null || (apt-get update -qq && apt-get install -y -
 in_ct "id gh-runner >/dev/null 2>&1 || useradd --system --create-home --home-dir $RUNNER_DIR --shell /bin/bash gh-runner"
 
 step "Deploy command and its sudo rule"
-in_ct "install -o root -g root -m 0755 $REPO_DIR/scripts/deploy.sh /usr/local/sbin/shadowdark-deploy"
+# Main's copy, not the checkout's: the checkout is whatever was last deployed.
+in_ct "cd $REPO_DIR && git fetch -q origin main && git show origin/main:scripts/deploy-entry.sh > /tmp/shadowdark-deploy \
+  && install -o root -g root -m 0755 /tmp/shadowdark-deploy /usr/local/sbin/shadowdark-deploy && rm /tmp/shadowdark-deploy"
 in_ct "printf '%s\n' 'gh-runner ALL=(root) NOPASSWD: /usr/local/sbin/shadowdark-deploy' > /etc/sudoers.d/shadowdark-deploy \
   && chmod 0440 /etc/sudoers.d/shadowdark-deploy && visudo -cf /etc/sudoers.d/shadowdark-deploy"
 
@@ -56,7 +60,7 @@ else
   in_ct "cd $RUNNER_DIR && curl -fsSLo $TARBALL https://github.com/actions/runner/releases/download/v$RUNNER_VERSION/$TARBALL \
     && echo '$RUNNER_SHA256  $TARBALL' | sha256sum -c - \
     && tar xzf $TARBALL && rm $TARBALL && chown -R gh-runner:gh-runner $RUNNER_DIR \
-    && ./bin/installdependencies.sh >/dev/null"
+    && ./bin/installdependencies.sh >/dev/null && apt-get clean"
 
   step "Registering $RUNNER_NAME to $REPO_URL"
   # The token goes in on stdin, so it stays out of the host's process list and shell history.
