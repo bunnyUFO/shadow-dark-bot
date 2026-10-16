@@ -14,6 +14,10 @@
   --radius: 10px;
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Notch / home-bar insets. Inside a mobile Discord Activity the page is in an
+     iframe, where env() reads 0; Discord supplies its own inset variables. */
+  --safe-top: var(--discord-safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-bottom: var(--discord-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
   color-scheme: dark;
 }
 
@@ -49,7 +53,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   justify-content: space-between;
   gap: 12px;
   padding: 10px 16px;
-  padding-top: max(10px, env(safe-area-inset-top));
+  padding-top: max(10px, var(--safe-top));
   background: rgba(12, 12, 13, 0.92);
   backdrop-filter: blur(6px);
   border-bottom: 1px solid var(--line);
@@ -82,7 +86,7 @@ main {
   max-width: 760px;
   margin: 0 auto;
   padding: 16px;
-  padding-bottom: max(32px, env(safe-area-inset-bottom));
+  padding-bottom: max(32px, var(--safe-bottom));
   min-width: 0;
 }
 
@@ -381,7 +385,7 @@ button.primary:hover { filter: brightness(1.08); }
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr); /* any number of sections share the width */
   padding: 4px;
-  padding-bottom: max(4px, env(safe-area-inset-bottom));
+  padding-bottom: max(4px, var(--safe-bottom));
   background: var(--panel);
   border-top: 1px solid var(--line);
 }
@@ -398,7 +402,7 @@ button.primary:hover { filter: brightness(1.08); }
 }
 .bottomnav .ico { display: block; font-size: 1.15rem; line-height: 1.2; }
 body.signed-in .bottomnav { display: grid; }
-body.signed-in main { padding-bottom: calc(60px + env(safe-area-inset-bottom) + 16px); }
+body.signed-in main { padding-bottom: calc(60px + var(--safe-bottom) + 16px); }
 
 @media (min-width: 720px) {
   .topnav .sections { display: flex; }
