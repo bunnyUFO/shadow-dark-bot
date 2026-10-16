@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 import logging
 import secrets
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import discord
 import uvicorn
@@ -29,36 +29,67 @@ READY_TIMEOUT_SECONDS = 15
 LOCAL_SESSION_TTL_SECONDS = 30 * 24 * 3600  # it's your own network; stay picked
 
 
-def bot_membership_check(bot: discord.Client, guild_ids: set[int]) -> MembershipCheck:
-    """A MembershipCheck backed by the bot: is the user in any allowed guild?
+async def _allowed_members(
+    bot: discord.Client, guild_ids: set[int], user_id: str
+) -> AsyncIterator[discord.Member]:
+    """The user as a member of each allowed guild they're in.
 
     The bot has no members intent, so the member cache is mostly empty; fall
     back to a REST lookup, which works for any guild the bot is in. Guilds the
-    bot isn't in can't grant access."""
-
-    async def is_allowed_member(user_id: str) -> bool:
-        try:
-            await asyncio.wait_for(bot.wait_until_ready(), READY_TIMEOUT_SECONDS)
-        except TimeoutError:
-            log.warning("Login attempted before the bot was ready; denying.")
-            return False
-        uid = int(user_id)
-        for gid in guild_ids:
-            guild = bot.get_guild(gid)
-            if guild is None:
-                continue
-            if guild.get_member(uid) is not None:
-                return True
+    bot isn't in yield nothing."""
+    uid = int(user_id)
+    for gid in guild_ids:
+        guild = bot.get_guild(gid)
+        if guild is None:
+            continue
+        member = guild.get_member(uid)
+        if member is None:
             try:
-                await guild.fetch_member(uid)
-                return True
+                member = await guild.fetch_member(uid)
             except discord.NotFound:
                 continue
             except discord.HTTPException:
-                log.exception("Membership lookup failed for guild %s", gid)
+                log.exception("Member lookup failed for guild %s", gid)
+                continue
+        yield member
+
+
+async def _bot_ready(bot: discord.Client) -> bool:
+    try:
+        await asyncio.wait_for(bot.wait_until_ready(), READY_TIMEOUT_SECONDS)
+    except TimeoutError:
+        log.warning("Login attempted before the bot was ready; denying.")
+        return False
+    return True
+
+
+def bot_membership_check(bot: discord.Client, guild_ids: set[int]) -> MembershipCheck:
+    """A MembershipCheck backed by the bot: is the user in any allowed guild?"""
+
+    async def is_allowed_member(user_id: str) -> bool:
+        if not await _bot_ready(bot):
+            return False
+        async for _ in _allowed_members(bot, guild_ids, user_id):
+            return True
         return False
 
     return is_allowed_member
+
+
+def bot_dm_role_check(
+    bot: discord.Client, guild_ids: set[int], role_ids: set[int]
+) -> MembershipCheck:
+    """Does the user hold a Dungeon Master role in any allowed guild?"""
+
+    async def has_dm_role(user_id: str) -> bool:
+        if not await _bot_ready(bot):
+            return False
+        async for member in _allowed_members(bot, guild_ids, user_id):
+            if {role.id for role in member.roles} & role_ids:
+                return True
+        return False
+
+    return has_dm_role
 
 
 def bot_name_resolver(bot: discord.Client, guild_ids: set[int]) -> NameResolver:
@@ -94,10 +125,16 @@ def build_public_app(bot: discord.Client, settings: Settings) -> FastAPI:
         is_allowed_member=bot_membership_check(bot, settings.allowed_guild_ids),
         public_base_url=settings.PUBLIC_BASE_URL,
         resolve_name=bot_name_resolver(bot, settings.allowed_guild_ids),
+        dm_user_ids=settings.dm_user_ids,
+        has_dm_role=(
+            bot_dm_role_check(bot, settings.allowed_guild_ids, settings.dm_role_ids)
+            if settings.dm_role_ids
+            else None
+        ),
     )
 
 
-def build_local_app() -> FastAPI:
+def build_local_app(dm_user_ids: frozenset[str] = frozenset()) -> FastAPI:
     # A fresh random key every start, never SESSION_SECRET: local sessions are
     # handed out without a login, so they must never be valid anywhere else.
     # (Restarting the bot just means picking your character again.)
@@ -108,6 +145,7 @@ def build_local_app() -> FastAPI:
             ttl_seconds=LOCAL_SESSION_TTL_SECONDS,
             purpose="local",
         ),
+        dm_user_ids=dm_user_ids,
     )
 
 
@@ -157,7 +195,7 @@ class WebServer:
     @classmethod
     def local(cls, settings: Settings) -> "WebServer":
         return cls(
-            build_local_app(),
+            build_local_app(settings.dm_user_ids),
             name="local",
             host=settings.LOCAL_WEB_HOST,
             port=settings.LOCAL_WEB_PORT,

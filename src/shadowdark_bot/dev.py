@@ -43,6 +43,13 @@ def main() -> None:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8081)
+    parser.add_argument(
+        "--dm",
+        action="append",
+        default=[],
+        metavar="USER_ID",
+        help="make this user a Dungeon Master (repeatable), e.g. 900000000000000001",
+    )
     args = parser.parse_args()
 
     # Unconditional: must beat .env and the shell, and a real token never loads.
@@ -77,8 +84,10 @@ def main() -> None:
             "and proxied requests.",
             args.host,
         )
+    if args.dm:
+        log.info("Dungeon Masters: %s", ", ".join(args.dm))
     uvicorn.run(
-        build_local_app(),
+        build_local_app(frozenset(args.dm)),
         host=args.host,
         port=args.port,
         proxy_headers=False,

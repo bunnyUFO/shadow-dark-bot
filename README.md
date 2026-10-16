@@ -164,6 +164,7 @@ The seed has three characters (Brannoc Ashfall the fighter, Ysolde Vane the wiza
 
 - Without `--reset`, your edits are kept between runs; `--reset` deletes the dev database and rebuilds it from scratch.
 - `--host 0.0.0.0` lets a phone on the LAN open the sheet (`--port` changes 8081).
+- `--dm 900000000000000001` makes Brannoc a Dungeon Master, who can edit everyone's sheet from **Party** (repeat `--dm` for more).
 - It uses `data/dev.db` only, never the bot's database, and never reads the bot token from `.env`.
 - `python -m pytest` runs the tests.
 
@@ -217,6 +218,15 @@ LOCAL_WEB_ENABLED=true
 then restart (`docker compose up -d`, or the update script). Open `http://<bot container IP>:8081` from any device on the network. Besides each character's sheet it has **Party**, **Guild** (coffers, storage locations, the magic item treasury and who has what), **Items** (the catalog) and **Spells** (the reference) sections. It's read-only for now; editing and the in-Discord Activity are planned — see [the plan](docs/implementation/discord-activity.md).
 
 The local sheet only answers private-network addresses and refuses anything that comes through a reverse proxy, so don't put it behind Nginx Proxy Manager.
+
+**Dungeon Masters** can edit every character's sheet (open someone from **Party**); everyone else edits only their own. List them in `.env` by Discord user ID, and on the public app you can also use a Discord role:
+
+```bash
+DM_USER_IDS=123456789012345678
+DM_ROLE_IDS=234567890123456789
+```
+
+A change takes effect at the DM's next login. See [the plan](docs/implementation/discord-activity.md#web-api) for details.
 
 ### Public web sheet / Discord Activity
 

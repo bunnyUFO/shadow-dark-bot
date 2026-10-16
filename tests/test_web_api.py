@@ -171,6 +171,7 @@ def test_me_reports_whether_a_character_exists(api):
     token = login(api, "u1")["token"]
     assert api.get("/api/me", headers=auth(token)).json() == {
         "user_id": "u1", "display_name": "User u1", "has_character": False,
+        "is_dm": False,
     }
     assert api.get("/api/character", headers=auth(token)).status_code == 404
     with session_scope() as s:

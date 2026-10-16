@@ -34,9 +34,24 @@ class Settings(BaseSettings):
     # Reverse proxies trusted for X-Forwarded-For / -Proto (comma-separated IPs).
     FORWARDED_ALLOW_IPS: str = "127.0.0.1"
 
+    # --- Dungeon Masters: may edit every character's sheet in the web apps. ---
+    # Comma-separated Discord user IDs (local and public app).
+    DM_USER_IDS: str = ""
+    # Comma-separated Discord role IDs; members with one in an allowed guild
+    # are DMs (public app only — the local app has no Discord login).
+    DM_ROLE_IDS: str = ""
+
     @property
     def allowed_guild_ids(self) -> set[int]:
-        return {int(part) for part in self.ALLOWED_GUILD_IDS.replace(" ", "").split(",") if part}
+        return _numeric_ids(self.ALLOWED_GUILD_IDS)
+
+    @property
+    def dm_user_ids(self) -> frozenset[str]:
+        return frozenset(part for part in self.DM_USER_IDS.replace(" ", "").split(",") if part)
+
+    @property
+    def dm_role_ids(self) -> set[int]:
+        return _numeric_ids(self.DM_ROLE_IDS)
 
     def web_config_errors(self) -> list[str]:
         """Problems that stop the web apps from starting safely (empty if fine)."""
@@ -55,9 +70,18 @@ class Settings(BaseSettings):
                 errors.append("ALLOWED_GUILD_IDS is empty — nobody could log in")
         except ValueError:
             errors.append("ALLOWED_GUILD_IDS must be comma-separated numeric guild IDs")
+        try:
+            _numeric_ids(self.DM_ROLE_IDS)
+        except ValueError:
+            errors.append("DM_ROLE_IDS must be comma-separated numeric role IDs")
         if "*" in [ip.strip() for ip in self.FORWARDED_ALLOW_IPS.split(",")]:
             errors.append("FORWARDED_ALLOW_IPS must list the reverse proxy's IP, not *")
         return errors
+
+
+def _numeric_ids(value: str) -> set[int]:
+    """Comma-separated numeric IDs; ValueError on anything else."""
+    return {int(part) for part in value.replace(" ", "").split(",") if part}
 
 
 settings = Settings()
