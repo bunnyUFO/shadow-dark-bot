@@ -48,7 +48,8 @@ def main() -> None:
         action="append",
         default=[],
         metavar="USER_ID",
-        help="make this user a Dungeon Master (repeatable), e.g. 900000000000000001",
+        help="make this user a Dungeon Master (repeatable), e.g. 900000000000000001; "
+        "stands in for the DM_ROLE_IDS role check, which needs the bot",
     )
     args = parser.parse_args()
 
@@ -84,10 +85,15 @@ def main() -> None:
             "and proxied requests.",
             args.host,
         )
-    if args.dm:
-        log.info("Dungeon Masters: %s", ", ".join(args.dm))
+    dm_ids = set(args.dm)
+
+    async def has_dm_role(user_id: str) -> bool:
+        return user_id in dm_ids
+
+    if dm_ids:
+        log.info("Dungeon Masters: %s", ", ".join(sorted(dm_ids)))
     uvicorn.run(
-        build_local_app(frozenset(args.dm)),
+        build_local_app(has_dm_role if dm_ids else None),
         host=args.host,
         port=args.port,
         proxy_headers=False,

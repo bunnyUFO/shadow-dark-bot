@@ -1,4 +1,4 @@
-"""Dungeon Masters: DM_USER_IDS / DM_ROLE_IDS users may edit every sheet over
+"""Dungeon Masters: whoever holds a DM_ROLE_IDS role may edit every sheet over
 /api/characters/{user_id}/…; everyone else stays limited to their own."""
 
 import asyncio
@@ -12,21 +12,18 @@ from shadowdark_bot.services import characters
 from shadowdark_bot.web.app import DM_ONLY, create_app
 from shadowdark_bot.web.auth import SessionSigner
 
-ROLE_DM = "rdm"  # holds a DM role in Discord
-
 
 @pytest.fixture
 def dm_api(dbsession):
-    """Members u1 (Bob), u2 (Amy), dm (listed in DM_USER_IDS, no character)
-    and rdm (has a DM role)."""
+    """Members u1 (Bob), u2 (Amy) and dm (holds the DM role, no character)."""
     role_checks = []
 
     async def is_member(user_id):
-        return user_id in {"u1", "u2", "dm", ROLE_DM}
+        return user_id in {"u1", "u2", "dm"}
 
     async def has_dm_role(user_id):
         role_checks.append(user_id)
-        return user_id == ROLE_DM
+        return user_id == "dm"
 
     app = create_app(
         mode="discord",
@@ -35,7 +32,6 @@ def dm_api(dbsession):
         is_allowed_member=is_member,
         public_base_url=BASE + "/",
         static_dir=None,
-        dm_user_ids=frozenset({"dm"}),
         has_dm_role=has_dm_role,
     )
     client = TestClient(app)
@@ -76,7 +72,7 @@ def test_player_may_use_their_own_id(dm_api):
     assert r.status_code == 200 and r.json()["gold_cp"] == 200
 
 
-def test_dm_by_user_id_edits_any_sheet(dm_api):
+def test_dm_edits_any_sheet(dm_api):
     c, dm = dm_api, _as(dm_api, "dm")
     me = c.get("/api/me", headers=dm).json()
     assert me["is_dm"] is True and me["has_character"] is False
@@ -144,16 +140,22 @@ def test_dm_by_user_id_edits_any_sheet(dm_api):
     assert _stack(mine, "stash", "Arrow")["quantity"] == 10
 
 
-def test_dm_by_discord_role(dm_api):
-    dm = _as(dm_api, ROLE_DM)
-    assert dm_api.get("/api/me", headers=dm).json()["is_dm"] is True
+def test_dm_edits_a_second_character(dm_api):
+    dm = _as(dm_api, "dm")
     r = dm_api.patch("/api/characters/u2/gold", json={"gold": "3sp"}, headers=dm)
     assert r.status_code == 200 and r.json()["name"] == "Amy" and r.json()["gold_cp"] == 30
 
 
-def test_dm_listed_by_id_skips_the_role_lookup(dm_api):
-    _as(dm_api, "dm")
-    assert dm_api.role_checks == []
+def test_no_role_check_means_no_dms(dbsession):
+    async def is_member(user_id):
+        return True
+
+    app = create_app(
+        mode="discord", oauth=FakeOAuth(), signer=SessionSigner(SECRET, ttl_seconds=3600),
+        is_allowed_member=is_member, public_base_url=BASE + "/", static_dir=None,
+    )
+    c = TestClient(app)
+    assert c.get("/api/me", headers=_as(c, "dm")).json()["is_dm"] is False
 
 
 def test_dm_cannot_edit_a_character_that_does_not_exist(dm_api):
@@ -175,13 +177,18 @@ def test_only_a_signed_true_flag_makes_a_dm():
 
 
 def test_local_mode_dm(dbsession):
+    """The local app asks the same role check about the picked character's owner."""
     from shadowdark_bot.web.server import build_local_app
 
     with session_scope() as s:
         _seed(s)
         _make_bob(s)
         characters.save_identity(s, "u2", name="Amy")
-    c = TestClient(build_local_app(frozenset({"u2"})), client=LAN)
+
+    async def has_dm_role(user_id):
+        return user_id == "u2"
+
+    c = TestClient(build_local_app(has_dm_role), client=LAN)
     amy = auth(c.post("/api/auth/local", json={"user_id": "u2"}).json()["token"])
     bob = auth(c.post("/api/auth/local", json={"user_id": "u1"}).json()["token"])
     assert c.get("/api/me", headers=amy).json()["is_dm"] is True
@@ -206,8 +213,11 @@ class _Member:
 
 
 class _Guild:
-    def __init__(self, members):
-        self.members = members
+    def __init__(self, gid, role_ids, members):
+        self.id, self.role_ids, self.members, self.fetched = gid, set(role_ids), members, []
+
+    def get_role(self, role_id):
+        return _Role(role_id) if role_id in self.role_ids else None
 
     def get_member(self, uid):
         return None  # no members intent: always falls back to REST
@@ -219,42 +229,41 @@ class _Guild:
             status = 404
             reason = "Not Found"
 
+        self.fetched.append(uid)
         if uid not in self.members:
             raise discord.NotFound(_Resp(), "Unknown Member")
         return self.members[uid]
 
 
 class _Bot:
-    def __init__(self, guilds):
-        self.guilds = guilds
+    def __init__(self, *guilds):
+        self.guilds = list(guilds)
 
     async def wait_until_ready(self):
         return None
-
-    def get_guild(self, gid):
-        return self.guilds.get(gid)
 
 
 def test_bot_dm_role_check():
     from shadowdark_bot.web.server import bot_dm_role_check
 
-    allowed = _Guild({1: _Member(10, 77), 2: _Member(10), 3: _Member()})
-    other = _Guild({4: _Member(77)})
-    check = bot_dm_role_check(_Bot({100: allowed, 200: other}), {100}, {77})
-    assert asyncio.run(check("1")) is True  # has the DM role
+    table = _Guild(100, {10, 77}, {1: _Member(10, 77), 2: _Member(10), 3: _Member()})
+    other = _Guild(200, {55}, {1: _Member(55), 4: _Member(55)})
+    check = bot_dm_role_check(_Bot(table, other), {77})
+    assert asyncio.run(check("1")) is True  # holds the game master role
     assert asyncio.run(check("2")) is False  # other roles only
     assert asyncio.run(check("3")) is False
-    assert asyncio.run(check("4")) is False  # DM role, but in a guild that isn't allowed
-    assert asyncio.run(check("5")) is False  # not a member anywhere
+    assert asyncio.run(check("5")) is False  # not a member
+    assert other.fetched == []  # a guild without the role is never asked
 
 
 def test_dm_settings():
     from shadowdark_bot.config import Settings
 
-    s = Settings(DISCORD_TOKEN="t", DM_USER_IDS="111, 222,", DM_ROLE_IDS="10,20")
-    assert s.dm_user_ids == frozenset({"111", "222"})
-    assert s.dm_role_ids == {10, 20}
-    assert Settings(DISCORD_TOKEN="t").dm_user_ids == frozenset()
+    assert Settings(DISCORD_TOKEN="t", DM_ROLE_IDS="10, 20,").dm_role_ids == {10, 20}
+    assert Settings(DISCORD_TOKEN="t").dm_role_ids == set()
+    local = Settings(DISCORD_TOKEN="t", LOCAL_WEB_ENABLED=True, DM_ROLE_IDS="game master")
+    assert "DM_ROLE_IDS" in " ".join(local.web_config_errors())
+    assert Settings(DISCORD_TOKEN="t", DM_ROLE_IDS="x").web_config_errors() == []  # web off
     web = Settings(
         DISCORD_TOKEN="t", WEB_ENABLED=True, PUBLIC_BASE_URL=BASE, DISCORD_CLIENT_ID="1",
         DISCORD_CLIENT_SECRET="s", SESSION_SECRET=SECRET, ALLOWED_GUILD_IDS="1",

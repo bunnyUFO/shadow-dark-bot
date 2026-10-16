@@ -35,19 +35,13 @@ class Settings(BaseSettings):
     FORWARDED_ALLOW_IPS: str = "127.0.0.1"
 
     # --- Dungeon Masters: may edit every character's sheet in the web apps. ---
-    # Comma-separated Discord user IDs (local and public app).
-    DM_USER_IDS: str = ""
-    # Comma-separated Discord role IDs; members with one in an allowed guild
-    # are DMs (public app only — the local app has no Discord login).
+    # Comma-separated Discord role IDs; whoever holds one is a DM (local and
+    # public app, checked through the bot at login).
     DM_ROLE_IDS: str = ""
 
     @property
     def allowed_guild_ids(self) -> set[int]:
         return _numeric_ids(self.ALLOWED_GUILD_IDS)
-
-    @property
-    def dm_user_ids(self) -> frozenset[str]:
-        return frozenset(part for part in self.DM_USER_IDS.replace(" ", "").split(",") if part)
 
     @property
     def dm_role_ids(self) -> set[int]:
@@ -58,6 +52,11 @@ class Settings(BaseSettings):
         errors = []
         if self.LOCAL_WEB_ENABLED and self.WEB_ENABLED and self.LOCAL_WEB_PORT == self.WEB_PORT:
             errors.append("LOCAL_WEB_PORT and WEB_PORT must differ")
+        if self.LOCAL_WEB_ENABLED or self.WEB_ENABLED:
+            try:
+                _numeric_ids(self.DM_ROLE_IDS)
+            except ValueError:
+                errors.append("DM_ROLE_IDS must be comma-separated numeric role IDs")
         if not self.WEB_ENABLED:
             return errors
         for name in ("PUBLIC_BASE_URL", "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET"):
@@ -70,10 +69,6 @@ class Settings(BaseSettings):
                 errors.append("ALLOWED_GUILD_IDS is empty — nobody could log in")
         except ValueError:
             errors.append("ALLOWED_GUILD_IDS must be comma-separated numeric guild IDs")
-        try:
-            _numeric_ids(self.DM_ROLE_IDS)
-        except ValueError:
-            errors.append("DM_ROLE_IDS must be comma-separated numeric role IDs")
         if "*" in [ip.strip() for ip in self.FORWARDED_ALLOW_IPS.split(",")]:
             errors.append("FORWARDED_ALLOW_IPS must list the reverse proxy's IP, not *")
         return errors

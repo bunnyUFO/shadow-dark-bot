@@ -130,14 +130,17 @@ cookies are frequently blocked.
 
 **Dungeon Masters.** A DM can edit every character's sheet: in the web app, opening someone from
 **Party** shows their full sheet (stash included) with every edit tool, under an "Editing … as
-Dungeon Master" banner. Everyone else edits only their own character. Who is a DM:
+Dungeon Master" banner. Everyone else edits only their own character.
 
-- `DM_USER_IDS` — comma-separated Discord user IDs (local and public app).
-- `DM_ROLE_IDS` — comma-separated Discord role IDs; anyone holding one in an `ALLOWED_GUILD_IDS`
-  guild is a DM (public app only, checked by the bot at login like the allowlist).
+Who is a DM is decided by Discord role: `DM_ROLE_IDS` lists role IDs (Developer Mode → Server
+Settings → Roles → right-click the role → Copy Role ID), and anyone holding one is a DM. At login
+the bot looks the user up in the server each role belongs to (cache, then REST, like the
+allowlist). Both apps use it: the public app checks the Discord user who logged in, the local app
+the owner of the character that was picked. The dev runner has no bot, so `--dm USER_ID` stands in
+for the role there.
 
-DM status is baked into the session token at login, so granting or removing it takes effect at the
-DM's next login (at most `SESSION_TTL_HOURS` later; the local app keeps sessions until the bot
+DM status is baked into the session token at login, so giving or taking the role takes effect at
+the DM's next login (at most `SESSION_TTL_HOURS` later; the local app keeps sessions until the bot
 restarts). On the local app anyone on the network can pick the DM's character, the same trust
 boundary as picking any character. Slash commands are unchanged: `/character` still only edits your
 own.
@@ -185,7 +188,7 @@ Follows the existing homelab pattern (see `proxmox-bunnylink/reverse-proxy.md`):
 
 New `.env` keys (see `.env.example`): `WEB_ENABLED`, `WEB_PORT`, `PUBLIC_BASE_URL`,
 `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `SESSION_SECRET` (≥ 32 chars), `SESSION_TTL_HOURS`,
-`ALLOWED_GUILD_IDS`, `FORWARDED_ALLOW_IPS`, and optionally `DM_USER_IDS` / `DM_ROLE_IDS`. The web app is off by default; with
+`ALLOWED_GUILD_IDS`, `FORWARDED_ALLOW_IPS`, and optionally `DM_ROLE_IDS`. The web app is off by default; with
 `WEB_ENABLED=true` the bot refuses to start until the required ones are set.
 
 ## Phases

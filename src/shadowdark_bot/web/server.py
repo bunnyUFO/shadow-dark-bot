@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 import logging
 import secrets
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 
 import discord
 import uvicorn
@@ -29,29 +29,21 @@ READY_TIMEOUT_SECONDS = 15
 LOCAL_SESSION_TTL_SECONDS = 30 * 24 * 3600  # it's your own network; stay picked
 
 
-async def _allowed_members(
-    bot: discord.Client, guild_ids: set[int], user_id: str
-) -> AsyncIterator[discord.Member]:
-    """The user as a member of each allowed guild they're in.
+async def _find_member(guild: discord.Guild, uid: int) -> discord.Member | None:
+    """The user as a member of this guild, or None.
 
     The bot has no members intent, so the member cache is mostly empty; fall
-    back to a REST lookup, which works for any guild the bot is in. Guilds the
-    bot isn't in yield nothing."""
-    uid = int(user_id)
-    for gid in guild_ids:
-        guild = bot.get_guild(gid)
-        if guild is None:
-            continue
-        member = guild.get_member(uid)
-        if member is None:
-            try:
-                member = await guild.fetch_member(uid)
-            except discord.NotFound:
-                continue
-            except discord.HTTPException:
-                log.exception("Member lookup failed for guild %s", gid)
-                continue
-        yield member
+    back to a REST lookup, which works for any guild the bot is in."""
+    member = guild.get_member(uid)
+    if member is not None:
+        return member
+    try:
+        return await guild.fetch_member(uid)
+    except discord.NotFound:
+        return None
+    except discord.HTTPException:
+        log.exception("Member lookup failed for guild %s", guild.id)
+        return None
 
 
 async def _bot_ready(bot: discord.Client) -> bool:
@@ -64,32 +56,45 @@ async def _bot_ready(bot: discord.Client) -> bool:
 
 
 def bot_membership_check(bot: discord.Client, guild_ids: set[int]) -> MembershipCheck:
-    """A MembershipCheck backed by the bot: is the user in any allowed guild?"""
+    """A MembershipCheck backed by the bot: is the user in any allowed guild?
+    Guilds the bot isn't in can't grant access."""
 
     async def is_allowed_member(user_id: str) -> bool:
         if not await _bot_ready(bot):
             return False
-        async for _ in _allowed_members(bot, guild_ids, user_id):
-            return True
+        uid = int(user_id)
+        for gid in guild_ids:
+            guild = bot.get_guild(gid)
+            if guild is not None and await _find_member(guild, uid) is not None:
+                return True
         return False
 
     return is_allowed_member
 
 
-def bot_dm_role_check(
-    bot: discord.Client, guild_ids: set[int], role_ids: set[int]
-) -> MembershipCheck:
-    """Does the user hold a Dungeon Master role in any allowed guild?"""
+def bot_dm_role_check(bot: discord.Client, role_ids: set[int]) -> MembershipCheck:
+    """Does the user hold a Dungeon Master role? A role ID belongs to exactly
+    one guild, so only guilds the bot is in that have one of the roles are
+    asked — no ALLOWED_GUILD_IDS needed, which keeps it working for the local
+    app too."""
 
     async def has_dm_role(user_id: str) -> bool:
         if not await _bot_ready(bot):
             return False
-        async for member in _allowed_members(bot, guild_ids, user_id):
-            if {role.id for role in member.roles} & role_ids:
+        uid = int(user_id)
+        for guild in bot.guilds:
+            if not any(guild.get_role(rid) is not None for rid in role_ids):
+                continue
+            member = await _find_member(guild, uid)
+            if member is not None and {role.id for role in member.roles} & role_ids:
                 return True
         return False
 
     return has_dm_role
+
+
+def _dm_role_check(bot: discord.Client, settings: Settings) -> MembershipCheck | None:
+    return bot_dm_role_check(bot, settings.dm_role_ids) if settings.dm_role_ids else None
 
 
 def bot_name_resolver(bot: discord.Client, guild_ids: set[int]) -> NameResolver:
@@ -125,16 +130,11 @@ def build_public_app(bot: discord.Client, settings: Settings) -> FastAPI:
         is_allowed_member=bot_membership_check(bot, settings.allowed_guild_ids),
         public_base_url=settings.PUBLIC_BASE_URL,
         resolve_name=bot_name_resolver(bot, settings.allowed_guild_ids),
-        dm_user_ids=settings.dm_user_ids,
-        has_dm_role=(
-            bot_dm_role_check(bot, settings.allowed_guild_ids, settings.dm_role_ids)
-            if settings.dm_role_ids
-            else None
-        ),
+        has_dm_role=_dm_role_check(bot, settings),
     )
 
 
-def build_local_app(dm_user_ids: frozenset[str] = frozenset()) -> FastAPI:
+def build_local_app(has_dm_role: MembershipCheck | None = None) -> FastAPI:
     # A fresh random key every start, never SESSION_SECRET: local sessions are
     # handed out without a login, so they must never be valid anywhere else.
     # (Restarting the bot just means picking your character again.)
@@ -145,7 +145,7 @@ def build_local_app(dm_user_ids: frozenset[str] = frozenset()) -> FastAPI:
             ttl_seconds=LOCAL_SESSION_TTL_SECONDS,
             purpose="local",
         ),
-        dm_user_ids=dm_user_ids,
+        has_dm_role=has_dm_role,
     )
 
 
@@ -193,9 +193,9 @@ class WebServer:
         )
 
     @classmethod
-    def local(cls, settings: Settings) -> "WebServer":
+    def local(cls, bot: discord.Client, settings: Settings) -> "WebServer":
         return cls(
-            build_local_app(settings.dm_user_ids),
+            build_local_app(_dm_role_check(bot, settings)),
             name="local",
             host=settings.LOCAL_WEB_HOST,
             port=settings.LOCAL_WEB_PORT,

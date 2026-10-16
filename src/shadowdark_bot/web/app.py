@@ -22,6 +22,7 @@ from typing import Annotated, Literal
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -147,7 +148,6 @@ def create_app(
     public_base_url: str = "",
     static_dir: Path | None = STATIC_DIR,
     resolve_name: guild_service.NameResolver | None = None,
-    dm_user_ids: frozenset[str] = frozenset(),
     has_dm_role: MembershipCheck | None = None,
 ) -> FastAPI:
     if mode == "discord" and (oauth is None or is_allowed_member is None):
@@ -256,9 +256,7 @@ def create_app(
                 raise HTTPException(status_code=401, detail=str(err)) from err
             if not await is_allowed_member(discord_user.id):
                 raise HTTPException(status_code=403, detail=NOT_A_MEMBER)
-            is_dm = discord_user.id in dm_user_ids or (
-                has_dm_role is not None and await has_dm_role(discord_user.id)
-            )
+            is_dm = has_dm_role is not None and await has_dm_role(discord_user.id)
             return SessionOut(
                 token=signer.issue(
                     discord_user.id, discord_user.display_name, is_dm=is_dm
@@ -281,16 +279,14 @@ def create_app(
                 return _summaries(session)
 
         @app.post("/api/auth/local")
-        def local_login(body: LocalLoginIn) -> SessionOut:
+        async def local_login(body: LocalLoginIn) -> SessionOut:
             """Start a session as an existing character's owner — no password;
-            the home network is the trust boundary."""
-            with session_scope() as session:
-                char = characters.load_character(session, body.user_id)
-                if char is None:
-                    raise CharacterNotFound("No character with that id.")
-                name = char.name
+            the home network is the trust boundary. Async for the DM role
+            check (the bot's loop); the DB read goes to a worker thread."""
+            name = await run_in_threadpool(_character_name, body.user_id)
+            is_dm = has_dm_role is not None and await has_dm_role(body.user_id)
             return SessionOut(
-                token=signer.issue(body.user_id, name, is_dm=body.user_id in dm_user_ids),
+                token=signer.issue(body.user_id, name, is_dm=is_dm),
                 expires_in=signer.ttl_seconds,
                 user=UserOut(id=body.user_id, display_name=name),
             )
@@ -671,6 +667,14 @@ def _full_sheet(user_id: str) -> CharacterSheetOut:
     with session_scope() as session:
         char = characters.require_character(session, user_id)
         return character_sheet(session, char, include_stash=True)
+
+
+def _character_name(user_id: str) -> str:
+    with session_scope() as session:
+        char = characters.load_character(session, user_id)
+        if char is None:
+            raise CharacterNotFound("No character with that id.")
+        return char.name
 
 
 def _guild(resolve_name: guild_service.NameResolver | None = None) -> GuildOut:

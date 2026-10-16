@@ -400,7 +400,7 @@ def test_proxy_headers_public_only():
     public = WebServer.public(_Bot({}), ok)._server.config
     assert public.proxy_headers is True
     assert public.forwarded_allow_ips == "192.168.1.11"
-    assert WebServer.local(ok)._server.config.proxy_headers is False
+    assert WebServer.local(_Bot({}), ok)._server.config.proxy_headers is False
 
 
 # ---------- local (home network, no login) mode ----------
