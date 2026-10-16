@@ -141,6 +141,9 @@ normal OAuth redirect. Everything after login is shared.
 - Bundle fonts, icons and scripts; no CDNs (external hosts need URL mappings).
 - No popups, new tabs or top-level redirects once inside Discord.
 - Mobile-first layout; the Activity panel is narrow and many players are on phones.
+- Insets come from `--safe-top` / `--safe-bottom` in `app.css`, never `env(safe-area-inset-*)`
+  directly: inside Discord's mobile iframe `env()` reads 0, so those tokens prefer Discord's
+  `--discord-safe-area-inset-*` variables.
 - Never send `X-Frame-Options: DENY` or a restrictive `frame-ancestors`.
 
 ## Hosting (Bunnylink)
@@ -161,6 +164,9 @@ Follows the existing homelab pattern (see `proxmox-bunnylink/reverse-proxy.md`):
 ### Discord Developer Portal
 
 - Activities → enable (auto-creates the **Launch** entry-point command).
+- Activities → Settings → **Supported Platforms** → tick **iOS** and **Android** as well as Web,
+  then save. Only Web (desktop and browser) is on by default; without this, phones show
+  *"Failed to Launch Activity — This Activity is not currently available on this OS"*.
 - URL Mappings → `/` → `shadowdark.bunnyufo.net`.
 - OAuth2 → add redirect `https://shadowdark.bunnyufo.net/auth/callback` (standalone login);
   copy the client secret into `.env` as `DISCORD_CLIENT_SECRET`.
