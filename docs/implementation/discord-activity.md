@@ -142,8 +142,8 @@ for the role there.
 DM status is baked into the session token at login, so giving or taking the role takes effect at
 the DM's next login (at most `SESSION_TTL_HOURS` later; the local app keeps sessions until the bot
 restarts). On the local app anyone on the network can pick the DM's character, the same trust
-boundary as picking any character. Slash commands are unchanged: `/character` still only edits your
-own.
+boundary as picking any character. In Discord, `/character sheet member:` opens another player's
+sheet for a DM (see [commands](../commands.md)); there the role is checked on every button press.
 
 ### Frontend
 

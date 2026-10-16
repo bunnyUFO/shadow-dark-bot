@@ -2,7 +2,7 @@
 
 Every command is a Discord **slash command**, available to anyone in the server.
 
-For now, **all commands are open to all guild members**. There's no role-gating — anyone can add, take, borrow, return, or even delete entries. Built-in invariants (see the bottom of this page) prevent the worst classes of mistakes. Role-based permissions and an audit log feed are on the roadmap.
+For now, **all commands are open to all guild members**. There's no role-gating — anyone can add, take, borrow, return, or even delete entries. Built-in invariants (see the bottom of this page) prevent the worst classes of mistakes. The one role is the **Dungeon Master** (`DM_ROLE_IDS`), who can also edit other players' characters (see `/character`). Finer-grained permissions and an audit log feed are on the roadmap.
 
 ## Primary entry point: `/<group> browse`
 
@@ -129,7 +129,7 @@ For guild-owned magical items. They are **never given away** — they're borrowe
 
 ## `/character` — Your Player Character
 
-Unlike the four guild-shared systems above, a **character belongs to one player** (keyed by Discord user). Each player has **one** character with lean Shadow Dark stats and a carried inventory. You edit **your own** character through an ephemeral, interactive sheet; you can **view** anyone else's read-only.
+Unlike the four guild-shared systems above, a **character belongs to one player** (keyed by Discord user). Each player has **one** character with lean Shadow Dark stats and a carried inventory. You edit **your own** character through an ephemeral, interactive sheet; you can **view** anyone else's read-only. A **Dungeon Master** — anyone holding a role listed in `DM_ROLE_IDS` — can edit anyone's.
 
 Stats covered: name, **ancestry**, **background**, class, **title**, **alignment**, level, **max HP**, AC, the six ability scores (with an auto-computed modifier table — Shadow Dark's `floor((score−10)/2)` clamped to ±4), gold (entered gp/sp/cp, stored as copper), **known languages**, **proficiencies**, a free-text **Talents** section, an optional **spellcasting** modifier (governing stat INT or WIS plus a manual spell-check bonus for talent-granted bonuses), and a **known spells** list.
 
@@ -137,7 +137,7 @@ Inventory is **hybrid**: a carried item either links to the shared `/items` cata
 
 | Command | What it does | Example |
 |---|---|---|
-| `/character sheet` | Open **your** sheet as an ephemeral, interactive embed with three tabs (buttons on the top row): **Combat** (home), **Inventory**, and **Roleplaying**. If you don't have a character yet, a **Create character** button opens the details form. | `/character sheet` |
+| `/character sheet member?` | Open **your** sheet as an ephemeral, interactive embed with three tabs (buttons on the top row): **Combat** (home), **Inventory**, and **Roleplaying**. If you don't have a character yet, a **Create character** button opens the details form. **Dungeon Masters** can name another `member` to open that player's full sheet (stash included) with every edit button, under an "Editing **X**'s character as Dungeon Master" line; anyone else gets a refusal. A DM can't create a character for someone who has none. | `/character sheet` · `/character sheet member:@Tessa` |
 | `/character carry item quantity? gear_slots?` | Add an item you're carrying. Autocomplete suggests catalog items (a match links it); any other text becomes a freeform item. `gear_slots` sets the per-item slot cost for a new freeform item (ignored for catalog items). Blocked if it would exceed your carry capacity. | `/character carry item:"Arrows" quantity:20` |
 | `/character show member` | View another player's sheet read-only, with the same **Combat / Inventory / Roleplaying** tabs; no edit buttons. Includes the Share button. | `/character show member:@Tessa` |
 
@@ -183,7 +183,7 @@ Even though commands are open, the bot enforces invariants that prevent broken s
 - Deleting a non-empty location errors.
 - Changing a catalog item's `type` into or out of `magical` is blocked while it's referenced by inventory or treasury entries. Switching between any of the non-magical types (common/weapon/armor/scroll/potion/loot/crafted) is always allowed.
 - Renaming an item via the `/items edit` modal's Name field is rejected if another item already has that name.
-- You can only edit **your own** character; the interactive sheet's controls reject anyone who isn't the owner. `/character show` is always read-only.
+- You can only edit **your own** character — unless you're a **Dungeon Master**; the interactive sheet's controls reject anyone who isn't the owner or a DM (the role is checked on every press, so removing it locks a DM out at once). `/character show` is always read-only.
 - Carrying items past your capacity — **max(10, STR)** gear slots — errors (bundle-aware ceiling formula, same as guild inventory).
 - Each player has at most one character; the sheet upserts rather than creating duplicates.
 

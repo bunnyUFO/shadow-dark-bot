@@ -19,6 +19,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from shadowdark_bot.config import Settings
+from shadowdark_bot.dungeon_master import holds_dm_role
 from shadowdark_bot.services.guild import NameResolver
 from shadowdark_bot.web.app import MembershipCheck, create_app
 from shadowdark_bot.web.auth import DiscordOAuth, SessionSigner
@@ -86,7 +87,7 @@ def bot_dm_role_check(bot: discord.Client, role_ids: set[int]) -> MembershipChec
             if not any(guild.get_role(rid) is not None for rid in role_ids):
                 continue
             member = await _find_member(guild, uid)
-            if member is not None and {role.id for role in member.roles} & role_ids:
+            if member is not None and holds_dm_role(member, role_ids):
                 return True
         return False
 

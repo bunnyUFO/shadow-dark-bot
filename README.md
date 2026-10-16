@@ -219,7 +219,7 @@ then restart (`docker compose up -d`, or the update script). Open `http://<bot c
 
 The local sheet only answers private-network addresses and refuses anything that comes through a reverse proxy, so don't put it behind Nginx Proxy Manager.
 
-**Dungeon Masters** can edit every character's sheet (open someone from **Party**); everyone else edits only their own. Whoever holds a DM role in Discord is a DM, in both the local and the public sheet. Put the role's ID in `.env` (Discord: turn on Developer Mode, then Server Settings → Roles → right-click the role → Copy Role ID):
+**Dungeon Masters** can edit every character's sheet (open someone from **Party**, or `/character sheet member:` in Discord); everyone else edits only their own. Whoever holds a DM role in Discord is a DM, in both the local and the public sheet. Put the role's ID in `.env` (Discord: turn on Developer Mode, then Server Settings → Roles → right-click the role → Copy Role ID):
 
 ```bash
 DM_ROLE_IDS=234567890123456789
