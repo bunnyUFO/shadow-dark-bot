@@ -8,6 +8,8 @@
   <meta name="theme-color" content="#0c0c0d">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230c0c0d'/%3E%3Cpath d='M32 10c6 9 13 14 13 24a13 13 0 0 1-26 0c0-6 3-9 6-13 1 5 3 7 6 8-2-7-1-13 1-19z' fill='%23f0a541'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
+  <!-- One section at a time (see the router at the bottom); without JS every section shows. -->
+  <script>document.documentElement.classList.add("paged");</script>
 </head>
 <body>
 
@@ -21,7 +23,7 @@
 </header>
 
 <div class="layout">
-  <nav class="toc" aria-label="Contents">
+  <nav class="toc" aria-label="Sections">
     <ol>
       <li><a href="#intro">Intro</a></li>
       <li><a href="#setup">Setup</a>
@@ -59,9 +61,11 @@
   </nav>
 
   <main>
+    <!-- phones: the current section's pages, filled in by the router -->
+    <nav class="subnav" aria-label="Pages in this section"></nav>
 
     <!-- ================= INTRO ================= -->
-    <section id="intro">
+    <section class="page" id="intro">
       <div class="hero">
         <div>
           <div class="eyebrow">A Discord bot for Shadowdark RPG guilds</div>
@@ -75,109 +79,133 @@
         </div>
         <figure class="showcase">
           <img class="desk" src="img/sheet-combat.webp" width="2048" height="1440" alt="The character sheet's Combat tab on a desktop: hit points, armour class, level, spellcasting, XP and ability scores.">
-          <img class="phone" src="img/phone-sheet.webp" width="780" height="1688" alt="The same sheet on a phone." loading="lazy">
+          <img class="phone" src="img/phone-sheet.webp" width="780" height="1688" alt="The same sheet on a phone.">
         </figure>
       </div>
 
       <div class="features">
-        <div class="feature"><h4><span class="ico">&#9876;</span>Character sheets</h4><p>Stats, abilities, spells, effects, gold and gear slots for every player, editable by the owner.</p></div>
-        <div class="feature"><h4><span class="ico">&#8962;</span>Guild storage</h4><p>Shared stashes with gear-slot capacity. Anyone can donate, and anyone with a character can take.</p></div>
-        <div class="feature"><h4><span class="ico">&#10022;</span>Magic item treasury</h4><p>Magic items are borrowed and returned, never given away. Everyone can see who has what.</p></div>
-        <div class="feature"><h4><span class="ico">&#9673;</span>Coffers &amp; catalog</h4><p>One shared purse in gp/sp/cp and an item catalog to buy from, priced the way you set it.</p></div>
-        <div class="feature"><h4><span class="ico">&#9760;</span>Spells &amp; creatures</h4><p>The full Shadowdark spell reference, plus a bestiary of what the party has met and when.</p></div>
-        <div class="feature"><h4><span class="ico">&#9733;</span>Dungeon Master mode</h4><p>Whoever holds your DM role can open and edit any player's sheet.</p></div>
+        <a class="feature" href="#act-sheet"><h4><span class="ico">&#9876;</span>Character sheets</h4><p>Stats, abilities, spells, effects, gold and gear slots for every player, editable by the owner.</p></a>
+        <a class="feature" href="#act-guild"><h4><span class="ico">&#8962;</span>Guild storage</h4><p>Shared stashes with gear-slot capacity. Anyone can donate, and anyone with a character can take.</p></a>
+        <a class="feature" href="#cmd-treasury"><h4><span class="ico">&#10022;</span>Magic item treasury</h4><p>Magic items are borrowed and returned, never given away. Everyone can see who has what.</p></a>
+        <a class="feature" href="#cmd-coffers"><h4><span class="ico">&#9673;</span>Coffers &amp; catalog</h4><p>One shared purse in gp/sp/cp and an item catalog to buy from, priced the way you set it.</p></a>
+        <a class="feature" href="#act-creatures"><h4><span class="ico">&#9760;</span>Spells &amp; creatures</h4><p>The full Shadowdark spell reference, plus a bestiary of what the party has met and when.</p></a>
+        <a class="feature" href="#act-dm"><h4><span class="ico">&#9733;</span>Dungeon Master mode</h4><p>Whoever holds your DM role can open and edit any player's sheet.</p></a>
       </div>
     </section>
 
     <!-- ================= SETUP ================= -->
-    <section id="setup">
+    <section class="page" id="setup">
       <div class="eyebrow">Setup</div>
       <h2>Get the bot into your server</h2>
       <p class="lead">You need a Discord application, somewhere to run the bot, and a few settings. The bot alone gives you every slash command. The web sheet and the Activity are optional extras.</p>
+      <ol class="cards steps">
+        <li><a class="card-link" href="#setup-app"><span class="num">1</span><h4>Create the Discord app</h4><p>Get a bot token and invite the bot to your server.</p></a></li>
+        <li><a class="card-link" href="#setup-run"><span class="num">2</span><h4>Run the bot</h4><p>One command on Proxmox, or Docker Compose anywhere.</p></a></li>
+        <li><a class="card-link" href="#setup-settings"><span class="num">3</span><h4>Settings</h4><p>What goes in <code>.env</code>, from the token to the web sheet.</p></a></li>
+        <li><a class="card-link" href="#setup-activity"><span class="num">4</span><h4>Turn on the Activity</h4><p>Open the sheet inside Discord. Optional.</p></a></li>
+        <li><a class="card-link" href="#setup-dm"><span class="num">5</span><h4>Choose your DMs</h4><p>Let a Discord role edit every sheet. Optional.</p></a></li>
+        <li><a class="card-link" href="#setup-local"><span class="num">6</span><h4>Try it without Discord</h4><p>The sample party on your own machine.</p></a></li>
+      </ol>
+    </section>
 
-      <ol class="steps">
-        <li>
-          <h3 id="setup-app">Create the Discord app</h3>
-          <ul class="plain">
-            <li>Open the <a href="https://discord.com/developers/applications">Discord Developer Portal</a>, click <strong>New Application</strong> and name it.</li>
-            <li>Under <strong>Bot</strong>, leave every privileged intent <strong>off</strong>, then <strong>Reset Token</strong> and copy the token. That's your <code>DISCORD_TOKEN</code>. Keep it secret.</li>
-            <li>Under <strong>OAuth2 → URL Generator</strong>, tick the <code>bot</code> and <code>applications.commands</code> scopes. Then tick the Send Messages, Embed Links, Read Message History and Use Slash Commands permissions. Open the URL it gives you and pick your server.</li>
-          </ul>
-          <p class="muted">No server ID or role ID is needed for the basics: the bot finds every server it's in and registers its commands there when it starts.</p>
-        </li>
+    <section class="page" id="setup-app">
+      <div class="eyebrow">Setup · Step 1 of 6</div>
+      <h2>Create the Discord app</h2>
+      <ul class="plain">
+        <li>Open the <a href="https://discord.com/developers/applications">Discord Developer Portal</a>, click <strong>New Application</strong> and name it.</li>
+        <li>Under <strong>Bot</strong>, leave every privileged intent <strong>off</strong>, then <strong>Reset Token</strong> and copy the token. That's your <code>DISCORD_TOKEN</code>. Keep it secret.</li>
+        <li>Under <strong>OAuth2 → URL Generator</strong>, tick the <code>bot</code> and <code>applications.commands</code> scopes. Then tick the Send Messages, Embed Links, Read Message History and Use Slash Commands permissions. Open the URL it gives you and pick your server.</li>
+      </ul>
+      <p class="muted">No server ID or role ID is needed for the basics: the bot finds every server it's in and registers its commands there when it starts.</p>
+    </section>
 
-        <li>
-          <h3 id="setup-run">Run the bot</h3>
-          <p><strong>On Proxmox (recommended):</strong> one command on the Proxmox host makes a small Debian container with Docker, clones the bot, asks for your token and starts it.</p>
+    <section class="page" id="setup-run">
+      <div class="eyebrow">Setup · Step 2 of 6</div>
+      <h2>Run the bot</h2>
+      <p><strong>On Proxmox (recommended):</strong> one command on the Proxmox host makes a small Debian container with Docker, clones the bot, asks for your token and starts it.</p>
 <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/bunnyUFO/shadow-dark-bot/main/scripts/install-proxmox.sh)</code></pre>
-          <p><strong>Anywhere with Docker:</strong></p>
+      <p><strong>Anywhere with Docker:</strong></p>
 <pre><code>git clone https://github.com/bunnyUFO/shadow-dark-bot.git
 cd shadow-dark-bot
 cp .env.example .env        # then set DISCORD_TOKEN
 docker compose up -d --build</code></pre>
-          <p>When the log shows <code>Synced N command(s) to guild …</code>, type <code>/ping</code> in your server. It answers <code>pong</code>. The full install, update and backup guide is in <a href="https://github.com/bunnyUFO/shadow-dark-bot/blob/main/docs/deploy-proxmox.md">docs/deploy-proxmox.md</a>.</p>
-        </li>
+      <p>When the log shows <code>Synced N command(s) to guild …</code>, type <code>/ping</code> in your server. It answers <code>pong</code>. The full install, update and backup guide is in <a href="https://github.com/bunnyUFO/shadow-dark-bot/blob/main/docs/deploy-proxmox.md">docs/deploy-proxmox.md</a>.</p>
+    </section>
 
-        <li>
-          <h3 id="setup-settings">Settings</h3>
-          <p>Everything lives in the bot's <code>.env</code> file (see <a href="https://github.com/bunnyUFO/shadow-dark-bot/blob/main/.env.example">.env.example</a>). Restart the bot after a change.</p>
-          <div class="table-wrap"><table>
-            <thead><tr><th>Setting</th><th>What it's for</th></tr></thead>
-            <tbody>
-              <tr><td><code>DISCORD_TOKEN</code></td><td><strong>Required.</strong> The bot token from step 1.</td></tr>
-              <tr><td><code>LOCAL_WEB_ENABLED</code></td><td><code>true</code> serves the sheet on your home network (port 8081). There's no login: you pick your character.</td></tr>
-              <tr><td><code>WEB_ENABLED</code></td><td><code>true</code> serves the public sheet with Discord login (port 8080, behind your reverse proxy). This is what the Activity uses.</td></tr>
-              <tr><td><code>PUBLIC_BASE_URL</code>, <code>DISCORD_CLIENT_ID</code>, <code>DISCORD_CLIENT_SECRET</code>, <code>SESSION_SECRET</code></td><td>Needed for the public sheet: its address, the app's OAuth2 ID and secret, and a long random string that signs logins.</td></tr>
-              <tr><td><code>ALLOWED_GUILD_IDS</code></td><td>Server IDs whose members may log in to the public sheet.</td></tr>
-              <tr><td><code>FORWARDED_ALLOW_IPS</code></td><td>Your reverse proxy's IP, so the public sheet trusts its headers. Never <code>*</code>.</td></tr>
-              <tr><td><code>DM_ROLE_IDS</code></td><td>Discord role IDs whose holders are <a href="#act-dm">Dungeon Masters</a>.</td></tr>
-            </tbody>
-          </table></div>
-        </li>
+    <section class="page" id="setup-settings">
+      <div class="eyebrow">Setup · Step 3 of 6</div>
+      <h2>Settings</h2>
+      <p>Everything lives in the bot's <code>.env</code> file (see <a href="https://github.com/bunnyUFO/shadow-dark-bot/blob/main/.env.example">.env.example</a>). Restart the bot after a change.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Setting</th><th>What it's for</th></tr></thead>
+        <tbody>
+          <tr><td><code>DISCORD_TOKEN</code></td><td><strong>Required.</strong> The bot token from step 1.</td></tr>
+          <tr><td><code>LOCAL_WEB_ENABLED</code></td><td><code>true</code> serves the sheet on your home network (port 8081). There's no login: you pick your character.</td></tr>
+          <tr><td><code>WEB_ENABLED</code></td><td><code>true</code> serves the public sheet with Discord login (port 8080, behind your reverse proxy). This is what the Activity uses.</td></tr>
+          <tr><td><code>PUBLIC_BASE_URL</code>, <code>DISCORD_CLIENT_ID</code>, <code>DISCORD_CLIENT_SECRET</code>, <code>SESSION_SECRET</code></td><td>Needed for the public sheet: its address, the app's OAuth2 ID and secret, and a long random string that signs logins.</td></tr>
+          <tr><td><code>ALLOWED_GUILD_IDS</code></td><td>Server IDs whose members may log in to the public sheet.</td></tr>
+          <tr><td><code>FORWARDED_ALLOW_IPS</code></td><td>Your reverse proxy's IP, so the public sheet trusts its headers. Never <code>*</code>.</td></tr>
+          <tr><td><code>DM_ROLE_IDS</code></td><td>Discord role IDs whose holders are <a href="#act-dm">Dungeon Masters</a>.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
 
-        <li>
-          <h3 id="setup-activity">Turn on the Activity</h3>
-          <p>The Activity is the web sheet opened inside Discord. Once the public sheet is running at your address:</p>
-          <ul class="plain">
-            <li><strong>Activities</strong> → enable. This adds the <strong>Launch</strong> entry point.</li>
-            <li><strong>URL Mappings</strong> → map <code>/</code> to your sheet's domain.</li>
-            <li><strong>OAuth2</strong> → add the redirect <code>https://&lt;your domain&gt;/auth/callback</code> so the standalone website can log in too.</li>
-            <li><strong>App Testers</strong> → invite each player. Each player has to accept the invite.</li>
-          </ul>
-          <div class="callout"><p><strong>Heads up:</strong> an unverified Activity launches only for the app's owner and up to 50 App Testers, and only in servers with fewer than 25 members. The standalone website at your domain works everywhere.</p></div>
-        </li>
+    <section class="page" id="setup-activity">
+      <div class="eyebrow">Setup · Step 4 of 6</div>
+      <h2>Turn on the Activity</h2>
+      <p>The Activity is the web sheet opened inside Discord. Once the public sheet is running at your address, set up these pages of the Developer Portal:</p>
+      <ul class="plain">
+        <li><strong>Activities</strong> → enable. This adds the <strong>Launch</strong> entry point.</li>
+        <li><strong>URL Mappings</strong> → map <code>/</code> to your sheet's domain.</li>
+        <li><strong>OAuth2</strong> → add the redirect <code>https://&lt;your domain&gt;/auth/callback</code> so the standalone website can log in too.</li>
+        <li><strong>App Testers</strong> → invite each player. Each player has to accept the invite.</li>
+      </ul>
+      <div class="callout"><p><strong>Heads up:</strong> an unverified Activity launches only for the app's owner and up to 50 App Testers, and only in servers with fewer than 25 members. The standalone website at your domain works everywhere.</p></div>
+    </section>
 
-        <li>
-          <h3 id="setup-dm">Choose your Dungeon Masters</h3>
-          <p>Give the role your DMs already have (for example <em>game master</em>) edit rights over every sheet:</p>
-          <ul class="plain">
-            <li>In Discord, turn on <strong>Developer Mode</strong> (User Settings → Advanced).</li>
-            <li>Open <strong>Server Settings → Roles</strong>, right-click the role and choose <strong>Copy Role ID</strong>.</li>
-            <li>Add it to <code>.env</code> and restart the bot:</li>
-          </ul>
+    <section class="page" id="setup-dm">
+      <div class="eyebrow">Setup · Step 5 of 6</div>
+      <h2>Choose your Dungeon Masters</h2>
+      <p>Give the role your DMs already have (for example <em>game master</em>) edit rights over every sheet:</p>
+      <ul class="plain">
+        <li>In Discord, turn on <strong>Developer Mode</strong> (User Settings → Advanced).</li>
+        <li>Open <strong>Server Settings → Roles</strong>, right-click the role and choose <strong>Copy Role ID</strong>.</li>
+        <li>Add it to <code>.env</code> and restart the bot:</li>
+      </ul>
 <pre><code>DM_ROLE_IDS=123456789012345678</code></pre>
-          <p class="muted">List several roles separated by commas. Giving or removing the role takes effect at that person's next login to the sheet. In Discord it's checked on every button press, so it takes effect at once.</p>
-        </li>
+      <p class="muted">List several roles separated by commas. Giving or removing the role takes effect at that person's next login to the sheet. In Discord it's checked on every button press, so it takes effect at once. See <a href="#act-dm">DM mode</a> for what a DM can do.</p>
+    </section>
 
-        <li>
-          <h3 id="setup-local">Try it without Discord</h3>
-          <p>The repo has a dev runner that serves the sheet on a seeded sample party. It needs no token and never touches the real database:</p>
+    <section class="page" id="setup-local">
+      <div class="eyebrow">Setup · Step 6 of 6</div>
+      <h2>Try it without Discord</h2>
+      <p>The repo has a dev runner that serves the sheet on a seeded sample party. It needs no token and never touches the real database:</p>
 <pre><code>py -3.12 -m venv .venv &amp;&amp; source .venv/Scripts/activate
 pip install -e ".[dev]"
 python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
-          <p>Open <code>http://localhost:8081</code> and pick a character. <code>--dm</code> makes Brannoc a Dungeon Master so you can try <a href="#act-dm">DM mode</a>.</p>
-        </li>
-      </ol>
+      <p>Open <code>http://localhost:8081</code> and pick a character. <code>--dm</code> makes Brannoc a Dungeon Master so you can try <a href="#act-dm">DM mode</a>.</p>
     </section>
 
     <!-- ================= COMMANDS ================= -->
-    <section id="commands">
+    <section class="page" id="commands">
       <div class="eyebrow">Commands</div>
       <h2>Slash commands</h2>
       <p class="lead">Every reply is visible only to you, with a <strong>Share with channel</strong> button to post a public copy. The guild commands each have a <code>browse</code> view where you can list, inspect and act in one place. Start there if you're not sure which command to run.</p>
+      <div class="cards">
+        <a class="card-link" href="#cmd-character"><h4><code>/character</code></h4><p>Your own player character: open, edit and show sheets.</p></a>
+        <a class="card-link" href="#cmd-items"><h4><code>/items</code></h4><p>The guild's item catalog: what every item is and costs.</p></a>
+        <a class="card-link" href="#cmd-inventory"><h4><code>/inventory</code></h4><p>Shared, non-magical stashes with gear-slot capacity.</p></a>
+        <a class="card-link" href="#cmd-coffers"><h4><code>/coffers</code></h4><p>The guild's shared purse, and buying from the catalog.</p></a>
+        <a class="card-link" href="#cmd-treasury"><h4><code>/treasury</code></h4><p>Magic items, borrowed and returned.</p></a>
+        <a class="card-link" href="#cmd-spells"><h4><code>/spells</code></h4><p>The Shadowdark spell reference.</p></a>
+      </div>
+    </section>
 
-      <div class="cmd-group" id="cmd-character">
-        <h3><code>/character</code> <span>Your own player character</span></h3>
+    <section class="page" id="cmd-character">
+      <div class="eyebrow">Commands</div>
+      <h2><code class="title-code">/character</code></h2>
+      <p class="lead">Your own player character.</p>
+      <div class="cmd-group">
         <div class="cmd">
           <div class="sig"><b>/character sheet</b> <i>member?</i></div>
           <p>Opens your interactive sheet with three tabs:</p>
@@ -200,49 +228,80 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
           <div class="eg">e.g. <code>/character show member:@Tessa</code></div>
         </div>
       </div>
+    </section>
 
-      <div class="cmd-group" id="cmd-items">
-        <h3><code>/items</code> <span>The guild's item catalog</span></h3>
-        <p class="muted" style="margin-top:8px">Every item has a type (common, weapon, armor, scroll, potion, loot, crafted or magical), gear slots and a bundle size. For example, 20 arrows fit in one slot.</p>
+    <section class="page" id="cmd-items">
+      <div class="eyebrow">Commands</div>
+      <h2><code class="title-code">/items</code></h2>
+      <p class="lead">The guild's item catalog. Every item has a type (common, weapon, armor, scroll, potion, loot, crafted or magical), gear slots and a bundle size. For example, 20 arrows fit in one slot.</p>
+      <div class="cmd-group">
         <div class="cmd"><div class="sig"><b>/items browse</b> <i>type?</i></div><p>Lists the catalog, grouped by type. Pick an item to see it, then press <strong>Edit</strong> to change it.</p></div>
         <div class="cmd"><div class="sig"><b>/items add</b> <i>name type description? gear_slots? bundle_size? gp? sp? cp?</i></div><p>Adds a new item to the catalog.</p><div class="eg">e.g. <code>/items add name:Arrows type:common bundle_size:20 sp:1</code></div></div>
         <div class="cmd"><div class="sig"><b>/items info</b> <i>name</i> · <b>/items edit</b> <i>name type?</i> · <b>/items remove</b> <i>name</i></div><p>Look up an item, edit it in a pre-filled form, or remove it if nothing uses it any more.</p></div>
       </div>
+    </section>
 
-      <div class="cmd-group" id="cmd-inventory">
-        <h3><code>/inventory</code> <span>Shared, non-magical stashes</span></h3>
+    <section class="page" id="cmd-inventory">
+      <div class="eyebrow">Commands</div>
+      <h2><code class="title-code">/inventory</code></h2>
+      <p class="lead">Shared, non-magical stashes, each with its own gear-slot capacity.</p>
+      <div class="cmd-group">
         <div class="cmd"><div class="sig"><b>/inventory browse</b> <i>location?</i></div><p>Pick a location, then an item. <strong>+ Add more</strong> and <strong>− Take</strong> work right there; taking puts the item in your character's held items.</p></div>
         <div class="cmd"><div class="sig"><b>/inventory add</b> <i>location item quantity? notes?</i></div><p>Puts a catalog item into a location. Same items stack, and capacity is checked bundle by bundle.</p><div class="eg">e.g. <code>/inventory add location:"Main Stash" item:Arrows quantity:15</code></div></div>
         <div class="cmd"><div class="sig"><b>/inventory location-create</b> · <b>location-edit</b> · <b>location-delete</b></div><p>Make, resize or remove storage locations, such as a main stash or a lakeside cabin, each with its own gear-slot capacity.</p></div>
       </div>
+    </section>
 
-      <div class="cmd-group" id="cmd-coffers">
-        <h3><code>/coffers</code> <span>The guild's shared purse</span></h3>
+    <section class="page" id="cmd-coffers">
+      <div class="eyebrow">Commands</div>
+      <h2><code class="title-code">/coffers</code></h2>
+      <p class="lead">The guild's shared purse, in gp, sp and cp.</p>
+      <div class="cmd-group">
         <div class="cmd"><div class="sig"><b>/coffers browse</b></div><p>Shows the balance and a dropdown of catalog items that have a price. Pick one and a quantity to buy it with guild money.</p></div>
         <div class="cmd"><div class="sig"><b>/coffers add</b> <i>gp? sp? cp? reason?</i> · <b>/coffers subtract</b> <i>gp? sp? cp? reason?</i></div><p>Pay in or take out. The balance can't go below zero.</p><div class="eg">e.g. <code>/coffers add gp:120 reason:"dungeon haul"</code></div></div>
       </div>
+    </section>
 
-      <div class="cmd-group" id="cmd-treasury">
-        <h3><code>/treasury</code> <span>Magic items, borrowed and returned</span></h3>
+    <section class="page" id="cmd-treasury">
+      <div class="eyebrow">Commands</div>
+      <h2><code class="title-code">/treasury</code></h2>
+      <p class="lead">Magic items belong to the guild. They're borrowed and returned, never given away.</p>
+      <div class="cmd-group">
         <div class="cmd"><div class="sig"><b>/treasury browse</b> <i>status?</i></div><p>Lists available and borrowed items. Pick one to <strong>Borrow for me</strong>, borrow for someone else, or <strong>Return</strong> it. A borrowed item also shows up in the borrower's carried gear.</p></div>
         <div class="cmd"><div class="sig"><b>/treasury add</b> <i>item tag?</i> · <b>/treasury remove</b> <i>entry_id</i></div><p>Registers a magic item. Each physical copy is tracked separately, and <code>tag</code> tells duplicates apart. You can only remove items that aren't borrowed.</p></div>
       </div>
+    </section>
 
-      <div class="cmd-group" id="cmd-spells">
-        <h3><code>/spells</code> <span>The spell reference</span></h3>
+    <section class="page" id="cmd-spells">
+      <div class="eyebrow">Commands</div>
+      <h2><code class="title-code">/spells</code></h2>
+      <p class="lead">The Shadowdark spell reference, for anyone to look things up.</p>
+      <div class="cmd-group">
         <div class="cmd"><div class="sig"><b>/spells browse</b> <i>spell_class? tier? alignment? name?</i></div><p>Filter every Tier 1–5 wizard and priest spell, then open one for its duration, range and text.</p></div>
         <div class="cmd"><div class="sig"><b>/spells info</b> <i>spell</i></div><p>Jumps straight to one spell, with autocomplete.</p><div class="eg">e.g. <code>/spells info spell:"Magic Missile"</code></div></div>
       </div>
     </section>
 
     <!-- ================= ACTIVITY ================= -->
-    <section id="activity">
+    <section class="page" id="activity">
       <div class="eyebrow">Activity</div>
       <h2>The full sheet, inside Discord</h2>
       <p class="lead">Start the Activity from Discord's App Launcher in any channel, or open the same sheet as a website in your browser. It signs you in with Discord, so you always land on your own character. On phones the sections move to a tab bar at the bottom.</p>
+      <div class="cards thumbs">
+        <a class="card-link" href="#act-sheet"><img src="img/sheet-combat.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Character sheet</h4><p>Combat, Inventory and Roleplaying tabs.</p></a>
+        <a class="card-link" href="#act-party"><img src="img/party.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Party</h4><p>Everyone's characters, read-only.</p></a>
+        <a class="card-link" href="#act-guild"><img src="img/guild.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Guild</h4><p>Coffers, storage and the treasury.</p></a>
+        <a class="card-link" href="#act-items"><img src="img/items.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Items</h4><p>The catalog, and buying from it.</p></a>
+        <a class="card-link" href="#act-spells"><img src="img/spells.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Spells</h4><p>The full spell reference.</p></a>
+        <a class="card-link" href="#act-creatures"><img src="img/creature.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Creatures</h4><p>The bestiary and the effects library.</p></a>
+        <a class="card-link" href="#act-dm"><img src="img/dm-sheet.webp" width="2048" height="1440" loading="lazy" alt=""><h4>DM mode <span class="dm-badge">DM</span></h4><p>Edit any player's sheet.</p></a>
+      </div>
+    </section>
 
-      <h3 id="act-sheet">Character sheet</h3>
-      <p>Your sheet in three tabs. Every card has its own <strong>Edit</strong>, and changes save straight away.</p>
+    <section class="page" id="act-sheet">
+      <div class="eyebrow">Activity</div>
+      <h2>Character sheet</h2>
+      <p class="lead">Your sheet in three tabs. Every card has its own <strong>Edit</strong>, and changes save straight away.</p>
       <ul class="plain">
         <li><strong>Combat:</strong>
           <ul class="plain">
@@ -260,42 +319,62 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
         <figure class="shot"><img src="img/sheet-inventory.webp" width="2048" height="1440" loading="lazy" alt="Inventory tab with gold, carried items and a gear-slot bar."><figcaption>Inventory: gold, gear slots and the stash.</figcaption></figure>
         <figure class="shot"><img src="img/sheet-roleplaying.webp" width="2048" height="1440" loading="lazy" alt="Roleplaying tab with background, languages and talents."><figcaption>Roleplaying: who your character is.</figcaption></figure>
       </div>
+    </section>
 
-      <h3 id="act-party">Party</h3>
-      <p>Everyone's characters at a glance. Open one to read their sheet: the same tabs, read-only. Only their held items are listed; stashes stay private.</p>
+    <section class="page" id="act-party">
+      <div class="eyebrow">Activity</div>
+      <h2>Party</h2>
+      <p class="lead">Everyone's characters at a glance. Open one to read their sheet: the same tabs, read-only. Only their held items are listed; stashes stay private.</p>
       <div class="pair">
         <figure class="shot"><img src="img/party.webp" width="2048" height="1440" loading="lazy" alt="Party list with three characters."><figcaption>The party list.</figcaption></figure>
         <figure class="shot"><img src="img/party-readonly.webp" width="2048" height="1440" loading="lazy" alt="Another player's sheet with a read-only banner."><figcaption>Another player's sheet, read-only.</figcaption></figure>
       </div>
+    </section>
 
-      <h3 id="act-guild">Guild</h3>
-      <p>Everything the guild shares:</p>
+    <section class="page" id="act-guild">
+      <div class="eyebrow">Activity</div>
+      <h2>Guild</h2>
+      <p class="lead">Everything the guild shares.</p>
       <ul class="plain">
         <li><strong>The coffers.</strong></li>
         <li><strong>Every storage location</strong> and what's in it. <strong>Take</strong> an item into your carried gear or stash.</li>
         <li><strong>The magic item treasury</strong>, showing who has each item. <strong>Borrow</strong> one for yourself, another character or anyone by name, and <strong>Return</strong> it, whoever borrowed it.</li>
       </ul>
       <figure class="shot"><img src="img/guild.webp" width="2048" height="1440" loading="lazy" alt="Guild page with coffers, storage locations and the treasury."><figcaption>Coffers, storage and the treasury.</figcaption></figure>
+    </section>
 
-      <h3 id="act-items">Items</h3>
-      <p>The guild's catalog, with a search box and a type filter. <strong>Buy</strong> an item with your own gold or the guild coffers, and put it in your gear, your stash or a guild location. An item that causes an effect, like a potion, links to it.</p>
+    <section class="page" id="act-items">
+      <div class="eyebrow">Activity</div>
+      <h2>Items</h2>
+      <p class="lead">The guild's catalog, with a search box and a type filter. <strong>Buy</strong> an item with your own gold or the guild coffers, and put it in your gear, your stash or a guild location. An item that causes an effect, like a potion, links to it.</p>
       <figure class="shot"><img src="img/items.webp" width="2048" height="1440" loading="lazy" alt="Item catalog with search, type filter and prices."><figcaption>The item catalog.</figcaption></figure>
+    </section>
 
-      <h3 id="act-spells">Spells</h3>
-      <p>The complete Shadowdark spell list. Filter by class, tier and alignment, or search by name, then open a spell for its duration, range and full text. Spells that cause an effect link to it, ready to apply to a character.</p>
+    <section class="page" id="act-spells">
+      <div class="eyebrow">Activity</div>
+      <h2>Spells</h2>
+      <p class="lead">The complete Shadowdark spell list. Filter by class, tier and alignment, or search by name, then open a spell for its duration, range and full text. Spells that cause an effect link to it, ready to apply to a character.</p>
       <figure class="shot"><img src="img/spells.webp" width="2048" height="1440" loading="lazy" alt="Spell reference with class, tier and alignment filters."><figcaption>The spell reference.</figcaption></figure>
+    </section>
 
-      <h3 id="act-creatures">Creatures</h3>
-      <p>A bestiary of what the party has met. Each creature has a Shadowdark-style stat block: AC, HP, level, attacks, movement, alignment and ability modifiers. Anything you haven't found out yet shows as <strong>?</strong>. Log each <strong>encounter</strong> with its date, session, place and what happened. Anyone can add, edit or delete.</p>
+    <section class="page" id="act-creatures">
+      <div class="eyebrow">Activity</div>
+      <h2>Creatures</h2>
+      <p class="lead">A bestiary of what the party has met. Each creature has a Shadowdark-style stat block: AC, HP, level, attacks, movement, alignment and ability modifiers. Anything you haven't found out yet shows as <strong>?</strong>.</p>
+      <p>Log each <strong>encounter</strong> with its date, session, place and what happened. Anyone can add, edit or delete.</p>
       <div class="pair">
         <figure class="shot"><img src="img/creatures.webp" width="2048" height="1440" loading="lazy" alt="Searchable list of creatures."><figcaption>Every creature you've met.</figcaption></figure>
         <figure class="shot"><img src="img/creature.webp" width="2048" height="1440" loading="lazy" alt="A creature's stat block with unknown stats shown as question marks."><figcaption>A stat block, with unknowns as ?.</figcaption></figure>
       </div>
-      <p>The <strong>effects library</strong> sits alongside. It holds reusable effects with a duration and stat changes, each linked to the items, spells and creatures that cause it. <strong>Apply</strong> one to yourself or a party member and it lands on their Combat tab.</p>
+      <h3>The effects library</h3>
+      <p>It sits alongside the bestiary and holds reusable effects with a duration and stat changes, each linked to the items, spells and creatures that cause it. <strong>Apply</strong> one to yourself or a party member and it lands on their Combat tab.</p>
       <figure class="shot"><img src="img/effects.webp" width="2048" height="1440" loading="lazy" alt="Effects library with linked items, spells and creatures."><figcaption>The effects library.</figcaption></figure>
+    </section>
 
-      <h3 id="act-dm">DM mode <span class="dm-badge">DM</span></h3>
-      <p>Anyone holding a role in <code>DM_ROLE_IDS</code> is a Dungeon Master (<a href="#setup-dm">see Setup</a>). Everyone else edits only their own character.</p>
+    <section class="page" id="act-dm">
+      <div class="eyebrow">Activity</div>
+      <h2>DM mode <span class="dm-badge">DM</span></h2>
+      <p class="lead">Anyone holding a role in <code>DM_ROLE_IDS</code> is a Dungeon Master (<a href="#setup-dm">see Setup</a>). Everyone else edits only their own character.</p>
       <ul class="plain">
         <li><strong>In the Activity:</strong> open a player from <strong>Party</strong> to get their whole sheet, stash included, with every edit button. A banner says whose sheet you're editing.</li>
         <li><strong>In Discord:</strong> <code>/character sheet member:@player</code> opens that player's interactive sheet for you. Anyone else who tries is politely refused.</li>
@@ -305,32 +384,60 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
         <figure class="shot"><img src="img/dm-party.webp" width="2048" height="1440" loading="lazy" alt="Party page reminding a DM they can edit any character."><figcaption>Party, as a Dungeon Master.</figcaption></figure>
         <figure class="shot"><img src="img/dm-sheet.webp" width="2048" height="1440" loading="lazy" alt="A DM editing another player's inventory under an 'Editing as Dungeon Master' banner."><figcaption>Editing a player's sheet, stash included.</figcaption></figure>
       </div>
-
-      <footer>
-        Shadowdark Bot is a fan project for groups playing <em>Shadowdark RPG</em>. It isn't affiliated with The Arcane Library. Source and issues are on <a href="https://github.com/bunnyUFO/shadow-dark-bot">GitHub</a>. Screenshots come from the built-in sample party.
-      </footer>
     </section>
+
+    <nav class="pager" aria-label="Previous and next page"></nav>
+
+    <footer>
+      Shadowdark Bot is a fan project for groups playing <em>Shadowdark RPG</em>. It isn't affiliated with The Arcane Library. Source and issues are on <a href="https://github.com/bunnyUFO/shadow-dark-bot">GitHub</a>. Screenshots come from the built-in sample party.
+    </footer>
   </main>
 </div>
 
 <script>
-  // Highlight the section you're reading in the contents.
+  // Show one section at a time, picked by the URL hash (#setup-app, #act-dm, …).
+  // The contents list sets the order; prev/next and the phone sub-menu follow it.
   const links = [...document.querySelectorAll(".toc a")];
-  const byId = new Map(links.map((a) => [a.hash.slice(1), a]));
-  const targets = [...byId.keys()].map((id) => document.getElementById(id)).filter(Boolean);
-  const mark = () => {
-    const y = window.scrollY + 140;
-    let current = targets[0];
-    for (const t of targets) if (t.getBoundingClientRect().top + window.scrollY <= y) current = t;
-    links.forEach((a) => a.classList.remove("active"));
-    const sub = byId.get(current.id);
-    sub?.classList.add("active");
-    // keep the top-level parent lit too, for the collapsed phone contents
-    const top = sub?.closest(".toc > ol > li")?.querySelector(":scope > a");
-    if (top && top !== sub) top.classList.add("active");
-  };
-  addEventListener("scroll", mark, { passive: true });
-  mark();
+  const order = links.map((a) => a.hash.slice(1));
+  const pages = new Map([...document.querySelectorAll(".page")].map((p) => [p.id, p]));
+  const pager = document.querySelector(".pager");
+  const subnav = document.querySelector(".subnav");
+  const title = (id) => links.find((a) => a.hash === "#" + id).textContent;
+  const groupOf = (id) => links.find((a) => a.hash === "#" + id).closest(".toc > ol > li");
+
+  function show() {
+    const id = pages.has(location.hash.slice(1)) ? location.hash.slice(1) : "intro";
+    pages.forEach((p, key) => p.classList.toggle("current", key === id));
+
+    links.forEach((a) => a.classList.remove("active", "open"));
+    const group = groupOf(id);
+    const top = group.querySelector(":scope > a");
+    links.find((a) => a.hash === "#" + id).classList.add("active");
+    top.classList.add("open");
+
+    const sub = [...group.querySelectorAll("ol a")];
+    subnav.replaceChildren(...sub.map((a) => {
+      const chip = a.cloneNode(true);
+      chip.classList.toggle("active", a.hash === "#" + id);
+      return chip;
+    }));
+    subnav.hidden = sub.length === 0;
+
+    const i = order.indexOf(id);
+    const step = (j, cls, label) => j < 0 || j >= order.length
+      ? Object.assign(document.createElement("span"), { className: cls })
+      : Object.assign(document.createElement("a"), {
+          className: cls, href: "#" + order[j],
+          innerHTML: `<small>${label}</small>${title(order[j])}`,
+        });
+    pager.replaceChildren(step(i - 1, "prev", "← Previous"), step(i + 1, "next", "Next →"));
+
+    document.title = id === "intro" ? "Shadowdark Bot" : `${title(id)} · Shadowdark Bot`;
+    window.scrollTo({ top: 0, behavior: "instant" });
+    subnav.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "center" });
+  }
+  addEventListener("hashchange", show);
+  show();
 </script>
 </body>
 </html>
