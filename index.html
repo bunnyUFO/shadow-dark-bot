@@ -135,7 +135,7 @@ docker compose up -d --build</code></pre>
     <section class="page" id="setup-settings">
       <div class="eyebrow">Setup · Step 3 of 6</div>
       <h2>Settings</h2>
-      <p>Everything lives in the bot's <code>.env</code> file (see <a href="https://github.com/bunnyUFO/shadow-dark-bot/blob/main/.env.example">.env.example</a>). Restart the bot after a change.</p>
+      <p>Everything lives in the bot's <code>.env</code> file (see <a href="https://github.com/bunnyUFO/shadow-dark-bot/blob/main/.env.example">.env.example</a>). After a change, restart the bot with <code>docker compose up -d</code>. A plain <code>restart</code> keeps the old settings.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Setting</th><th>What it's for</th></tr></thead>
         <tbody>
@@ -166,14 +166,53 @@ docker compose up -d --build</code></pre>
     <section class="page" id="setup-dm">
       <div class="eyebrow">Setup · Step 5 of 6</div>
       <h2>Choose your Dungeon Masters</h2>
-      <p>Give the role your DMs already have (for example <em>game master</em>) edit rights over every sheet:</p>
+      <p class="lead">Pick a Discord role, such as the one your game masters already have (for example <em>game master</em>). Everyone who holds it can edit every character's sheet. It takes one setting and a restart.</p>
+
+      <h3>1. Copy the role's ID</h3>
+      <p>The bot needs the role's ID, not its name. Turn on <strong>Developer Mode</strong> first. It's a setting in your own Discord app, so it needs no server permission:</p>
       <ul class="plain">
-        <li>In Discord, turn on <strong>Developer Mode</strong> (User Settings → Advanced).</li>
-        <li>Open <strong>Server Settings → Roles</strong>, right-click the role and choose <strong>Copy Role ID</strong>.</li>
-        <li>Add it to <code>.env</code> and restart the bot:</li>
+        <li><strong>Desktop or browser:</strong> User Settings (the gear at the bottom left) → <strong>Advanced</strong> → <strong>Developer Mode</strong>.</li>
+        <li><strong>Phone:</strong> your profile → the gear → <strong>Advanced</strong> → <strong>Developer Mode</strong>.</li>
       </ul>
+      <p>Then copy the ID in whichever way works for you:</p>
+      <ul class="plain">
+        <li><strong>With Server Settings access:</strong> open <strong>Server Settings → Roles</strong>, right-click the role (or click its <strong>⋯</strong>) and choose <strong>Copy Role ID</strong>.</li>
+        <li><strong>Without admin access:</strong> click a member who has the role, right-click the role's tag in their profile and choose <strong>Copy Role ID</strong>.</li>
+        <li><strong>Without Developer Mode:</strong> send <code>\@RoleName</code> in a channel. The message shows <code>&lt;@&amp;123456789012345678&gt;</code>, and the number is the role ID. This only works for a role you're allowed to mention.</li>
+      </ul>
+      <p class="muted">A role ID isn't secret, so a server admin can also just send it to you.</p>
+
+      <h3>2. Add it to the bot and restart</h3>
+      <p>Put the ID in the bot's <code>.env</code>. Separate several roles with commas.</p>
 <pre><code>DM_ROLE_IDS=123456789012345678</code></pre>
-      <p class="muted">List several roles separated by commas. Giving or removing the role takes effect at that person's next login to the sheet. In Discord it's checked on every button press, so it takes effect at once. See <a href="#act-dm">DM mode</a> for what a DM can do.</p>
+      <p>Then restart from the bot's folder. A plain <code>docker compose restart</code> keeps the old settings, so use:</p>
+<pre><code>docker compose up -d</code></pre>
+
+      <h3>3. Log in again</h3>
+      <ul class="plain">
+        <li><strong>Slash commands:</strong> work straight away, because the role is checked on every button press.</li>
+        <li><strong>Website:</strong> the DM logs out and back in. The role is checked at login, and a login lasts up to <code>SESSION_TTL_HOURS</code> (12 hours by default).</li>
+        <li><strong>Activity:</strong> it has no Log out button and can keep its old login until that expires. For DM access straight away, use the website.</li>
+      </ul>
+      <p>Removing the role works the same way: it takes effect at once in slash commands, and at the next login on the website and in the Activity.</p>
+      <p>To check it worked, open <strong>Party</strong>. As a DM it says you can edit any character, and another player's sheet opens under an "Editing … as Dungeon Master" banner. <a href="#act-dm">DM mode</a> shows what a DM can do.</p>
+
+      <h3>If it doesn't work</h3>
+      <p>"Only a Dungeon Master can edit someone else's character" means the bot didn't find the role. Check these:</p>
+      <ul class="plain">
+        <li>The ID in <code>.env</code> is a role ID, not a user or server ID.</li>
+        <li>The bot was restarted with <code>docker compose up -d</code>.</li>
+        <li>The person holds the role in the server the role belongs to, and the bot is in that server.</li>
+        <li>They logged in again after the change.</li>
+      </ul>
+
+      <h3>More than one server</h3>
+      <div class="callout"><p><strong>One bot, one set of characters.</strong> Every server the bot is in shares the same database. If the bot is also in a test server, a DM edit made there changes the real characters. To try DM mode safely, use the dev runner (<a href="#setup-local">step 6</a>).</p></div>
+      <ul class="plain">
+        <li>A role ID belongs to one server, so a role with the same name in another server is a different role. List only your real game's role.</li>
+        <li>A listed role counts in any server the bot is in, even one missing from <code>ALLOWED_GUILD_IDS</code>. Whoever holds it there is a DM on the website and in the Activity, for every character.</li>
+        <li>The home-network sheet has no password. Anyone on your network who picks a DM's character gets that DM's editing rights there.</li>
+      </ul>
     </section>
 
     <section class="page" id="setup-local">
@@ -376,7 +415,7 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
       <h2>DM mode <span class="dm-badge">DM</span></h2>
       <p class="lead">Anyone holding a role in <code>DM_ROLE_IDS</code> is a Dungeon Master (<a href="#setup-dm">see Setup</a>). Everyone else edits only their own character.</p>
       <ul class="plain">
-        <li><strong>In the Activity:</strong> open a player from <strong>Party</strong> to get their whole sheet, stash included, with every edit button. A banner says whose sheet you're editing.</li>
+        <li><strong>In the Activity and on the website:</strong> open a player from <strong>Party</strong> to get their whole sheet, stash included, with every edit button. A banner says whose sheet you're editing. The home-network sheet works the same way once you've picked your own character.</li>
         <li><strong>In Discord:</strong> <code>/character sheet member:@player</code> opens that player's interactive sheet for you. Anyone else who tries is politely refused.</li>
         <li>DMs can change anything on an existing character, including deleting it. They can't create a character for someone who hasn't made one.</li>
       </ul>
