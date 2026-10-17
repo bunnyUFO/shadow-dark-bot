@@ -107,6 +107,8 @@ class SessionUser:
 
     user_id: str
     display_name: str
+    # A Dungeon Master may edit every character, not just their own.
+    is_dm: bool = False
 
 
 class SessionSigner:
@@ -122,8 +124,8 @@ class SessionSigner:
         )
         self.ttl_seconds = ttl_seconds
 
-    def issue(self, user_id: str, display_name: str) -> str:
-        return self._serializer.dumps({"uid": user_id, "name": display_name})
+    def issue(self, user_id: str, display_name: str, *, is_dm: bool = False) -> str:
+        return self._serializer.dumps({"uid": user_id, "name": display_name, "dm": is_dm})
 
     def verify(self, token: str) -> SessionUser | None:
         try:
@@ -132,4 +134,8 @@ class SessionSigner:
             return None
         if not isinstance(data, dict) or not isinstance(data.get("uid"), str):
             return None
-        return SessionUser(user_id=data["uid"], display_name=str(data.get("name", "")))
+        return SessionUser(
+            user_id=data["uid"],
+            display_name=str(data.get("name", "")),
+            is_dm=data.get("dm") is True,
+        )

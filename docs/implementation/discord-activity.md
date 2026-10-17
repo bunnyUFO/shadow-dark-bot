@@ -102,9 +102,9 @@ tokens), `schemas.py` (JSON shapes), `server.py` (uvicorn in the bot's loop + me
 | `GET /api/health` | ✅ | Liveness, no login |
 | `GET /api/auth/config` | ✅ | `client_id`, `redirect_uri`, scopes for the frontend to start a login |
 | `POST /api/auth/exchange` | ✅ | `{code, flow: "web" \| "activity"}` → exchanges the code with Discord, checks the guild allowlist, returns our session token (+ the Discord access token for the SDK on `activity`) |
-| `GET /api/me` | ✅ | Session user + whether they have a character |
+| `GET /api/me` | ✅ | Session user, whether they have a character, and `is_dm` |
 | `GET /api/character` | ✅ | Full sheet for the session user (404 if none) |
-| `GET /api/characters/{user_id}` | ✅ | Read-only view, held items only (like `/character show`) |
+| `GET /api/characters/{user_id}` | ✅ | Read-only view, held items only (like `/character show`); the full sheet with the stash for a Dungeon Master |
 | `GET /api/spells?class=&tier=` · `GET /api/items?q=&type=&limit=` | ✅ | Spell reference and item catalog (Spells / Items sections, pickers) |
 | `GET /api/guild` | ✅ | Coffers, shared storage locations with contents, magic item treasury (status + borrower's character name) |
 | `GET /api/characters` | ✅ | Party list |
@@ -112,9 +112,11 @@ tokens), `schemas.py` (JSON shapes), `server.py` (uvicorn in the bot's loop + me
 | `POST /api/character/items` · `DELETE …/items/{id}?quantity=` · `POST …/items/{id}/give` | ✅ | Carry / remove / give (`{target_location_id, quantity?}`) |
 | `GET /api/character/items/{id}/give-targets` | ✅ | Where a stack may go: guild locations, own other location (`self`), other characters' held items |
 | `POST /api/character/spells` (`{spell_id}`) · `DELETE …/spells/{known_id}` | ✅ | Learn / forget (`known_id` = `spells[].id` on the sheet) |
+| `… /api/characters/{user_id}/…` | ✅ | Every `/api/character/…` write above, for another player's character — Dungeon Masters only (403 otherwise) |
 
 Every write returns 200 with the full updated sheet (same body as `GET /api/character`).
-Errors are `{"detail": "..."}`: 401 not logged in, 403 not in an allowed guild, 404 no character
+Errors are `{"detail": "..."}`: 401 not logged in, 403 not in an allowed guild (or editing someone
+else's character without being a DM), 404 no character
 or an item/spell id that isn't yours, 422 a body of the wrong type,
 400 a rule failed (the same reason text the bot shows, which may contain `**bold**`). Interactive docs (`/docs`) are disabled.
 
@@ -125,6 +127,23 @@ locks them out by the next login.
 
 Session token is sent as `Authorization: Bearer …` — **not a cookie**, because third-party-iframe
 cookies are frequently blocked.
+
+**Dungeon Masters.** A DM can edit every character's sheet: in the web app, opening someone from
+**Party** shows their full sheet (stash included) with every edit tool, under an "Editing … as
+Dungeon Master" banner. Everyone else edits only their own character.
+
+Who is a DM is decided by Discord role: `DM_ROLE_IDS` lists role IDs (Developer Mode → Server
+Settings → Roles → right-click the role → Copy Role ID), and anyone holding one is a DM. At login
+the bot looks the user up in the server each role belongs to (cache, then REST, like the
+allowlist). Both apps use it: the public app checks the Discord user who logged in, the local app
+the owner of the character that was picked. The dev runner has no bot, so `--dm USER_ID` stands in
+for the role there.
+
+DM status is baked into the session token at login, so giving or taking the role takes effect at
+the DM's next login (at most `SESSION_TTL_HOURS` later; the local app keeps sessions until the bot
+restarts). On the local app anyone on the network can pick the DM's character, the same trust
+boundary as picking any character. In Discord, `/character sheet member:` opens another player's
+sheet for a DM (see [commands](../commands.md)); there the role is checked on every button press.
 
 ### Frontend
 
@@ -175,7 +194,7 @@ Follows the existing homelab pattern (see `proxmox-bunnylink/reverse-proxy.md`):
 
 New `.env` keys (see `.env.example`): `WEB_ENABLED`, `WEB_PORT`, `PUBLIC_BASE_URL`,
 `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `SESSION_SECRET` (≥ 32 chars), `SESSION_TTL_HOURS`,
-`ALLOWED_GUILD_IDS`, `FORWARDED_ALLOW_IPS`. The web app is off by default; with
+`ALLOWED_GUILD_IDS`, `FORWARDED_ALLOW_IPS`, and optionally `DM_ROLE_IDS`. The web app is off by default; with
 `WEB_ENABLED=true` the bot refuses to start until the required ones are set.
 
 ## Phases

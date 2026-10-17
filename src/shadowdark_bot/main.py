@@ -56,7 +56,7 @@ class ShadowDarkBot(commands.Bot):
             from shadowdark_bot.web.server import WebServer
 
             if settings.LOCAL_WEB_ENABLED:
-                self._web_servers.append(WebServer.local(settings))
+                self._web_servers.append(WebServer.local(self, settings))
                 log.info("Local web app (no login) on port %s", settings.LOCAL_WEB_PORT)
             if settings.WEB_ENABLED:
                 self._web_servers.append(WebServer.public(self, settings))

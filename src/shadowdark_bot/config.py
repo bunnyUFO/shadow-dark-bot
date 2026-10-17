@@ -34,15 +34,29 @@ class Settings(BaseSettings):
     # Reverse proxies trusted for X-Forwarded-For / -Proto (comma-separated IPs).
     FORWARDED_ALLOW_IPS: str = "127.0.0.1"
 
+    # --- Dungeon Masters: may edit every character's sheet in the web apps. ---
+    # Comma-separated Discord role IDs; whoever holds one is a DM (local and
+    # public app, checked through the bot at login).
+    DM_ROLE_IDS: str = ""
+
     @property
     def allowed_guild_ids(self) -> set[int]:
-        return {int(part) for part in self.ALLOWED_GUILD_IDS.replace(" ", "").split(",") if part}
+        return _numeric_ids(self.ALLOWED_GUILD_IDS)
+
+    @property
+    def dm_role_ids(self) -> set[int]:
+        return _numeric_ids(self.DM_ROLE_IDS)
 
     def web_config_errors(self) -> list[str]:
         """Problems that stop the web apps from starting safely (empty if fine)."""
         errors = []
         if self.LOCAL_WEB_ENABLED and self.WEB_ENABLED and self.LOCAL_WEB_PORT == self.WEB_PORT:
             errors.append("LOCAL_WEB_PORT and WEB_PORT must differ")
+        if self.LOCAL_WEB_ENABLED or self.WEB_ENABLED:
+            try:
+                _numeric_ids(self.DM_ROLE_IDS)
+            except ValueError:
+                errors.append("DM_ROLE_IDS must be comma-separated numeric role IDs")
         if not self.WEB_ENABLED:
             return errors
         for name in ("PUBLIC_BASE_URL", "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET"):
@@ -58,6 +72,11 @@ class Settings(BaseSettings):
         if "*" in [ip.strip() for ip in self.FORWARDED_ALLOW_IPS.split(",")]:
             errors.append("FORWARDED_ALLOW_IPS must list the reverse proxy's IP, not *")
         return errors
+
+
+def _numeric_ids(value: str) -> set[int]:
+    """Comma-separated numeric IDs; ValueError on anything else."""
+    return {int(part) for part in value.replace(" ", "").split(",") if part}
 
 
 settings = Settings()

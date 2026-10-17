@@ -2,9 +2,11 @@
 
 One character per Discord user. The owner edits their own sheet through an
 ephemeral, interactive embed (buttons + modals); `/character show` renders any
-player's sheet read-only. Inventory is hybrid: a carried stack either links to
-the shared `/items` catalog (reusing its gear-slot data) or is a freeform typed
-item. Carry capacity is the Shadow Dark limit, max(10, STR).
+player's sheet read-only. A Dungeon Master (DM_ROLE_IDS) can open anyone's
+sheet for editing with `/character sheet member:`. Inventory is hybrid: a
+carried stack either links to the shared `/items` catalog (reusing its
+gear-slot data) or is a freeform typed item. Carry capacity is the Shadow Dark
+limit, max(10, STR).
 """
 
 import logging
@@ -19,6 +21,7 @@ from sqlalchemy.orm import Session
 from shadowdark_bot import storage
 from shadowdark_bot.currency import format_cp, parse_value_string
 from shadowdark_bot.db import session_scope
+from shadowdark_bot.dungeon_master import holds_dm_role
 from shadowdark_bot.embeds import (
     CHARACTER_COLOR,
     build_character_location_embed,
@@ -333,7 +336,8 @@ async def _refresh_sheet(
         )
         return
     embed, view = payload
-    await interaction.response.edit_message(content=None, embed=embed, view=view)
+    # The message text is left alone: it's the DM banner when a DM is editing.
+    await interaction.response.edit_message(embed=embed, view=view)
 
 
 # ---------- Write actions (thin Discord wrappers over services.characters) ----------
@@ -1059,14 +1063,18 @@ class _QuantityModal(discord.ui.Modal):
 
 
 class _OwnerView(discord.ui.View):
-    """Base view whose interactions are restricted to the character's owner."""
+    """Base view whose interactions are restricted to the character's owner or
+    a Dungeon Master (checked live, so losing the role locks a DM out at once).
+    `user_id` is always the character's owner: every action acts on it."""
 
     def __init__(self, user_id: str) -> None:
         super().__init__(timeout=VIEW_TIMEOUT_SECONDS)
         self.user_id = user_id
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if str(interaction.user.id) != self.user_id:
+        if str(interaction.user.id) != self.user_id and not holds_dm_role(
+            interaction.user
+        ):
             await interaction.response.send_message(
                 "This isn't your character sheet.", ephemeral=True
             )
@@ -1863,8 +1871,9 @@ class DeleteConfirmView(_OwnerView):
     ) -> None:
         with session_scope() as session:
             characters.delete_character(session, self.user_id)
+        whose = "Your" if str(interaction.user.id) == self.user_id else "The"
         await interaction.response.edit_message(
-            content="Your character has been deleted.", embed=None, view=None
+            content=f"{whose} character has been deleted.", embed=None, view=None
         )
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
@@ -1878,10 +1887,38 @@ class DeleteConfirmView(_OwnerView):
             )
             return
         embed, view = payload
-        await interaction.response.edit_message(content=None, embed=embed, view=view)
+        await interaction.response.edit_message(embed=embed, view=view)
 
 
 # ---------- Cog ----------
+
+
+NOT_A_DM = (
+    "Only a Dungeon Master can edit someone else's character. "
+    "Use `/character show` to look at it."
+)
+
+
+def _dm_banner(member: discord.Member) -> str:
+    return f"🛡 Editing **{member.display_name}**'s character as Dungeon Master."
+
+
+async def _open_as_dm(interaction: discord.Interaction, member: discord.Member) -> None:
+    """`/character sheet member:` — another player's full, editable sheet (stash
+    included) for a Dungeon Master. No creating characters for others."""
+    if not holds_dm_role(interaction.user):
+        await interaction.response.send_message(NOT_A_DM, ephemeral=True)
+        return
+    payload = _build_sheet_payload(str(member.id))
+    if payload is None:
+        await interaction.response.send_message(
+            f"**{member.display_name}** doesn't have a character yet.", ephemeral=True
+        )
+        return
+    embed, view = payload
+    await interaction.response.send_message(
+        content=_dm_banner(member), embed=embed, view=view, ephemeral=True
+    )
 
 
 class PlayerCharacters(commands.Cog):
@@ -1898,7 +1935,15 @@ class PlayerCharacters(commands.Cog):
         name="sheet",
         description="Open your character sheet (create one if you don't have it)",
     )
-    async def sheet(self, interaction: discord.Interaction) -> None:
+    @app_commands.describe(
+        member="Dungeon Masters only: open this player's character to edit it"
+    )
+    async def sheet(
+        self, interaction: discord.Interaction, member: discord.Member | None = None
+    ) -> None:
+        if member is not None and member.id != interaction.user.id:
+            await _open_as_dm(interaction, member)
+            return
         user_id = str(interaction.user.id)
         payload = _build_sheet_payload(user_id)
         if payload is None:

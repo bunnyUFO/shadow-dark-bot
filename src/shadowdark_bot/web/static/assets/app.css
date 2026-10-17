@@ -163,6 +163,12 @@ button.primary:hover { filter: brightness(1.08); }
   color: var(--muted);
   font-size: 0.92rem;
 }
+/* A Dungeon Master editing someone else's sheet: hard to miss. */
+.banner.dm {
+  border-style: solid;
+  border-color: var(--torch);
+  color: var(--text);
+}
 
 /* ---------- character picker / party ---------- */
 

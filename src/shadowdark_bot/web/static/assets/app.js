@@ -4,7 +4,8 @@
 //   #/                      -> your sheet (Combat)
 //   #/sheet/<tab>           -> your sheet
 //   #/party                 -> everyone's characters
-//   #/party/<user_id>/<tab> -> someone else's sheet (read-only, no stash)
+//   #/party/<user_id>/<tab> -> someone else's sheet (read-only, no stash;
+//                              the full, editable sheet for a Dungeon Master)
 //   #/guild                 -> coffers, guild storage, magic item treasury
 //   #/items                 -> the item catalog
 //   #/spells                -> the spell reference
@@ -265,21 +266,39 @@ async function renderOtherSheet(userId, tab) {
     location.hash = `#/sheet/${tab}`;
     return;
   }
-  const c = await api(`/characters/${encodeURIComponent(userId)}`);
-  mount(app,
-    h("p", { class: "banner" },
-      h("a", { href: "#/party" }, "← Party"),
-      ` Viewing ${c.name}'s sheet (read-only)`,
-    ),
-    sheetHeader(c, tab, (t) => `#/party/${encodeURIComponent(userId)}/${t}`),
-    h("div", { class: "sheet" }, sheetBody(c, tab)),
-  );
+  const path = `/characters/${encodeURIComponent(userId)}`;
+  const hrefFor = (t) => `#/party/${encodeURIComponent(userId)}/${t}`;
+  const back = () => h("a", { href: "#/party" }, "← Party");
+  if (!me.is_dm) {
+    const c = await api(path);
+    mount(app,
+      h("p", { class: "banner" }, back(), ` Viewing ${c.name}'s sheet (read-only)`),
+      sheetHeader(c, tab, hrefFor),
+      h("div", { class: "sheet" }, sheetBody(c, tab)),
+    );
+    return;
+  }
+  // A Dungeon Master gets the full sheet with every edit tool; its writes go
+  // to /api/characters/<user_id>/… instead of your own /api/character/….
+  const draw = (c) => {
+    const y = window.scrollY;
+    const ed = editOpts(c, draw, path);
+    mount(app,
+      h("p", { class: "banner dm" }, back(), ` Editing ${c.name}'s sheet as Dungeon Master`),
+      sheetHeader(c, tab, hrefFor, ed.tools("identity")),
+      h("div", { class: "sheet" }, sheetBody(c, tab, ed)),
+    );
+    window.scrollTo(0, y);
+  };
+  draw(await api(path));
 }
 
 async function renderParty() {
   const chars = await api("/characters");
   mount(app,
-    pageHead("Party", "Everyone's characters"),
+    pageHead("Party", me.is_dm
+      ? "Everyone's characters. As Dungeon Master you can edit any of them."
+      : "Everyone's characters"),
     h("ul", { class: "picker" },
       chars.map((c) =>
         h("li", {},

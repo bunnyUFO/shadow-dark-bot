@@ -171,6 +171,7 @@ def test_me_reports_whether_a_character_exists(api):
     token = login(api, "u1")["token"]
     assert api.get("/api/me", headers=auth(token)).json() == {
         "user_id": "u1", "display_name": "User u1", "has_character": False,
+        "is_dm": False,
     }
     assert api.get("/api/character", headers=auth(token)).status_code == 404
     with session_scope() as s:
@@ -399,7 +400,7 @@ def test_proxy_headers_public_only():
     public = WebServer.public(_Bot({}), ok)._server.config
     assert public.proxy_headers is True
     assert public.forwarded_allow_ips == "192.168.1.11"
-    assert WebServer.local(ok)._server.config.proxy_headers is False
+    assert WebServer.local(_Bot({}), ok)._server.config.proxy_headers is False
 
 
 # ---------- local (home network, no login) mode ----------

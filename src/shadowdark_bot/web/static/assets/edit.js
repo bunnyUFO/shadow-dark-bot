@@ -1,6 +1,6 @@
-// Editing layer for your own sheet: one modal form helper plus the wiring that
-// feeds sheetBody's tool/action slots. Every write returns the full sheet JSON,
-// which is handed to redraw().
+// Editing layer for a sheet (your own, or anyone's for a Dungeon Master): one
+// modal form helper plus the wiring that feeds sheetBody's tool/action slots.
+// Every write returns the full sheet JSON, which is handed to redraw().
 
 import { api } from "./api.js";
 import { h, slots } from "./dom.js";
@@ -149,8 +149,12 @@ function catalogItems() {
 
 export const btn = (label, onClick) => h("button", { type: "button", class: "tool", onClick }, label);
 
-export function editOpts(c, redraw) {
-  const write = async (path, method, body) => redraw(await api(path, { method, body }));
+// `base` is where the sheet's API lives: "/character" for your own, or
+// "/characters/<user_id>" when a Dungeon Master edits someone else's. Paths
+// below are written for your own sheet and re-rooted by url().
+export function editOpts(c, redraw, base = "/character") {
+  const url = (path) => path.replace(/^\/character\b/, base);
+  const write = async (path, method, body) => redraw(await api(url(path), { method, body }));
 
   const tools = (key) => {
     if (key === "gold") {
@@ -296,7 +300,7 @@ export function editOpts(c, redraw) {
     moveAction(item),
     btn("Give", async () => {
       try {
-        const res = await api(`/character/items/${item.id}/give-targets`);
+        const res = await api(url(`/character/items/${item.id}/give-targets`));
         const targets = Array.isArray(res) ? res : res.targets ?? [];
         if (!targets.length) return openForm({ title: "Give", message: "Nowhere to give this to." });
         openForm({
