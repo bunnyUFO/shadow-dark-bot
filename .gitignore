@@ -46,3 +46,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Beads lock file made by bd in the repository root
+.beads.gate.lock

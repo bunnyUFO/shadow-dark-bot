@@ -1,0 +1,64 @@
+name: Hub events
+on:
+  pull_request:
+    types: [opened, reopened, closed]
+  workflow_run:
+    workflows: ["Deploy"]
+    types: [completed]
+permissions: {}
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    continue-on-error: true
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Post the event
+        env:
+          BUW_CARDS_PASSWORD: ${{ secrets.BUW_CARD_DEPLOY_TOKEN }}
+          PROJECT: shadowdark
+          PREFIX: sd
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          WR_NAME: ${{ github.event.workflow_run.name }}
+          WR_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WR_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WR_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          # kind/title/url/bead from the env vars only; never put workflow expressions into this script
+          if [ -z "${BUW_CARDS_PASSWORD:-}" ]; then
+            echo "::notice::BUW_CARD_DEPLOY_TOKEN is not set; skipping"
+            exit 0
+          fi
+          ALT=""
+          case "$EVENT" in
+            pull_request)
+              case "$ACTION" in
+                opened|reopened) KIND=pr-opened; WORD=opened ;;
+                closed)
+                  if [ "$MERGED" = "true" ]; then KIND=pr-merged; WORD=merged; else exit 0; fi ;;
+                *) exit 0 ;;
+              esac
+              TITLE="$PROJECT: PR $WORD: $PR_TITLE"; URL="$PR_URL"; REF="$PR_BRANCH"; ALT="$PR_TITLE" ;;
+            workflow_run)
+              case "$WR_CONCLUSION" in
+                success) KIND=ci-passed; WORD=passed ;;
+                failure|timed_out) KIND=ci-failed; WORD=failed ;;
+                *) exit 0 ;;
+              esac
+              TITLE="$PROJECT: $WR_NAME $WORD on $WR_BRANCH"; URL="$WR_URL"; REF="$WR_BRANCH" ;;
+            *) exit 0 ;;
+          esac
+          TITLE="${TITLE:0:120}"
+          PAT="(^|[^a-z0-9])${PREFIX}-[a-z0-9]{3,10}(\.[0-9]+)*"
+          BEAD=$(printf '%s' "$REF" | grep -oE "$PAT" | head -n 1 | sed -E 's/^[^a-z0-9]+//' || true)
+          if [ -z "$BEAD" ] && [ -n "$ALT" ]; then
+            BEAD=$(printf '%s' "$ALT" | grep -oE "$PAT" | head -n 1 | sed -E 's/^[^a-z0-9]+//' || true)
+          fi
+          curl -fsS --max-time 10 https://api.workspaces.bunnyufo.net/cards.mjs -o "$RUNNER_TEMP/cards.mjs"
+          timeout 20 node "$RUNNER_TEMP/cards.mjs" event "$KIND" --title "$TITLE" --project "$PROJECT" ${BEAD:+--bead "$BEAD"} --url "$URL" --source hub-events --via api
