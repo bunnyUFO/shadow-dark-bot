@@ -1,0 +1,42 @@
+{
+  "extraKnownMarketplaces": {
+    "workspace-skills": {
+      "source": {
+        "source": "github",
+        "repo": "bunnyUFO-lab/workspace-skills"
+      }
+    },
+    "mattpocock": {
+      "source": {
+        "source": "github",
+        "repo": "mattpocock/skills"
+      }
+    },
+    "egm": {
+      "source": {
+        "source": "github",
+        "repo": "google/elephant-goldfish-model"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "bunnyufo@workspace-skills": true,
+    "dev-sprint@workspace-skills": true,
+    "hub-hooks@workspace-skills": true,
+    "mattpocock-skills@mattpocock": true,
+    "egm@egm": true
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/beads-start.sh\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}
