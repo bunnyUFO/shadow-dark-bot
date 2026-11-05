@@ -74,4 +74,4 @@
 export:
     auto: false
 sync:
-    remote: "git+https://github.com/bunnyUFO-lab/beads-shadowdark.git"
+    remote: "git+https://github.com/bunnyUFO-beads/beads-shadowdark.git"
