@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Beads in a cloud session: a replica cloned from S3, in the sandbox. Never blocks a session.
 # On a machine with the hub-hooks mod this does nothing: the mod connects the checkout to the Dolt server.
-# Claude Code runs it at session start. Codex runs it by hand, as AGENTS.md says: CLOUD_BEADS=1 bash .claude/hooks/beads-start.sh
+# Claude Code runs it at session start where the repository wires it in. Anywhere else, run it by hand first: CLOUD_BEADS=1 bash <this file>
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || [ "${CLOUD_BEADS:-}" = "1" ] || exit 0
 top="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+[ -n "$top" ] || exit 0
+# A second run after the redirect is written must not read the replica as this checkout.
+top=$(cd "$top" && pwd)
 [ -n "$top" ] || exit 0
 remote=$(sed -n 's/^[[:space:]]*remote:[[:space:]]*"\{0,1\}\(s3:[^"[:space:]]*\)"\{0,1\}.*/\1/p' "$top/.beads/config.yaml" 2>/dev/null | head -n 1)
 prefix=$(sed -n 's/.*Issue prefix: `\([a-z0-9]*\)`.*/\1/p' "$top/CLAUDE.md" 2>/dev/null | head -n 1)
@@ -22,10 +25,16 @@ if [ ! -d "$replica/.beads" ]; then
   git config user.email "$noreply"; git config user.name bunnyUFO; git config beads.role maintainer
   timeout 170 bd init --server --remote "$remote" --prefix "$prefix" --skip-agents --skip-hooks --non-interactive >/dev/null 2>&1 || { echo "Beads: could not clone $remote"; rm -rf "$replica"; exit 0; }
 fi
+# bd follows this to the replica, in every command and with nothing in the environment. It stays out of git.
+printf '%s\n' "$replica/.beads" > "$top/.beads/redirect"
+exclude=$(git -C "$top" rev-parse --git-path info/exclude 2>/dev/null)
+case "$exclude" in /*) ;; *) exclude="$top/$exclude" ;; esac
+grep -qs '^\.beads/redirect$' "$exclude" || echo '.beads/redirect' >> "$exclude"
+# bd fills an issue's owner from this folder's git address, and a store's history cannot be rewritten.
+git -C "$top" config user.email "$noreply"
+git -C "$top" config beads.role maintainer
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
-  { echo "export BEADS_DIR=\"$replica/.beads\""; echo "export GIT_AUTHOR_EMAIL=\"$noreply\""; echo "export GIT_COMMITTER_EMAIL=\"$noreply\""; echo "export BD_NON_INTERACTIVE=1"; } >> "$CLAUDE_ENV_FILE"
-else
-  echo "Beads: run this before using bd: export BEADS_DIR=\"$replica/.beads\" GIT_AUTHOR_EMAIL=\"$noreply\" BD_NON_INTERACTIVE=1"
+  { echo "unset BEADS_DIR"; echo "export BD_NON_INTERACTIVE=1"; } >> "$CLAUDE_ENV_FILE"
 fi
-echo "Beads: a replica of $remote is ready. Run bd sync before finishing, or your changes stay in this sandbox."
+echo "Beads: a replica of $remote is ready. Sync before finishing, or your changes stay in this sandbox."
 exit 0
