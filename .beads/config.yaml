@@ -72,4 +72,6 @@
 # - github.token    → use GITHUB_TOKEN env var instead
 
 export:
-    auto: true
+    auto: false
+sync:
+    remote: "git+https://github.com/bunnyUFO-lab/beads-shadowdark.git"
