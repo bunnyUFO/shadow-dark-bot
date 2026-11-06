@@ -182,7 +182,7 @@ def test_store_is_all_or_nothing(dbsession):
     with session_scope() as s:
         ids = _store_world(s)
         ids["closet"] = guild.create_location(s, name="Tight", max_gear_slots=3).id
-    with pytest.raises(CharacterError, match="holds"):
+    with pytest.raises(CharacterError, match="slots free"):
         with session_scope() as s:
             guild.store(s, "u1", location_id=ids["closet"], items=[
                 ("held", ids["held"]["Torch"], None),  # fits (2 of 3)
@@ -191,6 +191,30 @@ def test_store_is_all_or_nothing(dbsession):
     with session_scope() as s:
         assert _contents(s, ids["closet"]) == {}
         assert _held(s) == {"Torch": 2, "Rope": 2}
+
+
+def test_store_over_capacity_reports_the_whole_selection(dbsession):
+    # QA case: capacity 4, 2 used, then 3 torches + 1 longsword (4 slots) selected.
+    with session_scope() as s:
+        _world(s)
+        sword = Item(name="Longsword", gear_slots=1, bundle_size=1, item_type=ITEM_TYPE_COMMON)
+        s.add(sword)
+        s.flush()
+        characters.carry(s, "u1", item_name="Torch", quantity=3)
+        characters.carry(s, "u1", item_name="Longsword", quantity=1)
+        held = {e.display_name: e.id for e in storage.location_entries(
+            s, storage.held_location(s, "u1").id)}
+        loc = guild.create_location(s, name="Chest", max_gear_slots=4)
+        storage.add_stack(s, loc, quantity=2, item=s.query(Item).filter_by(name="Rope").one())
+        loc_id = loc.id
+    with pytest.raises(CharacterError) as err:
+        with session_scope() as s:
+            guild.store(s, "u1", location_id=loc_id, items=[
+                ("held", held["Torch"], None), ("held", held["Longsword"], None)])
+    assert str(err.value) == "**Chest** has 2 of 4 slots free; these items need 4."
+    with session_scope() as s:
+        assert _contents(s, loc_id) == {"Rope": 2}
+        assert _held(s) == {"Torch": 3, "Longsword": 1}
 
 
 def test_store_refuses_magical_and_freeform(dbsession):

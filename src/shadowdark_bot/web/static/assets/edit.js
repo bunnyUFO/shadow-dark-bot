@@ -557,7 +557,7 @@ export function guildEditOpts(me, redraw, party = []) {
     }
     openForm({
       title: `Store in ${loc.name}`,
-      message: `${slots(loc.used_slots)} / ${slots(loc.max_slots)} slots used. Choose how many of each. `
+      message: `Free: ${slots(loc.max_slots - loc.used_slots)} of ${slots(loc.max_slots)} slots. Choose how many of each. `
         + "Nothing moves unless everything fits.",
       fields: rows.map(({ role, i, hint }) => ({
         name: `q_${role}_${i.id}`, label: i.name, type: "number", value: 0, min: 0, max: i.quantity,
