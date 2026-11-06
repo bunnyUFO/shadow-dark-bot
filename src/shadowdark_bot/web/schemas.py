@@ -31,6 +31,7 @@ from shadowdark_bot.rules import (
     xp_needed,
 )
 from shadowdark_bot.services import characters, guild as guild_service
+from shadowdark_bot.services.catalog import clean_description
 
 
 class UserOut(BaseModel):
@@ -282,6 +283,17 @@ class CatalogItemIn(BaseModel):
     value: str | None = Field(default=None, max_length=40)  # "5gp 2sp 3cp"
 
 
+class CatalogItemPatch(BaseModel):
+    """Every field optional: omitted leaves it alone, "" clears description/value."""
+
+    name: str | None = Field(default=None, max_length=100)
+    item_type: str | None = None
+    description: str | None = Field(default=None, max_length=2000)
+    gear_slots: float | None = None
+    bundle_size: int | None = None
+    value: str | None = Field(default=None, max_length=40)
+
+
 class LearnSpellIn(BaseModel):
     spell_id: int
 
@@ -374,7 +386,7 @@ def catalog_item_out(item: Item) -> CatalogItemOut:
         gear_slots=item.gear_slots,
         bundle_size=item.bundle_size,
         value_cp=item.value_cp,
-        description=item.description,
+        description=clean_description(item.description),
     )
 
 
@@ -392,7 +404,7 @@ def _stack_out(e: InventoryEntry) -> ItemStackOut:
         slot_cost=e.slot_cost,
         value_cp=item.value_cp if item else None,
         # Freeform stacks keep their typed description in `notes`.
-        description=item.description if item else e.notes,
+        description=clean_description(item.description) if item else e.notes,
         notes=e.notes if item else None,
     )
 

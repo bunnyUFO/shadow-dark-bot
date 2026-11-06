@@ -132,3 +132,102 @@ def test_return_rules(dbsession):
         with pytest.raises(CharacterError, match="Only the person"):
             guild.return_borrow(s, ids["ring"], only_borrower="u2")
         assert s.get(TreasuryEntry, ids["ring"]).status == "borrowed"
+
+
+# ---------- create_location / store ----------
+
+
+def _closet(session, slots=3):
+    return guild.create_location(session, name="Closet", max_gear_slots=slots).id
+
+
+def _store_world(session):
+    """Ysolde carries 2 torches and 2 ropes, and has 2 more ropes in her stash."""
+    ids = _world(session)
+    characters.carry(session, "u1", item_name="Torch", quantity=2)
+    characters.carry(session, "u1", item_name="Rope", quantity=2)
+    characters.carry(session, "u1", item_name="Rope", quantity=2, role="stash")
+    held = storage.held_location(session, "u1")
+    stash = storage.stash_location(session, "u1")
+    by_name = lambda loc: {e.display_name: e.id for e in storage.location_entries(session, loc.id)}
+    ids.update(closet=_closet(session, 10), held=by_name(held), stash=by_name(stash))
+    return ids
+
+
+def _contents(session, location_id):
+    return {e.display_name: e.quantity for e in storage.location_entries(session, location_id)}
+
+
+def test_store_moves_stacks_from_held_and_stash(dbsession):
+    with session_scope() as s:
+        ids = _store_world(s)
+        res = guild.store(s, "u1", location_id=ids["closet"], items=[
+            ("held", ids["held"]["Torch"], None),
+            ("stash", ids["stash"]["Rope"], None),
+        ])
+        assert res.location_name == "Closet" and len(res.moved) == 2
+        assert _contents(s, ids["closet"]) == {"Torch": 2, "Rope": 2}
+        assert _held(s) == {"Rope": 2}
+
+
+def test_store_partial_quantity_leaves_the_rest(dbsession):
+    with session_scope() as s:
+        ids = _store_world(s)
+        guild.store(s, "u1", location_id=ids["closet"], items=[("held", ids["held"]["Rope"], 1)])
+        assert _contents(s, ids["closet"]) == {"Rope": 1}
+        assert _held(s) == {"Torch": 2, "Rope": 1}
+
+
+def test_store_is_all_or_nothing(dbsession):
+    with session_scope() as s:
+        ids = _store_world(s)
+        ids["closet"] = guild.create_location(s, name="Tight", max_gear_slots=3).id
+    with pytest.raises(CharacterError, match="holds"):
+        with session_scope() as s:
+            guild.store(s, "u1", location_id=ids["closet"], items=[
+                ("held", ids["held"]["Torch"], None),  # fits (2 of 3)
+                ("held", ids["held"]["Rope"], None),  # does not
+            ])
+    with session_scope() as s:
+        assert _contents(s, ids["closet"]) == {}
+        assert _held(s) == {"Torch": 2, "Rope": 2}
+
+
+def test_store_refuses_magical_and_freeform(dbsession):
+    with session_scope() as s:
+        ids = _store_world(s)
+        ring = s.query(Item).filter_by(name="Ring").one()
+        held = storage.held_location(s, "u1")
+        magic = InventoryEntry(location_id=held.id, item_id=ring.id, quantity=1)
+        s.add(magic)
+        s.flush()
+        characters.carry(s, "u1", item_name="Idol", quantity=1, freeform_slots=0.5)
+        idol = next(e.id for e in storage.location_entries(s, held.id) if e.display_name == "Idol")
+        for entry in (magic.id, idol):
+            with pytest.raises(CharacterError):
+                guild.store(s, "u1", location_id=ids["closet"], items=[("held", entry, None)])
+
+
+def test_store_rejects_empty_list_and_non_guild_target(dbsession):
+    with session_scope() as s:
+        ids = _store_world(s)
+        with pytest.raises(CharacterError, match="at least one"):
+            guild.store(s, "u1", location_id=ids["closet"], items=[])
+        stash = storage.stash_location(s, "u1")
+        with pytest.raises(CharacterError, match="guild storage"):
+            guild.store(s, "u1", location_id=stash.id, items=[("held", ids["held"]["Torch"], None)])
+        with pytest.raises(CharacterError, match="guild storage"):
+            guild.store(s, "u1", location_id=99999, items=[("held", ids["held"]["Torch"], None)])
+
+
+def test_create_location_rules(dbsession):
+    with session_scope() as s:
+        loc = guild.create_location(s, name="  Cellar ", max_gear_slots=10, description="  damp ")
+        assert (loc.name, loc.max_gear_slots, loc.description, loc.kind) == ("Cellar", 10, "damp", "inventory")
+        assert guild.create_location(s, name="Attic").max_gear_slots == 0
+        with pytest.raises(CharacterError, match="empty"):
+            guild.create_location(s, name="  ")
+        with pytest.raises(CharacterError, match="≥ 0"):
+            guild.create_location(s, name="Pit", max_gear_slots=-1)
+        with pytest.raises(CharacterError, match="already exists"):
+            guild.create_location(s, name="Cellar")

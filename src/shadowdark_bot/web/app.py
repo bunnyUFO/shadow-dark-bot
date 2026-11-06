@@ -49,6 +49,7 @@ from shadowdark_bot.web.auth import (
 )
 from shadowdark_bot.web.schemas import (
     CatalogItemIn,
+    CatalogItemPatch,
     CatalogItemOut,
     CharacterSheetOut,
     BuyIn,
@@ -369,6 +370,22 @@ def create_app(
             item = catalog.create_item(
                 session,
                 user.user_id,
+                name=body.name,
+                item_type=body.item_type,
+                description=body.description,
+                gear_slots=body.gear_slots,
+                bundle_size=body.bundle_size,
+                value=body.value,
+            )
+            return catalog_item_out(item)
+
+    @app.patch("/api/items/{item_id}")
+    def edit_catalog_item(item_id: int, body: CatalogItemPatch, user: User) -> CatalogItemOut:
+        """Open to everyone, like /items edit."""
+        with session_scope() as session:
+            item = catalog.update_item(
+                session,
+                item_id,
                 name=body.name,
                 item_type=body.item_type,
                 description=body.description,

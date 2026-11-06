@@ -97,3 +97,75 @@ def test_borrow_and_return_treasury_item(api):
     assert api.post(f"/api/guild/treasury/{ids['ring']}/return", headers=bob).status_code == 400
     assert api.post("/api/guild/treasury/999/borrow", headers=bob).status_code == 400
     assert api.post(f"/api/guild/treasury/{ids['ring']}/borrow").status_code == 401
+
+
+# ---------- add a location / store items ----------
+
+
+def test_add_location_listed_for_any_viewer(api):
+    ids, bob, _alice = _guild_world(api)
+    r = api.post("/api/guild/locations",
+                 json={"name": "Cellar", "max_gear_slots": 10, "description": "Damp"}, headers=bob)
+    assert r.status_code == 200
+    cellar = next(l for l in r.json()["locations"] if l["name"] == "Cellar")
+    assert cellar["max_slots"] == 10 and cellar["description"] == "Damp"
+    same = api.post("/api/guild/locations", json={"name": "Cellar", "max_gear_slots": 1}, headers=bob)
+    assert same.status_code == 400 and "already exists" in same.json()["detail"]
+    assert api.post("/api/guild/locations", json={"name": "X"}).status_code == 401
+    # a viewer with no character can still add one
+    with session_scope() as s:
+        characters.delete_character(s, "u2")
+    nochar = auth(login(api, "u2")["token"])
+    r = api.post("/api/guild/locations", json={"name": "Attic", "max_gear_slots": 4}, headers=nochar)
+    assert r.status_code == 200 and any(l["name"] == "Attic" for l in r.json()["locations"])
+
+
+def test_store_two_items(api):
+    ids, bob, _alice = _guild_world(api)
+    sheet = api.get("/api/character", headers=bob).json()
+    arrow, rope = _stack(sheet, "held", "Arrow"), _stack(sheet, "stash", "Rope")
+    r = api.post(f"/api/guild/locations/{ids['room']}/store", headers=bob, json={"items": [
+        {"role": "held", "entry_id": arrow["id"], "quantity": 5},
+        {"role": "stash", "entry_id": rope["id"]},
+    ]})
+    assert r.status_code == 200
+    room = next(l for l in r.json()["locations"] if l["location_id"] == ids["room"])
+    names = {i["name"]: i["quantity"] for i in room["items"]}
+    assert names == {"Rope": 5, "Arrow": 5}  # 4 ropes were already there
+    after = api.get("/api/character", headers=bob).json()
+    assert _stack(after, "held", "Arrow")["quantity"] == 20
+    assert not any(i["name"] == "Rope" for i in after["stash"]["items"])
+
+
+def test_store_rolls_back_when_a_later_item_does_not_fit(api):
+    ids, bob, _alice = _guild_world(api)
+    tight = api.post("/api/guild/locations", json={"name": "Tight", "max_gear_slots": 1}, headers=bob)
+    tight_id = next(l for l in tight.json()["locations"] if l["name"] == "Tight")["location_id"]
+    sheet = api.get("/api/character", headers=bob).json()
+    arrow, rope = _stack(sheet, "held", "Arrow"), _stack(sheet, "stash", "Rope")
+    guild_before = api.get("/api/guild", headers=bob).json()
+    r = api.post(f"/api/guild/locations/{tight_id}/store", headers=bob, json={"items": [
+        {"role": "stash", "entry_id": rope["id"]},  # fits (1 of 1)
+        {"role": "held", "entry_id": arrow["id"], "quantity": 20},  # does not
+    ]})
+    assert r.status_code == 400 and "holds" in r.json()["detail"]
+    assert api.get("/api/character", headers=bob).json() == sheet
+    assert api.get("/api/guild", headers=bob).json() == guild_before
+
+
+def test_store_errors(api):
+    ids, bob, _alice = _guild_world(api)
+    url = f"/api/guild/locations/{ids['room']}/store"
+    sheet = api.get("/api/character", headers=bob).json()
+    arrow = _stack(sheet, "held", "Arrow")["id"]
+    assert api.post(url, json={"items": [{"role": "x", "entry_id": arrow}]}, headers=bob).status_code == 422
+    assert api.post(url, json={"items": []}, headers=bob).status_code == 400
+    assert api.post(url, json={"items": [{"role": "held", "entry_id": arrow}]}).status_code == 401
+    idol = _stack(sheet, "held", "Idol")["id"]
+    bad = api.post(url, json={"items": [{"role": "held", "entry_id": idol}]}, headers=bob)
+    assert bad.status_code == 400
+    with session_scope() as s:
+        characters.delete_character(s, "u2")
+    nochar = auth(login(api, "u2")["token"])
+    ok_body = {"items": [{"role": "held", "entry_id": arrow}]}
+    assert api.post(url, json=ok_body, headers=nochar).status_code == 404
