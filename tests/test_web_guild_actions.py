@@ -148,7 +148,7 @@ def test_store_rolls_back_when_a_later_item_does_not_fit(api):
         {"role": "stash", "entry_id": rope["id"]},  # fits (1 of 1)
         {"role": "held", "entry_id": arrow["id"], "quantity": 20},  # does not
     ]})
-    assert r.status_code == 400 and "holds" in r.json()["detail"]
+    assert r.status_code == 400 and "slots free" in r.json()["detail"]
     assert api.get("/api/character", headers=bob).json() == sheet
     assert api.get("/api/guild", headers=bob).json() == guild_before
 

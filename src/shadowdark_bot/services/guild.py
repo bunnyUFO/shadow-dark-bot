@@ -24,6 +24,7 @@ from shadowdark_bot.models import (
     TreasuryEntry,
 )
 from shadowdark_bot.services import characters
+from shadowdark_bot.rules import fmt_slots, stack_slots
 from shadowdark_bot.services.characters import CharacterError
 
 STATUS_AVAILABLE = "available"
@@ -82,14 +83,16 @@ def store(
 ) -> StoreResult:
     """Move several stacks from the character's own held items or stash into a
     shared storage location. Each item is `(role, entry_id, quantity)` with
-    `quantity=None` meaning the whole stack. All or nothing: the first item that
-    doesn't fit raises, and the caller's transaction rolls the rest back."""
+    `quantity=None` meaning the whole stack. All or nothing: the slot cost of the
+    whole selection is checked up front, and anything that raises rolls the rest
+    back with the caller's transaction."""
     if not items:
         raise CharacterError("Choose at least one item to store.")
     characters.require_character(session, user_id)
     target = session.get(Location, location_id)
     if target is None or target.kind != "inventory" or target.owner_user_id is not None:
         raise CharacterError("That isn't a guild storage location.")
+    _check_store_fits(session, user_id, target, items)
     moved = [
         characters.give(
             session,
@@ -102,6 +105,51 @@ def store(
         for role, entry_id, quantity in items
     ]
     return StoreResult(location_name=target.name, moved=moved)
+
+
+def _check_store_fits(
+    session: Session,
+    user_id: str,
+    target: Location,
+    items: list[tuple[str, int, int | None]],
+) -> None:
+    """Raise one message when the whole selection needs more slots than `target`
+    has free. Bundle-aware, and stacks of the same item merge with each other and
+    with what is already there. Entries `give` would reject for another reason are
+    skipped here; `give` reports those."""
+    wanted: dict[tuple, list] = {}  # merge key -> [entry, quantity]
+    for role, entry_id, quantity in items:
+        entry = characters.location_entry(session, user_id, role, entry_id)
+        if entry is None or (quantity is not None and quantity < 1):
+            continue
+        qty = entry.quantity if quantity is None else min(quantity, entry.quantity)
+        key = (
+            ("item", entry.item_id)
+            if entry.item_id is not None
+            else ("free", entry.display_name)
+        )
+        if key in wanted:
+            wanted[key][1] += qty
+        else:
+            wanted[key] = [entry, qty]
+    needed = 0.0
+    for (kind, ident), (entry, qty) in wanted.items():
+        gear_slots, bundle = entry.effective_gear_slots, entry.effective_bundle_size
+        existing = storage.find_catalog_stack(
+            session, target.id, ident
+        ) if kind == "item" else storage.find_freeform_stack(session, target.id, ident)
+        have = existing.quantity if existing else 0
+        needed += stack_slots(have + qty, gear_slots, bundle) - stack_slots(
+            have, gear_slots, bundle
+        )
+    used = storage.used_slots(storage.location_entries(session, target.id))
+    free = target.max_gear_slots - used
+    if needed > free:
+        raise CharacterError(
+            f"**{target.name}** has {fmt_slots(free)} of "
+            f"{fmt_slots(target.max_gear_slots)} slots free; these items need "
+            f"{fmt_slots(needed)}."
+        )
 
 
 @dataclass
