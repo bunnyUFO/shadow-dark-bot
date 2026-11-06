@@ -29,6 +29,9 @@ export function mount(target, ...children) {
   append(target, children);
 }
 
+// Descriptions are plain text here; drop leftover **bold** / __bold__ markers.
+export const plain = (s) => String(s ?? "").replace(/(\*\*|__)(.+?)\1/gs, "$2");
+
 export const signed = (n) => (n >= 0 ? `+${n}` : `${n}`);
 
 // Gear slots without a trailing ".0", like the bot (1.0 -> "1", 0.5 -> "0.5").
