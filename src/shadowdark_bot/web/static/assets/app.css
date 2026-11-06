@@ -368,16 +368,12 @@ button.primary:hover { filter: brightness(1.08); }
 
 /* ---------- section navigation ---------- */
 
-.topnav .sections { display: none; gap: 4px; }
-.topnav .sections a,
 .bottomnav a {
   color: var(--muted);
   padding: 6px 10px;
   border-radius: 8px;
 }
-.topnav .sections a:hover,
 .bottomnav a:hover { color: var(--text); text-decoration: none; }
-.topnav .sections a.active,
 .bottomnav a.active { color: var(--torch); }
 
 /* Phones: sections live in a bottom tab bar, within thumb reach. */
@@ -410,30 +406,20 @@ button.primary:hover { filter: brightness(1.08); }
 body.signed-in .bottomnav { display: grid; }
 body.signed-in main { padding-bottom: calc(60px + var(--safe-bottom) + 16px); }
 
+/* Desktop: the same tab bar, centered to the content column instead of stretched. */
 @media (min-width: 720px) {
-  .topnav { gap: 20px; font-size: 1.05rem; }
-  .topnav .sections { display: flex; gap: 6px; }
-  .topnav .sections a {
-    padding: 9px 16px;
-    font-size: 1.1rem;
-    font-weight: 600;
-    border-radius: 999px;
-    transition: background 0.12s, color 0.12s;
+  .bottomnav {
+    left: 50%;
+    right: auto;
+    width: min(100%, 860px);
+    transform: translateX(-50%);
+    border: 1px solid var(--line);
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    padding: 6px;
   }
-  .topnav .sections a:hover { background: var(--panel-2); }
-  .topnav .sections a.active {
-    background: var(--torch);
-    color: var(--bg);
-  }
-}
-
-/* Narrow desktops / tablets: keep the bigger nav from overflowing. */
-@media (min-width: 720px) and (max-width: 899px) {
-  .topnav { gap: 8px; }
-  .topnav .sections { gap: 2px; }
-  .topnav .sections a { padding: 8px 11px; font-size: 1rem; }
-  body.signed-in .bottomnav { display: none; }
-  body.signed-in main { padding-bottom: 32px; }
+  .bottomnav a { min-height: 56px; font-size: 0.9rem; }
+  .bottomnav .ico { font-size: 1.4rem; }
 }
 
 /* ---------- filters ---------- */
