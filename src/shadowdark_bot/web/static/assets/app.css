@@ -648,3 +648,6 @@ span.round-box { cursor: default; }
 .rows > li.lost { opacity: 0.65; }
 .lost-badge { display: none; font-size: 0.75rem; color: var(--danger); }
 .rows > li.lost .lost-badge { display: inline; }
+
+/* Buttons under a page title (Guild: add storage location, Items: add item). */
+.page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }

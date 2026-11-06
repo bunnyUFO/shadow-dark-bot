@@ -94,7 +94,7 @@ def test_save_identity_creates_character_and_locations(dbsession):
         assert char.alignment == "Lawful"
         assert char.ancestry is None  # blank → None
         assert storage.held_location(s, "u1").name == "Bob"
-        assert storage.stash_location(s, "u1").name == "Bob Guild Stash"
+        assert storage.stash_location(s, "u1").name == "Bob Personal Stash"
 
 
 def test_save_identity_updates_and_renames_locations(dbsession):
@@ -208,7 +208,7 @@ def test_carry_catalog_and_freeform(dbsession):
                          freeform_slots=0.5, notes="Creepy")
         r = characters.carry(s, "u1", item_name="Rope", quantity=1,
                              role=LOCATION_ROLE_STASH)
-        assert r.location_name == "Bob Guild Stash"
+        assert r.location_name == "Bob Personal Stash"
     with session_scope() as s:
         held = _held_entries(s)
         assert held["Arrow"].quantity == 25
@@ -347,8 +347,8 @@ def test_give_blocks_other_stash_and_lists_targets(dbsession):
         held = storage.held_location(s, "u1")
         names = [loc.name for loc in characters.give_target_locations(s, "u1", held)]
         assert names[0] == "Armory"  # guild locations first
-        assert "Bob Guild Stash" in names and "Amy" in names
-        assert "Amy Guild Stash" not in names and "Bob" not in names
+        assert "Bob Personal Stash" in names and "Amy" in names
+        assert "Amy Personal Stash" not in names and "Bob" not in names
 
 
 # ---------- spells ----------

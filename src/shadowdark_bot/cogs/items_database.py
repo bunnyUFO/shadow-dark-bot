@@ -9,6 +9,7 @@ from shadowdark_bot.currency import format_cp, parse_to_cp, parse_value_string
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.embeds import build_item_embed
 from shadowdark_bot.services import effects
+from shadowdark_bot.services.catalog import type_change_error
 from shadowdark_bot.sharing import ShareButton, ShareableView
 from shadowdark_bot.models import (
     ITEM_TYPE_ARMOR,
@@ -286,35 +287,7 @@ def _format_list_line(item: Item) -> str:
 
 
 def _check_type_change(session, item: Item, new_type: str | None) -> str | None:
-    """Return an error string if changing item.item_type to new_type is blocked
-    by existing inventory/treasury references, else None."""
-    if new_type is None or new_type == item.item_type:
-        return None
-    going_magical = new_type == ITEM_TYPE_MAGICAL
-    leaving_magical = item.item_type == ITEM_TYPE_MAGICAL
-    if going_magical:
-        blocking = session.scalar(
-            select(func.count())
-            .select_from(InventoryEntry)
-            .where(InventoryEntry.item_id == item.id)
-        ) or 0
-        if blocking:
-            return (
-                f"Cannot mark **{item.name}** as magical — it still has "
-                f"{blocking} inventory stack(s). Remove them first."
-            )
-    elif leaving_magical:
-        blocking = session.scalar(
-            select(func.count())
-            .select_from(TreasuryEntry)
-            .where(TreasuryEntry.item_id == item.id)
-        ) or 0
-        if blocking:
-            return (
-                f"Cannot change **{item.name}** from magical — it still "
-                f"has {blocking} treasury instance(s). Remove them first."
-            )
-    return None
+    return type_change_error(session, item, new_type)
 
 
 # ---------- Edit modal ----------

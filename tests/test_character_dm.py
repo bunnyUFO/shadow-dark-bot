@@ -119,7 +119,7 @@ def test_dm_opens_another_players_sheet_for_editing(table):
     embed, inv_view = asyncio.run(inventory())
     assert "Lockpicks" in str(embed.to_dict())
     labels = {getattr(c, "label", None) for c in inv_view.children}
-    assert {"Manage Held", "Manage Stash", "Edit Gold"} <= labels
+    assert {"Manage Held", "Manage Personal Stash", "Edit Gold"} <= labels
 
 
 def test_dm_cannot_create_a_character_for_someone(table):

@@ -1,4 +1,4 @@
-"""Guild-side operations: taking from shared storage and the magic item treasury.
+"""Guild-side operations: shared storage (create, store, take) and the magic item treasury.
 
 Same conventions as `services.characters`: the caller owns the transaction, and
 rule failures raise `CharacterError` with a user-facing reason.
@@ -24,6 +24,7 @@ from shadowdark_bot.models import (
     TreasuryEntry,
 )
 from shadowdark_bot.services import characters
+from shadowdark_bot.rules import fmt_slots, stack_slots
 from shadowdark_bot.services.characters import CharacterError
 
 STATUS_AVAILABLE = "available"
@@ -35,6 +36,120 @@ def _naive_utcnow() -> datetime:
 
 
 # ---------- Guild storage ----------
+
+
+def create_location(
+    session: Session,
+    *,
+    name: str,
+    max_gear_slots: float | None = None,
+    description: str | None = None,
+) -> Location:
+    """A new shared storage location. Names are unique among guild locations."""
+    clean = (name or "").strip()
+    if not clean:
+        raise CharacterError("Name cannot be empty.")
+    capacity = 0.0 if max_gear_slots is None else float(max_gear_slots)
+    if capacity < 0:
+        raise CharacterError("Capacity must be ≥ 0.")
+    taken = session.scalar(
+        select(Location).where(Location.name == clean, Location.owner_user_id.is_(None))
+    )
+    if taken is not None:
+        raise CharacterError(f"A location named **{clean}** already exists.")
+    location = Location(
+        name=clean,
+        kind="inventory",
+        max_gear_slots=capacity,
+        description=(description or "").strip() or None,
+    )
+    session.add(location)
+    session.flush()
+    return location
+
+
+@dataclass
+class StoreResult:
+    location_name: str
+    moved: list[characters.GiveResult]
+
+
+def store(
+    session: Session,
+    user_id: str,
+    *,
+    location_id: int,
+    items: list[tuple[str, int, int | None]],
+) -> StoreResult:
+    """Move several stacks from the character's own held items or stash into a
+    shared storage location. Each item is `(role, entry_id, quantity)` with
+    `quantity=None` meaning the whole stack. All or nothing: the slot cost of the
+    whole selection is checked up front, and anything that raises rolls the rest
+    back with the caller's transaction."""
+    if not items:
+        raise CharacterError("Choose at least one item to store.")
+    characters.require_character(session, user_id)
+    target = session.get(Location, location_id)
+    if target is None or target.kind != "inventory" or target.owner_user_id is not None:
+        raise CharacterError("That isn't a guild storage location.")
+    _check_store_fits(session, user_id, target, items)
+    moved = [
+        characters.give(
+            session,
+            user_id,
+            role=role,
+            entry_id=entry_id,
+            target_location_id=target.id,
+            quantity=quantity,
+        )
+        for role, entry_id, quantity in items
+    ]
+    return StoreResult(location_name=target.name, moved=moved)
+
+
+def _check_store_fits(
+    session: Session,
+    user_id: str,
+    target: Location,
+    items: list[tuple[str, int, int | None]],
+) -> None:
+    """Raise one message when the whole selection needs more slots than `target`
+    has free. Bundle-aware, and stacks of the same item merge with each other and
+    with what is already there. Entries `give` would reject for another reason are
+    skipped here; `give` reports those."""
+    wanted: dict[tuple, list] = {}  # merge key -> [entry, quantity]
+    for role, entry_id, quantity in items:
+        entry = characters.location_entry(session, user_id, role, entry_id)
+        if entry is None or (quantity is not None and quantity < 1):
+            continue
+        qty = entry.quantity if quantity is None else min(quantity, entry.quantity)
+        key = (
+            ("item", entry.item_id)
+            if entry.item_id is not None
+            else ("free", entry.display_name)
+        )
+        if key in wanted:
+            wanted[key][1] += qty
+        else:
+            wanted[key] = [entry, qty]
+    needed = 0.0
+    for (kind, ident), (entry, qty) in wanted.items():
+        gear_slots, bundle = entry.effective_gear_slots, entry.effective_bundle_size
+        existing = storage.find_catalog_stack(
+            session, target.id, ident
+        ) if kind == "item" else storage.find_freeform_stack(session, target.id, ident)
+        have = existing.quantity if existing else 0
+        needed += stack_slots(have + qty, gear_slots, bundle) - stack_slots(
+            have, gear_slots, bundle
+        )
+    used = storage.used_slots(storage.location_entries(session, target.id))
+    free = target.max_gear_slots - used
+    if needed > free:
+        raise CharacterError(
+            f"**{target.name}** has {fmt_slots(free)} of "
+            f"{fmt_slots(target.max_gear_slots)} slots free; these items need "
+            f"{fmt_slots(needed)}."
+        )
 
 
 @dataclass
@@ -58,7 +173,7 @@ def take(
     if quantity is not None and quantity < 1:
         raise CharacterError("Quantity must be ≥ 1.")
     if role not in (LOCATION_ROLE_HELD, LOCATION_ROLE_STASH):
-        raise CharacterError("Choose Carrying or Stash.")
+        raise CharacterError("Choose Carrying or Personal Stash.")
     char = characters.require_character(session, user_id)
     source = session.get(Location, location_id)
     if source is None or source.kind != "inventory" or source.owner_user_id is not None:

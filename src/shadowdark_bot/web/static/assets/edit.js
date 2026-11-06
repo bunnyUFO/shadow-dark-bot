@@ -137,6 +137,8 @@ export function openForm({ title, message, fields = [], submitLabel = "Save", da
 }
 
 let catalogPromise = null;
+// The Items page calls this after it adds or edits a catalog entry.
+export const forgetCatalog = () => { catalogPromise = null; };
 function catalogItems() {
   catalogPromise ??= api("/items?limit=1000")
     .then((r) => (Array.isArray(r) ? r : r.items ?? []))
@@ -273,12 +275,12 @@ export function editOpts(c, redraw, base = "/character") {
     return null;
   };
 
-  // Carrying rows get Stash, stash rows get Take: a give to your own other location.
+  // Carrying rows get To Personal Stash, stash rows get Take: a give to your own other location.
   const moveAction = (item) => {
     const inStash = (c.stash?.items ?? []).some((i) => i.id === item.id);
     const [label, dest, where] = inStash
       ? ["Take", c.held, "Carrying"]
-      : ["Stash", c.stash, "Stash"];
+      : ["To Personal Stash", c.stash, "Personal Stash"];
     if (!dest) return null;
     const move = (quantity) => write(`/character/items/${item.id}/give`, "POST",
       { target_location_id: dest.location_id, quantity });
@@ -287,7 +289,7 @@ export function editOpts(c, redraw, base = "/character") {
         return move(1).catch((err) => openForm({ title: label, message: cleanDetail(err.message) }));
       }
       openForm({
-        title: `${label} ${item.name}`,
+        title: inStash ? `${label} ${item.name}` : `Move ${item.name}`,
         message: `Move to ${where}.`,
         fields: [{ name: "quantity", label: "Quantity", type: "number", value: item.quantity, min: 1, max: item.quantity }],
         submitLabel: label,
@@ -477,7 +479,7 @@ export function guildEditOpts(me, redraw, party = []) {
         message: `${item.quantity} in ${loc.name}.`,
         fields: [
           { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1, max: item.quantity },
-          { name: "to", label: "Put in", type: "select", value: "held", options: [["held", "Carrying"], ["stash", "Stash"]] },
+          { name: "to", label: "Put in", type: "select", value: "held", options: [["held", "Carrying"], ["stash", "Personal Stash"]] },
         ],
         submitLabel: "Take",
         onSubmit: (v) => write(`/guild/locations/${loc.location_id}/items/${item.id}/take`,
@@ -516,7 +518,63 @@ export function guildEditOpts(me, redraw, party = []) {
     ? btn("Borrow", () => borrowDialog(t))
     : btn("Return", () => write(`/guild/treasury/${t.id}/return`).catch(showFailure("Return")));
 
-  return { takeAction, treasuryAction };
+  // Anyone can add a location (like /inventory location-create). There is no
+  // default capacity: the web has no location edit, so a silent 0 would make
+  // a location nothing fits in.
+  const addLocationAction = () => btn("Add storage location", () => openForm({
+    title: "Add storage location",
+    fields: [
+      { name: "name", label: "Name", type: "text", required: true },
+      { name: "max_gear_slots", label: "Capacity in gear slots", type: "number", min: 0, step: "any",
+        required: true, hint: "How many gear slots it holds" },
+      { name: "description", label: "Description", type: "textarea" },
+    ],
+    submitLabel: "Add",
+    onSubmit: (v) => write("/guild/locations", {
+      name: v.name, max_gear_slots: v.max_gear_slots, description: v.description.trim() || null,
+    }),
+  }));
+
+  // Put some carried / Personal Stash items into a location, all or nothing
+  // (one request; the server rolls back if any stack does not fit).
+  const storeAction = me.has_character
+    ? (loc) => btn("Store", () => storeDialog(loc).catch(showFailure("Store")))
+    : null;
+
+  const storeDialog = async (loc) => {
+    const c = await api("/character");
+    const eligible = (stacks) => (stacks ?? []).filter((i) => i.source !== "freeform" && i.item_type !== "magical");
+    const rows = [
+      ...eligible(c.held?.items).map((i) => ({ role: "held", i, hint: "carried" })),
+      ...eligible(c.stash?.items).map((i) => ({ role: "stash", i, hint: "in Personal Stash" })),
+    ];
+    if (!rows.length) {
+      return openForm({
+        title: `Store in ${loc.name}`,
+        message: "Nothing you carry can go into guild storage. Magical items go to the treasury; "
+          + "custom items can only be given to a character.",
+      });
+    }
+    openForm({
+      title: `Store in ${loc.name}`,
+      message: `Free: ${slots(loc.max_slots - loc.used_slots)} of ${slots(loc.max_slots)} slots. Choose how many of each. `
+        + "Nothing moves unless everything fits.",
+      fields: rows.map(({ role, i, hint }) => ({
+        name: `q_${role}_${i.id}`, label: i.name, type: "number", value: 0, min: 0, max: i.quantity,
+        step: 1, hint: `${i.quantity} ${hint}`,
+      })),
+      submitLabel: "Store",
+      onSubmit: (v) => {
+        const items = rows
+          .map(({ role, i }) => ({ role, entry_id: i.id, quantity: v[`q_${role}_${i.id}`] ?? 0 }))
+          .filter((x) => x.quantity > 0);
+        if (!items.length) throw new Error("Choose at least one item.");
+        return write(`/guild/locations/${loc.location_id}/store`, { items });
+      },
+    });
+  };
+
+  return { takeAction, treasuryAction, addLocationAction, storeAction };
 }
 
 export const showFailure = (title) => (err) => openForm({ title, message: cleanDetail(err.message) });
@@ -542,7 +600,7 @@ async function addItemDialog(role, write) {
         showWhen: ["mode", "custom"] },
       { name: "notes", label: "Notes", type: "textarea", showWhen: ["mode", "custom"] },
       { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1, required: true },
-      { name: "to", label: "Put in", type: "select", value: role, options: [["held", "Carrying"], ["stash", "Stash"]] },
+      { name: "to", label: "Put in", type: "select", value: role, options: [["held", "Carrying"], ["stash", "Personal Stash"]] },
     ],
     submitLabel: "Add",
     onSubmit: (v) => write("/character/items", "POST", v.mode === "catalog"
@@ -588,7 +646,7 @@ export async function buyDialog(item, onBought) {
   const me = await api("/character");
   const places = [
     [`held:${me.held.location_id}`, "Carrying"],
-    [`stash:${me.stash.location_id}`, "Stash"],
+    [`stash:${me.stash.location_id}`, "Personal Stash"],
     ...(item.item_type === "magical" ? [] : guild.locations.map((l) => [`guild:${l.location_id}`, `Guild: ${l.name}`])),
   ];
   const total = h("strong", {});
