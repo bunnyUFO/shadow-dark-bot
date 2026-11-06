@@ -903,7 +903,14 @@ def buy(
     item = session.get(Item, item_id)
     if item is None:
         raise CharacterError("That item is no longer in the catalog.")
-    check_bonus(item, bonus)
+    if bonus != 0:
+        raise CharacterError(
+            "Magic +1 to +3 items can't be bought. Add found ones to a sheet with Add item."
+        )
+    if not item.purchasable:
+        raise CharacterError(
+            f"**{item.name}** isn't for sale. Tick Purchasable in Edit item to sell it."
+        )
     if item.value_cp is None or item.value_cp <= 0:
         raise CharacterError(f"**{item.name}** has no price set, so it can't be bought.")
 
@@ -917,8 +924,6 @@ def buy(
             "Magical items can't go into guild inventory — they belong in the treasury."
         )
 
-    # Open owner question: should a +N item cost more than the base item? No
-    # Shadowdark rule prices magic weapons/armor, so the bonus is free for now.
     price = item.value_cp
     total = price * quantity
     if pay_from == "guild":
@@ -1213,18 +1218,68 @@ class StatResult:
     sources: list[tuple[str, str]] = field(default_factory=list)
 
 
+def is_shield(item: Item) -> bool:
+    """A shield is any catalog armor whose name contains "shield"; every other
+    armor is body armor."""
+    return "shield" in item.name.lower()
+
+
 def armor_bonus(entries: Sequence[InventoryEntry]) -> list[tuple[str, int]]:
-    """The held armor stacks that raise AC, as (display name, bonus) pairs: the
-    best body armor plus the best shield (a catalog name containing "shield").
-    Pass only held stacks; spare armor in the stash must not count."""
+    """The worn armor stacks that raise AC, as (display name, bonus) pairs: the
+    best worn body armor plus the best worn shield. Pass only held stacks; spare
+    armor in the stash must not count. Wearing keeps one of each class, so the
+    "best" pick is only a guard for data that has two worn items of one class."""
     best: dict[bool, InventoryEntry] = {}
     for e in entries:
-        if e.bonus <= 0 or e.item is None or e.item.item_type != ITEM_TYPE_ARMOR:
+        if (
+            not e.worn
+            or e.bonus <= 0
+            or e.item is None
+            or e.item.item_type != ITEM_TYPE_ARMOR
+        ):
             continue
-        is_shield = "shield" in e.item.name.lower()
-        if is_shield not in best or e.bonus > best[is_shield].bonus:
-            best[is_shield] = e
+        shield = is_shield(e.item)
+        if shield not in best or e.bonus > best[shield].bonus:
+            best[shield] = e
     return [(e.display_name, e.bonus) for e in best.values()]
+
+
+@dataclass
+class WearResult:
+    display_name: str
+    worn: bool
+    took_off: str | None  # the other armor of the same class that came off
+
+
+def set_worn(session: Session, user_id: str, *, entry_id: int, worn: bool) -> WearResult:
+    """Wear or take off an armor stack in Carrying. Wearing swaps: any other
+    worn stack of the same class (body armor or shield) comes off. Taking off a
+    stack that isn't worn changes nothing."""
+    char = require_character(session, user_id)
+    entry = location_entry(session, user_id, LOCATION_ROLE_HELD, entry_id)
+    if entry is None:
+        if location_entry(session, user_id, LOCATION_ROLE_STASH, entry_id) is not None:
+            raise CharacterError("Move it to Carrying before wearing it.")
+        raise CharacterNotFound("That item is no longer there.")
+    if entry.item is None or entry.item.item_type != ITEM_TYPE_ARMOR:
+        raise CharacterError("Only armor and shields can be worn.")
+    took_off = None
+    if worn:
+        shield = is_shield(entry.item)
+        for other in storage.location_entries(session, entry.location_id):
+            if (
+                other.id != entry.id
+                and other.worn
+                and other.item is not None
+                and other.item.item_type == ITEM_TYPE_ARMOR
+                and is_shield(other.item) == shield
+            ):
+                other.worn = False
+                took_off = other.display_name
+    entry.worn = worn
+    touch(char)
+    session.flush()
+    return WearResult(display_name=entry.display_name, worn=worn, took_off=took_off)
 
 
 def resolve_stat(

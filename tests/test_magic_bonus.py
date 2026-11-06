@@ -21,11 +21,11 @@ from shadowdark_bot.web.schemas import character_sheet
 
 def _world(session):
     session.add_all([
-        Item(name="Dagger", gear_slots=1, item_type=ITEM_TYPE_WEAPON, value_cp=100),
-        Item(name="Leather Armor", gear_slots=1, item_type=ITEM_TYPE_ARMOR, value_cp=500),
-        Item(name="Shield", gear_slots=1, item_type=ITEM_TYPE_ARMOR, value_cp=100),
-        Item(name="Chainmail", gear_slots=2, item_type=ITEM_TYPE_ARMOR, value_cp=1000),
-        Item(name="Rope", gear_slots=1, item_type=ITEM_TYPE_COMMON, value_cp=100),
+        Item(name="Dagger", gear_slots=1, item_type=ITEM_TYPE_WEAPON, value_cp=100, purchasable=True),
+        Item(name="Leather Armor", gear_slots=1, item_type=ITEM_TYPE_ARMOR, value_cp=500, purchasable=True),
+        Item(name="Shield", gear_slots=1, item_type=ITEM_TYPE_ARMOR, value_cp=100, purchasable=True),
+        Item(name="Chainmail", gear_slots=2, item_type=ITEM_TYPE_ARMOR, value_cp=1000, purchasable=True),
+        Item(name="Rope", gear_slots=1, item_type=ITEM_TYPE_COMMON, value_cp=100, purchasable=True),
     ])
     session.flush()
     for uid, name in (("u1", "Bob"), ("u2", "Alice")):
@@ -42,7 +42,7 @@ def _locs(session, uid="u1"):
     return storage.ensure_character_locations(session, characters.require_character(session, uid))
 
 
-def _buy(session, name, bonus, qty=1, uid="u1", dest=None):
+def _buy_raw(session, name, bonus, qty=1, uid="u1", dest=None):
     item = session.query(Item).filter_by(name=name).one()
     dest = dest or _locs(session, uid)[0].id
     return characters.buy(
@@ -51,15 +51,31 @@ def _buy(session, name, bonus, qty=1, uid="u1", dest=None):
     )
 
 
-def test_buy_bonus_stack(dbsession):
+def _buy(session, name, bonus, qty=1, uid="u1", dest=None):
+    """Put a stack on a sheet: bought at +0, placed directly at +N (magic items
+    are found, not bought)."""
+    if bonus == 0:
+        return _buy_raw(session, name, 0, qty, uid, dest)
+    item = session.query(Item).filter_by(name=name).one()
+    dest_id = dest or _locs(session, uid)[0].id
+    return storage.add_stack(
+        session, session.get(Location, dest_id), quantity=qty, item=item, bonus=bonus
+    )
+
+
+def _wear(session, name, uid="u1"):
+    held = _locs(session, uid)[0]
+    entry = next(e for e in storage.location_entries(session, held.id) if e.display_name == name)
+    return characters.set_worn(session, uid, entry_id=entry.id, worn=True)
+
+
+def test_buy_bonus_is_refused(dbsession):
     with session_scope() as s:
         _world(s)
-        res = _buy(s, "Dagger", 1)
-        assert res.display_name == "Dagger +1"
-        assert res.total_cp == 100  # base price at any bonus
-        (stack,) = storage.location_entries(s, _locs(s)[0].id)
-        assert stack.bonus == 1 and stack.display_name == "Dagger +1"
-        assert characters.require_character(s, "u1").gold_cp == 9900
+        with pytest.raises(CharacterError, match="can't be bought"):
+            _buy_raw(s, "Dagger", 1)
+        assert characters.require_character(s, "u1").gold_cp == 10000
+        assert storage.location_entries(s, _locs(s)[0].id) == []
 
 
 def test_bonus_stacks_are_separate_and_merge(dbsession):
@@ -77,7 +93,7 @@ def test_bad_bonus_refused(dbsession, name, bonus):
     with session_scope() as s:
         _world(s)
         with pytest.raises(CharacterError):
-            _buy(s, name, bonus)
+            _buy_raw(s, name, bonus)
         assert characters.require_character(s, "u1").gold_cp == 10000
         assert storage.location_entries(s, _locs(s)[0].id) == []
 
@@ -85,10 +101,10 @@ def test_bad_bonus_refused(dbsession, name, bonus):
 def test_bonus_error_messages(dbsession):
     with session_scope() as s:
         _world(s)
-        with pytest.raises(CharacterError, match="Only weapons and armor can have a magic bonus."):
-            _buy(s, "Rope", 1)
-        with pytest.raises(CharacterError, match="Magic bonus must be"):
-            _buy(s, "Dagger", 4)
+        with pytest.raises(CharacterError, match="can't be bought"):
+            _buy_raw(s, "Rope", 1)
+        with pytest.raises(CharacterError, match="can't be bought"):
+            _buy_raw(s, "Dagger", 4)
         with pytest.raises(CharacterError, match="Only weapons and armor"):
             characters.carry(s, "u1", item_name="Mystery", quantity=1, bonus=1)
 
@@ -151,15 +167,18 @@ def test_armor_counts_toward_ac_from_held_only(dbsession):
         _buy(s, "Leather Armor", 1)
         _buy(s, "Shield", 1)
         _buy(s, "Chainmail", 3, dest=_locs(s)[1].id)  # stash: ignored
+        assert _ac(s).total == base  # nothing worn yet
+        _wear(s, "Leather Armor +1")
+        _wear(s, "Shield +1")
         ac = _ac(s)
         assert ac.total == base + 2
-        assert sorted(x["effect"] for x in ac.sources) == ["Leather Armor +1 (carried)", "Shield +1 (carried)"]
+        assert sorted(x["effect"] for x in ac.sources) == ["Leather Armor +1 (worn)", "Shield +1 (worn)"]
         leather = next(
             e for e in storage.location_entries(s, _locs(s)[0].id) if "Leather" in e.display_name)
         characters.move_stack(s, leather, _locs(s)[1], 1)
         ac = _ac(s)
         assert ac.total == base + 1
-        assert [x["effect"] for x in ac.sources] == ["Shield +1 (carried)"]
+        assert [x["effect"] for x in ac.sources] == ["Shield +1 (worn)"]
 
 
 def test_armor_bonus_picks_best_body_and_best_shield(dbsession):
@@ -167,6 +186,8 @@ def test_armor_bonus_picks_best_body_and_best_shield(dbsession):
         _world(s)
         for name, b in (("Leather Armor", 1), ("Chainmail", 2), ("Shield", 1), ("Dagger", 3)):
             _buy(s, name, b)
+        for e in storage.location_entries(s, _locs(s)[0].id):
+            e.worn = e.item.item_type == ITEM_TYPE_ARMOR  # two worn per class: guard case
         pairs = characters.armor_bonus(storage.location_entries(s, _locs(s)[0].id))
         assert sorted(pairs) == [("Chainmail +2", 2), ("Shield +1", 1)]
 
@@ -215,7 +236,10 @@ def test_api_buy_and_sheet(api):
     body = {"quantity": 1, "pay_from": "character",
             "destination_location_id": sheet["held"]["location_id"], "bonus": 1}
     r = api.post(f"/api/items/{dagger['id']}/buy", json=body, headers=h)
+    assert r.status_code == 400 and "can't be bought" in r.json()["detail"]
+    r = api.post(f"/api/items/{dagger['id']}/buy", json={**body, "bonus": 0}, headers=h)
     assert r.status_code == 200, r.text
+    api.post("/api/character/items", json={"name": "Dagger", "bonus": 1}, headers=h)
     sheet = api.get("/api/character", headers=h).json()
     stack = _stack(sheet, "held", "Dagger +1")
     assert stack["bonus"] == 1 and stack["item_type"] == "weapon"
@@ -223,7 +247,7 @@ def test_api_buy_and_sheet(api):
     assert too_high.status_code == 422
     rope = _item(api, h, "Rope")
     bad = api.post(f"/api/items/{rope['id']}/buy", json={**body, "bonus": 1}, headers=h)
-    assert bad.status_code == 400 and "Only weapons and armor" in bad.json()["detail"]
+    assert bad.status_code == 400 and "can't be bought" in bad.json()["detail"]
 
 
 def test_api_carry_bonus_and_ac(api):
@@ -231,7 +255,12 @@ def test_api_carry_bonus_and_ac(api):
     r = api.post("/api/character/items", json={"name": "Leather Armor", "bonus": 1}, headers=h)
     assert r.status_code == 200, r.text
     sheet = api.get("/api/character", headers=h).json()
+    assert sheet["effective"]["ac"]["total"] == 11  # carried, not worn
+    stack = _stack(sheet, "held", "Leather Armor +1")
+    r = api.post(f"/api/character/items/{stack['id']}/wear", json={"worn": True}, headers=h)
+    assert r.status_code == 200, r.text
+    sheet = r.json()
     assert sheet["effective"]["ac"]["total"] == 12
-    assert sheet["effective"]["ac"]["sources"] == [{"effect": "Leather Armor +1 (carried)", "change": "+1"}]
+    assert sheet["effective"]["ac"]["sources"] == [{"effect": "Leather Armor +1 (worn)", "change": "+1"}]
     neg = api.post("/api/character/items", json={"name": "Dagger", "bonus": -1}, headers=h)
     assert neg.status_code == 422

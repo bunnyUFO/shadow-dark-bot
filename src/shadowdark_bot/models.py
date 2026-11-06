@@ -70,6 +70,11 @@ class Item(Base):
     item_type: Mapped[str] = mapped_column(
         String, nullable=False, default=ITEM_TYPE_COMMON, server_default=ITEM_TYPE_COMMON
     )
+    # Whether the Items page offers Buy. Defaults to no; only the core rulebook
+    # gear starts as yes (migration 0025 and dev_seed).
+    purchasable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     created_by: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()
@@ -144,6 +149,11 @@ class InventoryEntry(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     # Magic bonus 0..3 (weapons/armor only); part of the catalog stack key.
     bonus: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Armor in Carrying that is worn. Only worn armor counts toward AC; on a
+    # stack of 2 it means "one of these is worn". Not part of the unique key.
+    worn: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     slots_each: Mapped[float | None] = mapped_column(Float)
     bundle_size: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)

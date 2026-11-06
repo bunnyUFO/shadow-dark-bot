@@ -496,11 +496,11 @@ def test_edit_stack_catalog_only_quantity_and_notes(dbsession):
 def _priced(session):
     session.add_all([
         Item(name="Torch", gear_slots=1, bundle_size=1, item_type=ITEM_TYPE_COMMON,
-             value_cp=10),
+             value_cp=10, purchasable=True),
         Item(name="Free Thing", gear_slots=1, bundle_size=1,
-             item_type=ITEM_TYPE_COMMON),
+             item_type=ITEM_TYPE_COMMON, purchasable=True),
         Item(name="Wand", gear_slots=1, bundle_size=1, item_type=ITEM_TYPE_MAGICAL,
-             value_cp=500),
+             value_cp=500, purchasable=True),
     ])
     session.flush()
     return {i.name: i.id for i in session.query(Item).all()}

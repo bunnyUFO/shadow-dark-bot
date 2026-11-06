@@ -536,6 +536,7 @@ dialog.sheet-form select { max-width: 100%; min-width: 0; text-overflow: ellipsi
 
 /* add / edit / buy dialogs */
 dialog.sheet-form .field[hidden] { display: none; }
+dialog.sheet-form .field input[type="checkbox"] { width: auto; align-self: flex-start; margin: 2px 0; }
 dialog.sheet-form select[size] { padding: 4px; }
 dialog.sheet-form select[size] option { padding: 8px 6px; }
 .form-total { margin: 10px 0 0; }
