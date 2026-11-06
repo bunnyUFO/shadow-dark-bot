@@ -66,6 +66,10 @@ function tagsControl(f) {
 function control(f, listId) {
   const common = { name: f.name, id: `f-${f.name}`, required: f.required || null };
   if (f.type === "tags") return tagsControl(f);
+  if (f.type === "checkbox") {
+    // No `required` or `showWhen` on a checkbox: both read `.value`.
+    return h("input", { name: f.name, id: `f-${f.name}`, type: "checkbox", checked: f.value || null });
+  }
   if (f.type === "select") {
     return h("select", { ...common, size: f.size ?? null }, selectOptions(f.options, f.value));
   }
@@ -149,6 +153,7 @@ export function openForm({ title, message, fields = [], submitLabel = "Save", da
     for (const [f, el] of controls) {
       if (el.disabled) continue;
       if (f.type === "tags") values[f.name] = el.tagValue();
+      else if (f.type === "checkbox") values[f.name] = el.checked;
       else values[f.name] = f.type === "number" ? (el.value === "" ? null : Number(el.value)) : el.value;
     }
     submit.disabled = true;
@@ -332,7 +337,13 @@ export function editOpts(c, redraw, base = "/character") {
     });
   };
 
-  const itemActions = (item) => [
+  const itemActions = (item, key) => [
+    // Only armor in Carrying can be worn; wearing swaps same-class armor.
+    key === "held" && item.item_type === "armor"
+      ? btn(item.worn ? "Take off" : "Wear", () =>
+          write(`/character/items/${item.id}/wear`, "POST", { worn: !item.worn })
+            .catch(showFailure("Wear")))
+      : null,
     moveAction(item),
     btn("Give", async () => {
       try {
@@ -672,8 +683,7 @@ const price = (cp) => coins(cp);
 
 // Opens the buy dialog for a catalog item; `onBought(message)` gets a short
 // confirmation once the purchase went through.
-export async function buyDialog(item, onBought, bonus = 0) {
-  const label = bonus ? `${item.name} +${bonus}` : item.name;
+export async function buyDialog(item, onBought) {
   let guild;
   try {
     guild = await api("/guild");
@@ -688,7 +698,7 @@ export async function buyDialog(item, onBought, bonus = 0) {
   ];
   const total = h("strong", {});
   const dialog = openForm({
-    title: `Buy ${label}`,
+    title: `Buy ${item.name}`,
     message: `${price(item.value_cp)} each. You have ${me.gold || "0cp"}; the coffers hold ${guild.coffers.balance || "0cp"}.`,
     fields: [
       { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1, required: true },
@@ -701,9 +711,9 @@ export async function buyDialog(item, onBought, bonus = 0) {
       const qty = v.quantity ?? 1;
       const [, locId] = v.dest.split(":");
       await api(`/items/${item.id}/buy`, { method: "POST", body: {
-        quantity: qty, pay_from: v.pay_from, destination_location_id: Number(locId), bonus } });
+        quantity: qty, pay_from: v.pay_from, destination_location_id: Number(locId) } });
       const where = places.find(([val]) => val === v.dest)[1];
-      onBought(`Bought ${qty > 1 ? `${qty}× ` : ""}${label} for ${price(item.value_cp * qty)}`
+      onBought(`Bought ${qty > 1 ? `${qty}× ` : ""}${item.name} for ${price(item.value_cp * qty)}`
         + ` — paid from ${v.pay_from === "guild" ? "guild coffers" : "your gold"}, put in ${where}.`);
     },
   });
