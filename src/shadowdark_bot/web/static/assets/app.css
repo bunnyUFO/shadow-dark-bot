@@ -411,7 +411,27 @@ body.signed-in .bottomnav { display: grid; }
 body.signed-in main { padding-bottom: calc(60px + var(--safe-bottom) + 16px); }
 
 @media (min-width: 720px) {
-  .topnav .sections { display: flex; }
+  .topnav { gap: 20px; font-size: 1.05rem; }
+  .topnav .sections { display: flex; gap: 6px; }
+  .topnav .sections a {
+    padding: 9px 16px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    border-radius: 999px;
+    transition: background 0.12s, color 0.12s;
+  }
+  .topnav .sections a:hover { background: var(--panel-2); }
+  .topnav .sections a.active {
+    background: var(--torch);
+    color: var(--bg);
+  }
+}
+
+/* Narrow desktops / tablets: keep the bigger nav from overflowing. */
+@media (min-width: 720px) and (max-width: 899px) {
+  .topnav { gap: 8px; }
+  .topnav .sections { gap: 2px; }
+  .topnav .sections a { padding: 8px 11px; font-size: 1rem; }
   body.signed-in .bottomnav { display: none; }
   body.signed-in main { padding-bottom: 32px; }
 }
