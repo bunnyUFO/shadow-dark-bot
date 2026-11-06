@@ -104,7 +104,7 @@ def test_ensure_creates_held_and_stash_with_caps(dbsession):
         stash = storage.stash_location(s, "u1")
         assert held.name == "Bob"
         assert held.max_gear_slots == 15  # max(10, STR)
-        assert stash.name == "Bob Guild Stash"
+        assert stash.name == "Bob Personal Stash"
         assert stash.max_gear_slots == 10
 
 
@@ -120,7 +120,7 @@ def test_ensure_syncs_name_and_cap(dbsession):
         held = storage.held_location(s, "u1")
         assert held.name == "Bobby"
         assert held.max_gear_slots == 16
-        assert storage.stash_location(s, "u1").name == "Bobby Guild Stash"
+        assert storage.stash_location(s, "u1").name == "Bobby Personal Stash"
 
 
 def test_add_stack_merges_catalog_and_dedupes_freeform(dbsession):
@@ -154,10 +154,10 @@ def test_give_targets_exclude_other_stash_and_source(dbsession):
         held = storage.held_location(s, "u1")
         labels = [lbl for _, lbl in pc._give_targets(s, "u1", held)]
         assert any("Armory" in lbl for lbl in labels)  # guild location
-        assert any("Your stash" in lbl for lbl in labels)  # own stash
+        assert any("Your personal stash" in lbl for lbl in labels)  # own stash
         assert any("Amy" in lbl for lbl in labels)  # other char held
         # Amy's stash must NOT be offered.
-        assert not any("Amy Guild Stash" in lbl for lbl in labels)
+        assert not any("Amy Personal Stash" in lbl for lbl in labels)
         # Source (own held) is excluded.
         assert not any("Your held" in lbl for lbl in labels)
 

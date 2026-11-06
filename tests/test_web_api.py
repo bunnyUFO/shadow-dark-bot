@@ -208,7 +208,7 @@ def test_my_character_full_sheet(api):
     assert by_name["Idol"]["source"] == "freeform"
     assert by_name["Idol"]["description"] == "Creepy"
     stash = sheet["stash"]
-    assert stash["name"] == "Bob Guild Stash"
+    assert stash["name"] == "Bob Personal Stash"
     assert stash["items"][0]["description"] == "50 feet"
     assert stash["items"][0]["value_cp"] == 100
 

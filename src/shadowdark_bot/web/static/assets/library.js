@@ -3,8 +3,8 @@
 // appear only for viewers with a character.
 
 import { api } from "./api.js";
-import { h, mount, slots } from "./dom.js";
-import { buyDialog, guildEditOpts } from "./edit.js";
+import { h, mount, plain, slots } from "./dom.js";
+import { buyDialog, forgetCatalog, guildEditOpts, openForm } from "./edit.js";
 import { effectsBySource, libraryLink, linkedEffects } from "./effects.js";
 import { card, coins, pageHead, storeCard } from "./sheet.js";
 
@@ -150,7 +150,7 @@ function spellRefRow(s, effects) {
 
 // ---------- item catalog ----------
 
-export async function renderItems(app, { canBuy = false } = {}) {
+export async function renderItems(app, { canBuy = false } = {}, saved = null) {
   const [items, linked] = await Promise.all([api("/items?limit=1000"), effectsBySource()]);
   const list = h("div", {});
   const notice = h("p", { class: "banner notice", role: "status", hidden: true });
@@ -160,10 +160,20 @@ export async function renderItems(app, { canBuy = false } = {}) {
     notice.scrollIntoView({ block: "nearest" });
   };
   const buy = canBuy ? (item) => buyDialog(item, say) : null;
-  const redraw = () => drawItems(list, items, buy, linked);
+  // After a save: forget edit.js's cached catalog (the sheet's Add item picker),
+  // then draw the page again; filters live in itemFilters so they stay.
+  const edit = (item) => itemFormDialog(item, items, async (name) => {
+    forgetCatalog();
+    const y = window.scrollY;
+    await renderItems(app, { canBuy }, `${item ? "Saved" : "Added"} ${name}.`);
+    window.scrollTo(0, y);
+  });
+  const redraw = () => drawItems(list, items, buy, edit, linked);
   const present = new Set(items.map((i) => i.item_type));
   mount(app,
     pageHead("Items", ["Catalog \u00b7 ", libraryLink()]),
+    h("div", { class: "page-actions" },
+      h("button", { type: "button", class: "tool", onclick: () => edit(null) }, "Add item")),
     notice,
     h("div", { class: "filters" },
       searchBox(itemFilters.q, "Search items", (v) => { itemFilters.q = v; redraw(); }),
@@ -173,9 +183,10 @@ export async function renderItems(app, { canBuy = false } = {}) {
     list,
   );
   redraw();
+  if (saved) say(saved);
 }
 
-function drawItems(list, items, buy, linked) {
+function drawItems(list, items, buy, edit, linked) {
   const q = itemFilters.q.trim().toLowerCase();
   const shown = items.filter((i) =>
     (!q || i.name.toLowerCase().includes(q)) && (!itemFilters.type || i.item_type === itemFilters.type),
@@ -184,8 +195,8 @@ function drawItems(list, items, buy, linked) {
     countLine(shown.length, items.length, "items"),
     shown.length === 0
       ? h("p", { class: "card muted" },
-          items.length ? "No items match those filters." : "The catalog is empty. Add items in Discord with /items add.")
-      : h("section", { class: "card" }, h("ul", { class: "rows" }, shown.map((i) => catalogRow(i, buy, linked.get(`item:${i.id}`))))),
+          items.length ? "No items match those filters." : "The catalog is empty. Add the first one with Add item.")
+      : h("section", { class: "card" }, h("ul", { class: "rows" }, shown.map((i) => catalogRow(i, buy, edit, linked.get(`item:${i.id}`))))),
   );
 }
 
@@ -193,7 +204,7 @@ function slotText(gearSlots, bundle) {
   return bundle > 1 ? `${slots(gearSlots)} sl / ${bundle}` : `${slots(gearSlots)} sl`;
 }
 
-function catalogRow(i, buy, effects) {
+function catalogRow(i, buy, edit, effects) {
   return h("li", {},
     h("details", { class: "row" },
       h("summary", {},
@@ -209,15 +220,59 @@ function catalogRow(i, buy, effects) {
             : `${slots(i.gear_slots)} each`),
           fact("Value", i.value_cp !== null ? coins(i.value_cp) : null),
         ),
-        i.description ? h("p", { class: "prose" }, i.description) : null,
+        i.description ? h("p", { class: "prose" }, plain(i.description)) : null,
         linkedEffects(effects),
-        buy && i.value_cp > 0
-          ? h("div", { class: "row-actions" },
-              h("button", { type: "button", class: "tool", onclick: () => buy(i) }, "Buy"))
-          : null,
+        h("div", { class: "row-actions" },
+          buy && i.value_cp > 0
+            ? h("button", { type: "button", class: "tool", onclick: () => buy(i) }, "Buy")
+            : null,
+          h("button", { type: "button", class: "tool", onclick: () => edit(i) }, "Edit")),
       ),
     ),
   );
+}
+
+// Add (item = null) or edit one catalog item. "Copy from" fills every field
+// except the name from another item, like the effect picker on the sheet.
+// `onSaved(name)` runs after the server accepted the change.
+function itemFormDialog(item, catalog, onSaved) {
+  const valueText = (i) => (i?.value_cp != null ? coins(i.value_cp) : "");
+  const fields = [
+    ...(item ? [] : [{
+      name: "copy", label: "Copy from", type: "select", size: 6, value: "", filter: "Search the catalog",
+      options: [["", "Nothing"], ...catalog.map((i) => [i.id, i.name])],
+    }]),
+    { name: "name", label: "Name", type: "text", value: item?.name, required: true },
+    { name: "item_type", label: "Type", type: "select", value: item?.item_type ?? "common", options: ITEM_TYPES },
+    { name: "gear_slots", label: "Gear slots", type: "number", value: item?.gear_slots ?? 1, min: 0, step: "any", required: true },
+    { name: "bundle_size", label: "Bundle size", type: "number", value: item?.bundle_size ?? 1, min: 1, step: 1,
+      required: true, hint: "How many fit in one gear slot, like 20 arrows" },
+    { name: "value", label: "Value", type: "text", value: valueText(item), hint: "Like 5gp 2sp; blank = no value" },
+    { name: "description", label: "Description", type: "textarea", value: item?.description ?? "" },
+  ];
+  const dialog = openForm({
+    title: item ? `Edit ${item.name}` : "Add item",
+    fields,
+    submitLabel: item ? "Save" : "Add",
+    onSubmit: async (v) => {
+      const body = {
+        name: v.name, item_type: v.item_type, gear_slots: v.gear_slots ?? 1, bundle_size: v.bundle_size ?? 1,
+        value: v.value.trim(), description: v.description.trim(),
+      };
+      await api(item ? `/items/${item.id}` : "/items", { method: item ? "PATCH" : "POST", body });
+      onSaved(body.name.trim());
+    },
+  });
+  dialog.querySelector("#f-copy")?.addEventListener("change", (ev) => {
+    const src = catalog.find((i) => String(i.id) === ev.target.value);
+    if (!src) return;
+    const set = (name, value) => { dialog.querySelector(`#f-${name}`).value = value; };
+    set("item_type", src.item_type);
+    set("gear_slots", src.gear_slots);
+    set("bundle_size", src.bundle_size);
+    set("value", valueText(src));
+    set("description", src.description ?? "");
+  });
 }
 
 // ---------- guild storage ----------
@@ -246,17 +301,23 @@ function drawGuild(app, g, ed) {
         h("span", { class: "tile-note" }, "magic items available"),
       ),
     ),
+    ed?.addLocationAction ? h("div", { class: "page-actions" }, ed.addLocationAction()) : null,
     card("treasury", "Magic item treasury", { aside: h("span", { class: "slots" }, `${available} available`), collapsible: true },
       g.treasury.length === 0
         ? h("p", { class: "muted" }, "Empty. Add magical items in Discord with /treasury add.")
         : h("ul", { class: "rows" }, g.treasury.map((t) => treasuryRow(t, ed?.treasuryAction(t)))),
     ),
     g.locations.length === 0
-      ? h("p", { class: "card muted" }, "No guild storage locations yet. Create one in Discord with /inventory.")
+      ? h("p", { class: "card muted" }, "No guild storage locations yet. Add one with the button above, or /inventory location-create in Discord.")
       : g.locations.map((loc) => storeCard(loc.name, loc, "Empty.", {
           cardKey: `guild-location-${loc.location_id}`,
           collapsible: true,
-          opts: ed?.takeAction ? { itemActions: (item) => ed.takeAction(loc, item) } : undefined,
+          opts: ed
+            ? {
+                tools: () => ed.storeAction?.(loc),
+                itemActions: ed.takeAction ? (item) => ed.takeAction(loc, item) : undefined,
+              }
+            : undefined,
         })),
   );
 }
@@ -279,7 +340,7 @@ function treasuryRow(t, action) {
           fact("Value", t.item.value_cp !== null ? coins(t.item.value_cp) : null),
           fact("Instance", `#${t.id}`),
         ),
-        t.item.description ? h("p", { class: "prose" }, t.item.description) : null,
+        t.item.description ? h("p", { class: "prose" }, plain(t.item.description)) : null,
       ),
     ),
     h("span", { class: "row-actions" }, action ?? null),

@@ -37,7 +37,7 @@ from shadowdark_bot.models import (
     PlayerCharacter,
     Spell,
 )
-from shadowdark_bot.services import characters, guild as guild_service
+from shadowdark_bot.services import catalog, characters, guild as guild_service
 from shadowdark_bot.services.characters import CharacterError, CharacterNotFound
 from shadowdark_bot.web import creature_routes, effect_routes
 from shadowdark_bot.web.auth import (
@@ -48,6 +48,8 @@ from shadowdark_bot.web.auth import (
     SessionUser,
 )
 from shadowdark_bot.web.schemas import (
+    CatalogItemIn,
+    CatalogItemPatch,
     CatalogItemOut,
     CharacterSheetOut,
     BuyIn,
@@ -63,10 +65,12 @@ from shadowdark_bot.web.schemas import (
     GuildOut,
     IdentityIn,
     LearnSpellIn,
+    LocationIn,
     ProficienciesIn,
     SkillsIn,
     SpellOut,
     StatsIn,
+    StoreIn,
     XpIn,
     TakeIn,
     UserOut,
@@ -369,6 +373,38 @@ def create_app(
         with session_scope() as session:
             return [catalog_item_out(item) for item in session.scalars(stmt).all()]
 
+    @app.post("/api/items")
+    def add_catalog_item(body: CatalogItemIn, user: User) -> CatalogItemOut:
+        """Add an item to the catalog. Open to everyone, like /items add."""
+        with session_scope() as session:
+            item = catalog.create_item(
+                session,
+                user.user_id,
+                name=body.name,
+                item_type=body.item_type,
+                description=body.description,
+                gear_slots=body.gear_slots,
+                bundle_size=body.bundle_size,
+                value=body.value,
+            )
+            return catalog_item_out(item)
+
+    @app.patch("/api/items/{item_id}")
+    def edit_catalog_item(item_id: int, body: CatalogItemPatch, user: User) -> CatalogItemOut:
+        """Open to everyone, like /items edit."""
+        with session_scope() as session:
+            item = catalog.update_item(
+                session,
+                item_id,
+                name=body.name,
+                item_type=body.item_type,
+                description=body.description,
+                gear_slots=body.gear_slots,
+                bundle_size=body.bundle_size,
+                value=body.value,
+            )
+            return catalog_item_out(item)
+
     @app.get("/api/guild")
     def guild(user: User) -> GuildOut:
         """Guild coffers, shared storage locations and the magic item treasury."""
@@ -588,6 +624,32 @@ def create_app(
                 entry_id=entry_id,
                 quantity=body.quantity,
                 role=body.to,
+            )
+        return _guild(resolve_name)
+
+    @app.post("/api/guild/locations")
+    def add_guild_location(body: LocationIn, user: User) -> GuildOut:
+        """A new shared storage location. Open to everyone, like /inventory
+        location-create."""
+        with session_scope() as session:
+            guild_service.create_location(
+                session,
+                name=body.name,
+                max_gear_slots=body.max_gear_slots,
+                description=body.description,
+            )
+        return _guild(resolve_name)
+
+    @app.post("/api/guild/locations/{location_id}/store")
+    def store_in_guild(location_id: int, body: StoreIn, user: User) -> GuildOut:
+        """Put some of your carried / stashed items into a shared location, all
+        or nothing."""
+        with session_scope() as session:
+            guild_service.store(
+                session,
+                user.user_id,
+                location_id=location_id,
+                items=[(i.role, i.entry_id, i.quantity) for i in body.items],
             )
         return _guild(resolve_name)
 

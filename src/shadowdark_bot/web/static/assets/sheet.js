@@ -1,7 +1,7 @@
 // Renders a character sheet (the JSON from /api/character or
 // /api/characters/{id}) with the same three tabs as the Discord sheet.
 
-import { h, signed, slots } from "./dom.js";
+import { h, plain, signed, slots } from "./dom.js";
 import { usedAfterTap } from "./rounds.js";
 
 export const TABS = [
@@ -324,7 +324,9 @@ function inventoryTab(c, opts) {
       ),
     ),
     storeCard("Carrying", c.held, "Carrying nothing.", { key: "held", c, opts }),
-    c.stash ? storeCard("Stash", c.stash, "Empty.", { key: "stash", c, opts }) : null,
+    c.stash ? storeCard("Personal Stash", c.stash, "Empty.", {
+      key: "stash", c, opts, note: "Private. Only its owner and Dungeon Masters can see it.",
+    }) : null,
   ];
 }
 
@@ -337,6 +339,7 @@ export function storeCard(label, store, empty, ctx = {}) {
   return card(ctx.cardKey ?? ctx.key ?? `store-${store.id ?? label}`, label,
     { aside, tools: ctx.opts?.tools?.(ctx.key, ctx.c), collapsible: ctx.collapsible ?? false },
     store.description && !ctx.key ? h("p", { class: "store-desc muted" }, store.description) : null,
+    ctx.note ? h("p", { class: "store-desc muted" }, ctx.note) : null,
     h("div", {
       class: "meter",
       role: "meter",
@@ -367,7 +370,7 @@ function itemRow(i, actions) {
           fact("Slots", per),
           fact("Value", i.value_cp !== null ? coins(i.value_cp) : null),
         ),
-        i.description ? h("p", { class: "prose" }, i.description) : null,
+        i.description ? h("p", { class: "prose" }, plain(i.description)) : null,
         i.notes ? h("p", { class: "prose muted" }, i.notes) : null,
         // Inside the expanded row so three buttons never squeeze the name on a phone.
         h("div", { class: "row-actions" }, actions ?? null),
