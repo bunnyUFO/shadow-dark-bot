@@ -1,5 +1,5 @@
-"""Effects library endpoints (/api/effects). Any signed-in user may add, edit,
-delete and link.
+"""Effects library endpoints (/api/effects). Any signed-in user may read and
+apply an effect; only a Dungeon Master may add, edit, delete and link.
 
 Registered by `create_app` (above its /api catch-all). Rules live in
 `services.effects`; this module only shapes JSON.
@@ -92,7 +92,7 @@ def _read(template_id: int) -> EffectOut:
         return effect_out(session, effects.get_template(session, template_id))
 
 
-def register(app: FastAPI, User) -> None:
+def register(app: FastAPI, User, DungeonMaster) -> None:
 
     @app.get("/api/effects")
     def list_effects(
@@ -105,7 +105,7 @@ def register(app: FastAPI, User) -> None:
             return effect_outs(session, effects.list_templates(session, q, kind, target_id))
 
     @app.post("/api/effects")
-    def create_effect(body: EffectIn, user: User) -> EffectOut:
+    def create_effect(body: EffectIn, user: DungeonMaster) -> EffectOut:
         with session_scope() as session:
             template = effects.create_template(
                 session, user.user_id, **body.model_dump()
@@ -118,7 +118,7 @@ def register(app: FastAPI, User) -> None:
         return _read(template_id)
 
     @app.patch("/api/effects/{template_id}")
-    def update_effect(template_id: int, body: EffectIn, user: User) -> EffectOut:
+    def update_effect(template_id: int, body: EffectIn, user: DungeonMaster) -> EffectOut:
         with session_scope() as session:
             effects.update_template(
                 session, template_id, **body.model_dump(exclude_unset=True)
@@ -126,7 +126,7 @@ def register(app: FastAPI, User) -> None:
         return _read(template_id)
 
     @app.delete("/api/effects/{template_id}")
-    def delete_effect(template_id: int, user: User) -> dict:
+    def delete_effect(template_id: int, user: DungeonMaster) -> dict:
         with session_scope() as session:
             name = effects.delete_template(session, template_id)
         return {"deleted": name}
@@ -143,13 +143,13 @@ def register(app: FastAPI, User) -> None:
             )
 
     @app.post("/api/effects/{template_id}/links")
-    def add_link(template_id: int, body: LinkIn, user: User) -> EffectOut:
+    def add_link(template_id: int, body: LinkIn, user: DungeonMaster) -> EffectOut:
         with session_scope() as session:
             effects.add_link(session, template_id, body.kind, body.target_id)
         return _read(template_id)
 
     @app.delete("/api/effects/{template_id}/links/{kind}/{target_id}")
-    def remove_link(template_id: int, kind: str, target_id: int, user: User) -> EffectOut:
+    def remove_link(template_id: int, kind: str, target_id: int, user: DungeonMaster) -> EffectOut:
         with session_scope() as session:
             effects.remove_link(session, template_id, kind, target_id)
         return _read(template_id)

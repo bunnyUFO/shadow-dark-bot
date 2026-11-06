@@ -9,7 +9,7 @@ from test_web_api import BASE, LAN, SECRET, FakeOAuth, _make_bob, _seed, _stack,
 
 from shadowdark_bot.db import session_scope
 from shadowdark_bot.services import characters
-from shadowdark_bot.web.app import DM_ONLY, create_app
+from shadowdark_bot.web.app import DM_ONLY, DM_ONLY_LIBRARY, create_app
 from shadowdark_bot.web.auth import SessionSigner
 
 
@@ -272,3 +272,17 @@ def test_dm_settings():
     assert web.web_config_errors() == []
     bad = web.model_copy(update={"DM_ROLE_IDS": "Dungeon Master"})
     assert "DM_ROLE_IDS" in " ".join(bad.web_config_errors())
+
+
+def test_dm_alone_changes_the_bestiary_and_library(dm_api):
+    amy, dm = _as(dm_api, "u2"), _as(dm_api, "dm")
+    assert dm_api.post("/api/creatures", json={"name": "Goblin"}, headers=dm).status_code == 200
+    assert dm_api.post("/api/effects", json={"name": "Bless"}, headers=dm).status_code == 200
+    for r in (
+        dm_api.post("/api/creatures", json={"name": "Wolf"}, headers=amy),
+        dm_api.post("/api/effects", json={"name": "Curse"}, headers=amy),
+    ):
+        assert r.status_code == 403 and r.json()["detail"] == DM_ONLY_LIBRARY
+    # players still read both
+    assert [c["name"] for c in dm_api.get("/api/creatures", headers=amy).json()] == ["Goblin"]
+    assert [e["name"] for e in dm_api.get("/api/effects", headers=amy).json()] == ["Bless"]

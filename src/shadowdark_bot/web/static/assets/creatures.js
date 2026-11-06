@@ -1,6 +1,7 @@
 // The creature bestiary: a searchable list and a Shadowdark-style stat block per
-// creature, plus the encounters the party has had with it. Anyone may add, edit
-// and delete. Every stat can be unknown, which shows as "?".
+// creature, plus the encounters the party has had with it. Everyone can read it;
+// only a Dungeon Master can add, edit and delete. Every stat can be unknown, which
+// shows as "?".
 
 import { api } from "./api.js";
 import { h, mount, signed } from "./dom.js";
@@ -31,7 +32,7 @@ const btn = (label, onClick, cls = "tool") => h("button", { type: "button", clas
 
 // ---------- list ----------
 
-export async function renderCreatures(app) {
+export async function renderCreatures(app, me = null) {
   const creatures = await api("/creatures");
   const list = h("div", {});
   const draw = () => {
@@ -56,7 +57,7 @@ export async function renderCreatures(app) {
         "aria-label": "Search creatures", autocomplete: "off",
         oninput: (e) => { filters.q = e.target.value; draw(); },
       }),
-      btn("Add creature", () => openCreatureForm(null), "tool add-creature"),
+      me?.is_dm ? btn("Add creature", () => openCreatureForm(null), "tool add-creature") : null,
     ),
     list,
   );
@@ -77,17 +78,18 @@ function creatureRow(c) {
 
 // ---------- detail ----------
 
-export async function renderCreature(app, id) {
+export async function renderCreature(app, id, me = null) {
+  const canEdit = me?.is_dm === true;
   const draw = (c, effects) => {
     const y = window.scrollY;
     mount(app,
       h("p", { class: "banner" }, h("a", { href: "#/creatures" }, "← Creatures")),
-      statBlock(c, (saved) => draw(saved, effects)),
+      statBlock(c, (saved) => draw(saved, effects), canEdit),
       effects.length ? card("effects", "Effects", {}, linkedEffects(effects)) : null,
       c.special_abilities ? textCard("abilities", "Special abilities", c.special_abilities) : null,
       c.description ? textCard("description", "Description", c.description) : null,
       c.notes ? textCard("notes", "Notes", c.notes) : null,
-      encountersCard(c, (saved) => draw(saved, effects)),
+      encountersCard(c, (saved) => draw(saved, effects), canEdit),
     );
     window.scrollTo(0, y);
   };
@@ -100,7 +102,7 @@ export async function renderCreature(app, id) {
 
 const textCard = (key, title, text) => card(key, title, {}, h("p", { class: "prose" }, text));
 
-function statBlock(c, redraw) {
+function statBlock(c, redraw, canEdit) {
   const stat = (label, value) =>
     h("div", { class: "tile" },
       h("span", { class: "tile-label" }, label),
@@ -109,7 +111,7 @@ function statBlock(c, redraw) {
     ["I", c.int_mod], ["W", c.wis_mod], ["Ch", c.cha_mod]];
   const sub = [c.level === null ? "Level ?" : `Level ${c.level}`, c.alignment ? ALIGN_LABEL[c.alignment] : "Alignment ?"];
   return card("stats", c.name, {
-    tools: [
+    tools: !canEdit ? null : [
       btn("Edit", () => openCreatureForm(c, redraw)),
       btn("Delete", () => openForm({
         title: "Delete creature",
@@ -181,7 +183,7 @@ function openCreatureForm(c, redraw) {
 
 // ---------- encounters ----------
 
-function encountersCard(c, redraw) {
+function encountersCard(c, redraw, canEdit) {
   const write = async (path, method, body) => redraw(await api(`/creatures/${c.id}/encounters${path}`, { method, body }));
   const form = (e) => openForm({
     title: e ? "Edit encounter" : "Add encounter",
@@ -203,7 +205,7 @@ function encountersCard(c, redraw) {
   });
   return card("encounters", "Encounters", {
     aside: c.encounters.length ? String(c.encounters.length) : null,
-    tools: btn("Add", () => form(null)),
+    tools: canEdit ? btn("Add", () => form(null)) : null,
   },
     c.encounters.length === 0
       ? h("p", { class: "muted" }, "Not met yet.")
@@ -215,7 +217,9 @@ function encountersCard(c, redraw) {
                 ? h("span", { class: "muted" }, [e.session, e.place].filter(Boolean).join(" · "))
                 : null,
               e.outcome ? h("p", { class: "prose" }, e.outcome) : null),
-            h("div", { class: "row-actions" }, btn("Edit", () => form(e)), btn("Delete", () => del(e))),
+            canEdit
+              ? h("div", { class: "row-actions" }, btn("Edit", () => form(e)), btn("Delete", () => del(e)))
+              : null,
           ))),
   );
 }

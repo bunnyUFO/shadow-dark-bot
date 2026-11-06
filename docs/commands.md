@@ -2,7 +2,7 @@
 
 Every command is a Discord **slash command**, available to anyone in the server.
 
-For now, **all commands are open to all guild members**. There's no role-gating — anyone can add, take, borrow, return, or even delete entries. Built-in invariants (see the bottom of this page) prevent the worst classes of mistakes. The one role is the **Dungeon Master** (`DM_ROLE_IDS`), who can also edit other players' characters (see `/character`). Finer-grained permissions and an audit log feed are on the roadmap.
+For now, **all commands are open to all guild members**. There's no role-gating — anyone can add, take, borrow, return, or even delete entries. Built-in invariants (see the bottom of this page) prevent the worst classes of mistakes. The one role is the **Dungeon Master** (`DM_ROLE_IDS`), who can also edit other players' characters (see `/character`) and change the bestiary and effects library in the web app. Finer-grained permissions and an audit log feed are on the roadmap.
 
 ## Primary entry point: `/<group> browse`
 

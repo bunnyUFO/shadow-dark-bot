@@ -10,7 +10,7 @@ from shadowdark_bot.db import session_scope
 from shadowdark_bot.models import Creature, CreatureEncounter
 from shadowdark_bot.services import creatures
 from shadowdark_bot.services.creatures import CreatureError, CreatureNotFound
-from shadowdark_bot.web.app import create_app
+from shadowdark_bot.web.app import DM_ONLY_LIBRARY, create_app
 from shadowdark_bot.web.auth import SessionSigner
 
 # ---------- services ----------
@@ -152,13 +152,23 @@ def test_delete_cascades_to_encounters(dbsession):
 # ---------- web API ----------
 
 
-@pytest.fixture
-def client(dbsession):
+def _web(user_id, name, *, is_dm):
     signer = SessionSigner("x" * 40, 3600, purpose="local")
     app = create_app(mode="local", signer=signer, static_dir=None)
     tc = TestClient(app, client=("127.0.0.1", 50000))
-    tc.headers["Authorization"] = f"Bearer {signer.issue('u1', 'Tester')}"
+    tc.headers["Authorization"] = f"Bearer {signer.issue(user_id, name, is_dm=is_dm)}"
     return tc
+
+
+@pytest.fixture
+def client(dbsession):
+    """A Dungeon Master: the only kind of user who may change the bestiary."""
+    return _web("u1", "Tester", is_dm=True)
+
+
+@pytest.fixture
+def player(dbsession):
+    return _web("u2", "Player", is_dm=False)
 
 
 def test_requires_login(client):
@@ -246,3 +256,25 @@ def test_encounters_api(client):
 
     client.delete(f"/api/creatures/{cid}")
     assert client.get(f"/api/creatures/{cid}").status_code == 404
+
+
+def test_only_a_dm_changes_the_bestiary(client, player):
+    cid = client.post("/api/creatures", json={"name": "Goblin"}).json()["id"]
+    base = f"/api/creatures/{cid}"
+    eid = client.post(f"{base}/encounters", json={}).json()["encounters"][0]["id"]
+    attempts = [
+        player.post("/api/creatures", json={"name": "Wolf"}),
+        player.patch(base, json={"ac": 3}),
+        player.delete(base),
+        player.post(f"{base}/encounters", json={}),
+        player.patch(f"{base}/encounters/{eid}", json={"place": "x"}),
+        player.delete(f"{base}/encounters/{eid}"),
+    ]
+    for r in attempts:
+        assert r.status_code == 403, r.text
+        assert r.json()["detail"] == DM_ONLY_LIBRARY
+
+    # reading stays open to everyone, and nothing was changed
+    assert [c["name"] for c in player.get("/api/creatures").json()] == ["Goblin"]
+    got = player.get(base).json()
+    assert got["ac"] is None and len(got["encounters"]) == 1

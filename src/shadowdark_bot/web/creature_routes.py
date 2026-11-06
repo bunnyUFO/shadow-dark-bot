@@ -1,4 +1,5 @@
-"""Creature bestiary endpoints. Any signed-in user may add, edit and delete.
+"""Creature bestiary endpoints. Any signed-in user may read; only a Dungeon
+Master may add, edit and delete (creatures and their encounters).
 
 Registered by `create_app` (above its /api catch-all). Rules live in
 `services.creatures`; this module only shapes JSON. Input stat fields accept
@@ -110,7 +111,7 @@ def _read(creature_id: int) -> CreatureOut:
         return _creature_out(session, creature_id)
 
 
-def register(app: FastAPI, User) -> None:
+def register(app: FastAPI, User, DungeonMaster) -> None:
 
     @app.get("/api/creatures")
     def list_creatures(
@@ -126,7 +127,7 @@ def register(app: FastAPI, User) -> None:
             ]
 
     @app.post("/api/creatures")
-    def create_creature(body: CreatureIn, user: User) -> CreatureOut:
+    def create_creature(body: CreatureIn, user: DungeonMaster) -> CreatureOut:
         with session_scope() as session:
             creature = creatures.create_creature(
                 session, user.user_id, **body.model_dump()
@@ -139,7 +140,7 @@ def register(app: FastAPI, User) -> None:
         return _read(creature_id)
 
     @app.patch("/api/creatures/{creature_id}")
-    def update_creature(creature_id: int, body: CreatureIn, user: User) -> CreatureOut:
+    def update_creature(creature_id: int, body: CreatureIn, user: DungeonMaster) -> CreatureOut:
         with session_scope() as session:
             creatures.update_creature(
                 session, creature_id, **body.model_dump(exclude_unset=True)
@@ -147,13 +148,13 @@ def register(app: FastAPI, User) -> None:
         return _read(creature_id)
 
     @app.delete("/api/creatures/{creature_id}")
-    def delete_creature(creature_id: int, user: User) -> dict:
+    def delete_creature(creature_id: int, user: DungeonMaster) -> dict:
         with session_scope() as session:
             name = creatures.delete_creature(session, creature_id)
         return {"deleted": name}
 
     @app.post("/api/creatures/{creature_id}/encounters")
-    def add_encounter(creature_id: int, body: EncounterIn, user: User) -> CreatureOut:
+    def add_encounter(creature_id: int, body: EncounterIn, user: DungeonMaster) -> CreatureOut:
         with session_scope() as session:
             creatures.add_encounter(
                 session, user.user_id, creature_id, body.model_dump()
@@ -162,7 +163,7 @@ def register(app: FastAPI, User) -> None:
 
     @app.patch("/api/creatures/{creature_id}/encounters/{encounter_id}")
     def update_encounter(
-        creature_id: int, encounter_id: int, body: EncounterIn, user: User
+        creature_id: int, encounter_id: int, body: EncounterIn, user: DungeonMaster
     ) -> CreatureOut:
         with session_scope() as session:
             creatures.update_encounter(
@@ -172,7 +173,7 @@ def register(app: FastAPI, User) -> None:
         return _read(creature_id)
 
     @app.delete("/api/creatures/{creature_id}/encounters/{encounter_id}")
-    def delete_encounter(creature_id: int, encounter_id: int, user: User) -> CreatureOut:
+    def delete_encounter(creature_id: int, encounter_id: int, user: DungeonMaster) -> CreatureOut:
         with session_scope() as session:
             creatures.delete_encounter(session, creature_id, encounter_id)
         return _read(creature_id)

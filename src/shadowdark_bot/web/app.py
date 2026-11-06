@@ -91,6 +91,7 @@ NOT_A_MEMBER = (
 )
 LOCAL_ONLY = "The local sheet is only available on the home network."
 DM_ONLY = "Only a Dungeon Master can edit someone else's character."
+DM_ONLY_LIBRARY = "Only a Dungeon Master can change the bestiary and the effects library."
 
 # Headers a reverse proxy adds. Seeing any of them in local mode means someone
 # pointed the proxy at the local port — refuse rather than expose a no-login app.
@@ -213,6 +214,15 @@ def create_app(
         return target
 
     Target = Annotated[str, Depends(acting_on)]
+
+    def require_dm(user: User) -> SessionUser:
+        """The signed-in user, who must be a Dungeon Master (403 otherwise).
+        Guards every write to the bestiary and the effects library."""
+        if not user.is_dm:
+            raise HTTPException(status_code=403, detail=DM_ONLY_LIBRARY)
+        return user
+
+    DungeonMaster = Annotated[SessionUser, Depends(require_dm)]
 
     def sheet_route(method: str, path: str):
         """Register a sheet write for your own character and, under
@@ -639,8 +649,8 @@ def create_app(
         return _full_sheet(user.user_id)
 
     # ---------- creatures (bestiary) ----------
-    creature_routes.register(app, User)
-    effect_routes.register(app, User)
+    creature_routes.register(app, User, DungeonMaster)
+    effect_routes.register(app, User, DungeonMaster)
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"])
     def api_not_found(path: str) -> None:

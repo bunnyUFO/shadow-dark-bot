@@ -15,6 +15,7 @@ from shadowdark_bot.models import (
 from shadowdark_bot.services import creatures, effects
 from shadowdark_bot.services.characters import CharacterError
 from shadowdark_bot.spell_data import seed_spells
+from shadowdark_bot.web.app import DM_ONLY_LIBRARY
 from shadowdark_bot.web.server import build_local_app
 
 
@@ -25,15 +26,29 @@ def seeded(dbsession):
         assert seed_sample_data(s) is True
 
 
-@pytest.fixture
-def client(seeded):
+async def _is_dm(user_id):
+    return True
+
+
+def _local_client(has_dm_role=None):
     # "local" mode: no Discord, any seeded character can sign in.
-    c = TestClient(build_local_app(), client=("127.0.0.1", 50000))
+    c = TestClient(build_local_app(has_dm_role), client=("127.0.0.1", 50000))
     token = c.post(
         "/api/auth/local", json={"user_id": "900000000000000001"}
     ).json()["token"]
     c.headers["Authorization"] = f"Bearer {token}"
     return c
+
+
+@pytest.fixture
+def client(seeded):
+    """A Dungeon Master: the only kind of user who may change the library."""
+    return _local_client(_is_dm)
+
+
+@pytest.fixture
+def player(seeded):
+    return _local_client()
 
 
 def _ids(session):
@@ -166,3 +181,26 @@ def test_seed_has_linked_effects(client):
     assert rows["Shield of Faith"]["max_rounds"] == 5
     assert [(l["kind"], l["target_name"]) for l in rows["Frightened"]["links"]] == [("creature", "Goblin")]
     assert rows["Giant Strength"]["links"][0]["kind"] == "item"
+
+
+def test_only_a_dm_changes_the_library(client, player):
+    eff = client.post("/api/effects", json={"name": "Bless", "max_rounds": 5}).json()
+    url = f"/api/effects/{eff['id']}"
+    spell_id = client.get("/api/spells").json()[0]["id"]
+    assert client.post(f"{url}/links", json={"kind": "spell", "target_id": spell_id}).status_code == 200
+    attempts = [
+        player.post("/api/effects", json={"name": "Curse"}),
+        player.patch(url, json={"max_rounds": 2}),
+        player.post(f"{url}/links", json={"kind": "item", "target_id": 1}),
+        player.delete(f"{url}/links/spell/{spell_id}"),
+        player.delete(url),
+    ]
+    for r in attempts:
+        assert r.status_code == 403, r.text
+        assert r.json()["detail"] == DM_ONLY_LIBRARY
+
+    # reading and applying an effect stay open to everyone; nothing was changed
+    again = player.get(url).json()
+    assert (again["name"], again["max_rounds"], len(again["links"])) == ("Bless", 5, 1)
+    assert player.post(f"{url}/apply", json={}).status_code == 200
+    assert not any(e["name"] == "Curse" for e in player.get("/api/effects").json())
