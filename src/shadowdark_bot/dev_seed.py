@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from shadowdark_bot import storage
+from shadowdark_bot import core_gear, storage
 from shadowdark_bot.models import (
     LOCATION_ROLE_HELD,
     LOCATION_ROLE_STASH,
@@ -72,6 +72,8 @@ class _Sample:
     spell_ability: str | None
     gold_cp: int
     held: list[tuple[str, int]] = field(default_factory=list)
+    # Display names of held stacks to wear (armor and shields).
+    worn: list[str] = field(default_factory=list)
     # (name, quantity, slots each, notes)
     freeform: list[tuple[str, int, float, str | None]] = field(default_factory=list)
     stash: list[tuple[str, int]] = field(default_factory=list)
@@ -91,9 +93,10 @@ PARTY = [
         BRANNOC_ID, "Brannoc Ashfall", "Fighter", "Warrior", "Human", "Lawful",
         "Soldier", 3, (16, 12, 14, 9, 10, 11), 22, 15, None, 2550,
         held=[
-            ("Longsword", 1), ("Shield", 1), ("Chainmail", 1), ("Shortbow", 1),
+            ("Longsword", 1), ("Shield +1", 1), ("Chainmail", 1), ("Shortbow", 1),
             ("Arrow", 25), ("Torch", 3), ("Rations", 3),
         ],
+        worn=["Chainmail", "Shield +1"],
         freeform=[("Lucky Coin", 1, 0.0, "Won from a ghoul at dice")],
         stash=[("Rope", 1), ("Crowbar", 1)],
         proficiencies="All weapons; all armor and shields",
@@ -122,6 +125,7 @@ PARTY = [
         ALDRIC_ID, "Brother Aldric", "Priest", None, "Dwarf", "Lawful",
         None, 1, (12, 8, 13, 10, 15, 10), 7, 13, "wis", 0,
         held=[("Leather Armor", 1), ("Torch", 1)],
+        worn=["Leather Armor"],
         freeform=[("Holy Symbol", 1, 1.0, None)],
         spells=["Cure Wounds", "Protection From Evil", "Turn Undead"],
         xp=3,
@@ -147,6 +151,11 @@ def _seed_character(session: Session, s: _Sample) -> None:
     )
     for item, qty in s.held:
         characters.carry(session, s.user_id, item_name=item, quantity=qty)
+    if s.worn:
+        held_loc = storage.character_location(session, s.user_id, LOCATION_ROLE_HELD)
+        stacks = {e.display_name: e for e in storage.location_entries(session, held_loc.id)}
+        for name in s.worn:
+            characters.set_worn(session, s.user_id, entry_id=stacks[name].id, worn=True)
     for name, qty, slots, notes in s.freeform:
         characters.carry(
             session, s.user_id, item_name=name, quantity=qty,
@@ -311,6 +320,7 @@ def seed_sample_data(session: Session) -> bool:
             Item(
                 name=name, item_type=item_type, gear_slots=slots,
                 bundle_size=bundle, value_cp=value, description=desc,
+                purchasable=core_gear.is_core_gear(name, item_type),
             )
         )
     session.flush()
