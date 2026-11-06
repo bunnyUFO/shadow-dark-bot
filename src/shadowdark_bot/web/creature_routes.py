@@ -11,6 +11,7 @@ from typing import Annotated
 
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from shadowdark_bot.db import session_scope
@@ -24,6 +25,10 @@ class CreatureIn(BaseModel):
     """Create body. PATCH uses the same shape, applying only the fields sent."""
 
     name: str | None = None
+    title: str | None = None
+    tags: list[str] | str | None = None
+    kind: str | None = None
+    type_id: _Num = None
     level: _Num = None
     ac: _Num = None
     hp: _Num = None
@@ -42,35 +47,43 @@ class CreatureIn(BaseModel):
 
 
 class EncounterIn(BaseModel):
-    date: str | None = None  # YYYY-MM-DD; blank means today
-    session: str | None = None
-    place: str | None = None
-    outcome: str | None = None
+    details: str | None = None
 
 
 class EncounterOut(BaseModel):
     id: int
-    date: dt.date
-    session: str | None
-    place: str | None
-    outcome: str | None
+    details: str | None
     created_by: str | None
+    created_at: dt.datetime
 
 
 class CreatureSummaryOut(BaseModel):
     id: int
     name: str
+    title: str | None
+    kind: str
+    tags: list[str]
+    type_id: int | None
+    # Effective values: the creature's own, else its Type's.
     level: int | None
     ac: int | None
     hp: int | None
     alignment: str | None
     encounter_count: int
-    last_seen: dt.date | None
+
+
+class TypeRef(BaseModel):
+    id: int
+    name: str
 
 
 class CreatureOut(BaseModel):
     id: int
     name: str
+    title: str | None
+    kind: str
+    tags: list[str]
+    type: TypeRef | None
     level: int | None
     ac: int | None
     hp: int | None
@@ -86,6 +99,8 @@ class CreatureOut(BaseModel):
     special_abilities: str | None
     description: str | None
     notes: str | None
+    # Values shown from the Type where this creature's own are blank.
+    inherited: dict[str, int | str]
     created_by: str | None
     created_at: dt.datetime
     updated_at: dt.datetime
@@ -94,15 +109,29 @@ class CreatureOut(BaseModel):
 
 def _encounter_out(e: CreatureEncounter) -> EncounterOut:
     return EncounterOut(
-        id=e.id, date=e.date, session=e.session, place=e.place,
-        outcome=e.outcome, created_by=e.created_by,
+        id=e.id, details=e.details, created_by=e.created_by, created_at=e.created_at
     )
+
+
+_PLAIN = (
+    "id", "name", "title", "kind", "level", "ac", "hp", "attacks", "movement",
+    "str_mod", "dex_mod", "con_mod", "int_mod", "wis_mod", "cha_mod", "alignment",
+    "special_abilities", "description", "notes", "created_by", "created_at",
+    "updated_at",
+)
 
 
 def _creature_out(session: Session, creature_id: int) -> CreatureOut:
     c = creatures.get_creature(session, creature_id)
-    data = {col.name: getattr(c, col.name) for col in Creature.__table__.columns}
-    return CreatureOut(**data, encounters=[_encounter_out(e) for e in c.encounters])
+    parent = session.get(Creature, c.type_id) if c.type_id else None
+    data = {name: getattr(c, name) for name in _PLAIN}
+    return CreatureOut(
+        **data,
+        tags=c.tag_list(),
+        type=TypeRef(id=parent.id, name=parent.name) if parent else None,
+        inherited=creatures.inherited(session, c),
+        encounters=[_encounter_out(e) for e in c.encounters],
+    )
 
 
 def _read(creature_id: int) -> CreatureOut:
@@ -118,13 +147,35 @@ def register(app: FastAPI, User, DungeonMaster) -> None:
         user: User, q: Annotated[str, Query(max_length=100)] = ""
     ) -> list[CreatureSummaryOut]:
         with session_scope() as session:
-            return [
-                CreatureSummaryOut(
-                    id=c.id, name=c.name, level=c.level, ac=c.ac, hp=c.hp,
-                    alignment=c.alignment, encounter_count=n, last_seen=last,
+            rows = creatures.list_creatures(session, q)
+            # The bestiary is small: one lookup of Types serves every row.
+            types = {
+                c.id: c for c in session.scalars(
+                    select(Creature).where(Creature.kind == "type")
                 )
-                for c, n, last in creatures.list_creatures(session, q)
-            ]
+            }
+            out = []
+            for c, n in rows:
+                parent = types.get(c.type_id) if c.kind == "named" else None
+
+                def effective(field, c=c, parent=parent):
+                    own = getattr(c, field)
+                    if own is None and parent is not None:
+                        return getattr(parent, field)
+                    return own
+
+                out.append(CreatureSummaryOut(
+                    id=c.id, name=c.name, title=c.title, kind=c.kind,
+                    tags=c.tag_list(), type_id=c.type_id,
+                    level=effective("level"), ac=effective("ac"), hp=effective("hp"),
+                    alignment=effective("alignment"), encounter_count=n,
+                ))
+            return out
+
+    @app.get("/api/creatures/tags")
+    def creature_tags(user: User) -> list[str]:
+        with session_scope() as session:
+            return creatures.tag_suggestions(session)
 
     @app.post("/api/creatures")
     def create_creature(body: CreatureIn, user: DungeonMaster) -> CreatureOut:

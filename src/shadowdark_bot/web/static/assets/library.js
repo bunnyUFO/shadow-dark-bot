@@ -45,7 +45,7 @@ function searchBox(value, placeholder, oninput) {
 }
 
 // A row of toggle chips; `options` is [[value, label], …] with "" meaning All.
-function chipGroup(label, options, current, onpick) {
+export function chipGroup(label, options, current, onpick) {
   const group = h("div", { class: "chip-group", role: "radiogroup", "aria-label": label });
   const draw = (selected) =>
     group.replaceChildren(
@@ -74,7 +74,7 @@ function chipGroup(label, options, current, onpick) {
   return group;
 }
 
-const countLine = (shown, total, noun) =>
+export const countLine = (shown, total, noun) =>
   h("p", { class: "count muted" }, shown === total ? `${total} ${noun}` : `${shown} of ${total} ${noun}`);
 
 // ---------- spells ----------

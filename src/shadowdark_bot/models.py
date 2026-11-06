@@ -1,11 +1,9 @@
 import json
-from datetime import date as date_type
 from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
-    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -450,14 +448,25 @@ class CharacterEffect(Base):
 
 
 class Creature(Base):
-    """A monster the party has met. Every stat is nullable: NULL means unknown
-    (shown as "?"), since players often only learn a creature's numbers over
-    several encounters. The name may be a placeholder description."""
+    """A monster the party has met. Every stat is nullable: NULL means not
+    known and is not shown, since players often only learn a creature's numbers
+    over several encounters. The name may be a placeholder description.
+
+    `kind` is "named" (one particular creature) or "type" (a kind of creature).
+    A Named creature may point at its Type through `type_id` (no database
+    foreign key; the service keeps it valid) and shows the Type's stats where
+    its own are blank. `tags` is a JSON array of lowercase strings."""
 
     __tablename__ = "creatures"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str | None] = mapped_column(String)
+    tags: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(
+        String, nullable=False, default="type", server_default=text("'type'")
+    )
+    type_id: Mapped[int | None] = mapped_column(Integer)
     level: Mapped[int | None] = mapped_column(Integer)
     ac: Mapped[int | None] = mapped_column(Integer)
     hp: Mapped[int | None] = mapped_column(Integer)
@@ -484,12 +493,17 @@ class Creature(Base):
     encounters: Mapped[list["CreatureEncounter"]] = relationship(
         back_populates="creature",
         cascade="all, delete-orphan",
-        order_by="CreatureEncounter.date.desc(), CreatureEncounter.id.desc()",
+        order_by="CreatureEncounter.created_at.desc(), CreatureEncounter.id.desc()",
     )
+
+    def tag_list(self) -> list[str]:
+        return json.loads(self.tags) if self.tags else []
 
 
 class CreatureEncounter(Base):
-    """One time the party met a creature."""
+    """One time the party met a creature: a free-text note (what happened,
+    and whenever the DM wants to say when or where). `created_at` only orders
+    the notes, newest first."""
 
     __tablename__ = "creature_encounters"
 
@@ -497,10 +511,7 @@ class CreatureEncounter(Base):
     creature_id: Mapped[int] = mapped_column(
         ForeignKey("creatures.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    date: Mapped[date_type] = mapped_column(Date, nullable=False)
-    session: Mapped[str | None] = mapped_column(String)
-    place: Mapped[str | None] = mapped_column(String)
-    outcome: Mapped[str | None] = mapped_column(Text)
+    details: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()

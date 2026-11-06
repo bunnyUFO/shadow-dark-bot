@@ -1,14 +1,19 @@
 """The creature bestiary: monsters the party has met, and each encounter.
 
-Every stat is optional — `None` means unknown. Callers pass only the fields
-they want to change; a blank or `None` value sets that field back to unknown.
-Failures raise CreatureError (a CharacterError, so the web layer answers 400)
-or CreatureNotFound (404).
+Every stat is optional — `None` means not known, and is not shown. Callers
+pass only the fields they want to change; a blank or `None` value sets that
+field back to unset. A creature is Named or a Type; a Named creature may
+point at its Type and then shows the Type's stats where its own are blank
+(see `inherited`). Tags are lowercase words. An encounter is one free-text
+note. Failures raise CreatureError (a CharacterError, so the web layer
+answers 400) or CreatureNotFound (404).
 """
 
-from datetime import date, datetime
+import json
+import re
+from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from shadowdark_bot.models import Creature, CreatureEncounter
@@ -31,6 +36,7 @@ INT_FIELDS: dict[str, tuple[str, int, int | None]] = {
 }
 # field -> (label, max length)
 TEXT_FIELDS: dict[str, tuple[str, int]] = {
+    "title": ("Class / title", 100),
     "attacks": ("Attacks", 500),
     "movement": ("Movement", 100),
     "special_abilities": ("Special abilities", 4000),
@@ -38,11 +44,13 @@ TEXT_FIELDS: dict[str, tuple[str, int]] = {
     "notes": ("Notes", 4000),
 }
 NAME_MAX = 200
-ENCOUNTER_TEXT: dict[str, tuple[str, int]] = {
-    "session": ("Session", 100),
-    "place": ("Place", 200),
-    "outcome": ("Outcome", 2000),
-}
+ENCOUNTER_TEXT: dict[str, tuple[str, int]] = {"details": ("Encounter", 2000)}
+KINDS = ("named", "type")
+TAG_MAX = 30
+TAGS_MAX = 12
+DEFAULT_TAGS = ("ally", "enemy", "neutral", "creature", "townfolk")
+# What a Named creature shows from its Type when its own value is blank.
+INHERITED_FIELDS = (*INT_FIELDS, "attacks", "movement", "alignment", "special_abilities")
 
 
 class CreatureError(CharacterError):
@@ -102,12 +110,50 @@ def _clean_alignment(value) -> str | None:
     return letter
 
 
+def _clean_tags(value) -> str | None:
+    """A list (or comma-separated string) of tags as JSON text, or None."""
+    if _blank(value):
+        return None
+    if isinstance(value, str):
+        value = value.split(",")
+    if not isinstance(value, (list, tuple)):
+        raise CreatureError("Tags must be a list of words.")
+    tags: list[str] = []
+    for raw in value:
+        tag = re.sub(r"\s+", " ", str(raw).strip().lower())
+        if not tag:
+            continue
+        if "," in tag:
+            raise CreatureError("A tag can't contain a comma.")
+        if len(tag) > TAG_MAX:
+            raise CreatureError(f"A tag is too long (max {TAG_MAX} characters).")
+        if tag not in tags:
+            tags.append(tag)
+    if len(tags) > TAGS_MAX:
+        raise CreatureError(f"Too many tags (max {TAGS_MAX}).")
+    return json.dumps(tags) if tags else None
+
+
+def _clean_kind(value) -> str:
+    kind = "" if _blank(value) else str(value).strip().lower()
+    if kind not in KINDS:
+        raise CreatureError("Kind must be Named or Type.")
+    return kind
+
+
 def _clean_fields(data: dict) -> dict:
-    """Validate the given fields only, returning column values."""
+    """Validate the given fields only, returning column values. `type_id` is
+    passed through for `_apply` to check against the final kind."""
     out: dict = {}
     for key, value in data.items():
         if key == "name":
             out[key] = _clean_name(value)
+        elif key == "tags":
+            out[key] = _clean_tags(value)
+        elif key == "kind":
+            out[key] = _clean_kind(value)
+        elif key == "type_id":
+            out[key] = None if _blank(value) else value
         elif key == "alignment":
             out[key] = _clean_alignment(value)
         elif key in INT_FIELDS:
@@ -130,11 +176,51 @@ def get_creature(session: Session, creature_id: int) -> Creature:
     return creature
 
 
+def _check_type_link(session: Session, creature: Creature) -> None:
+    """The creature's final kind and type_id must agree."""
+    if creature.kind == "type":
+        creature.type_id = None
+        return
+    if creature.type_id is None:
+        return
+    try:
+        type_id = int(creature.type_id)
+    except (TypeError, ValueError):
+        raise CreatureError("That type isn't in the bestiary.") from None
+    target = session.get(Creature, type_id)
+    if target is None:
+        raise CreatureError("That type isn't in the bestiary.")
+    if target.kind != "type" or target.id == creature.id:
+        raise CreatureError("Only a Type can be linked.")
+    creature.type_id = target.id
+
+
+def _apply(session: Session, creature: Creature, fields: dict) -> None:
+    """Set the validated fields, then check the kind and type link together
+    (so a call may set `kind` and `type_id` at once)."""
+    if fields.get("type_id") is not None and (fields.get("kind") or creature.kind) != "named":
+        raise CreatureError("Only a Named creature can have a type.")
+    if fields.get("kind") == "named" and creature.id is not None:
+        used = session.scalar(
+            select(func.count()).select_from(Creature).where(Creature.type_id == creature.id)
+        )
+        if used:
+            plural = "creature uses" if used == 1 else "creatures use"
+            raise CreatureError(f"{used} named {plural} {creature.name} as their type.")
+    for key, value in fields.items():
+        setattr(creature, key, value)
+    _check_type_link(session, creature)
+
+
 def create_creature(session: Session, user_id: str, **data) -> Creature:
-    """Add a creature. Only the name is required."""
+    """Add a creature. Only the name is required; the kind defaults to Type."""
     if "name" not in data:
         raise CreatureError("A creature needs a name (a description will do).")
-    creature = Creature(created_by=user_id, **_clean_fields(data))
+    if _blank(data.get("kind")):
+        data = {k: v for k, v in data.items() if k != "kind"}
+    fields = {"kind": "type", **_clean_fields(data)}
+    creature = Creature(created_by=user_id)
+    _apply(session, creature, fields)
     session.add(creature)
     session.flush()
     return creature
@@ -144,8 +230,7 @@ def update_creature(session: Session, creature_id: int, **changes) -> Creature:
     """Change only the given fields; blank/None sets a stat back to unknown
     (the name can't be blanked)."""
     creature = get_creature(session, creature_id)
-    for key, value in _clean_fields(changes).items():
-        setattr(creature, key, value)
+    _apply(session, creature, _clean_fields(changes))
     creature.updated_at = datetime.now()
     session.flush()
     return creature
@@ -156,58 +241,66 @@ def delete_creature(session: Session, creature_id: int) -> str:
     creature = get_creature(session, creature_id)
     name = creature.name
     effects.drop_links_for(session, "creature", creature.id)
+    session.execute(
+        update(Creature).where(Creature.type_id == creature.id).values(type_id=None)
+    )
     session.delete(creature)
     session.flush()
     return name
 
 
-def list_creatures(
-    session: Session, q: str = ""
-) -> list[tuple[Creature, int, date | None]]:
-    """Creatures by name with (encounter count, last seen date), optionally
-    filtered by a name substring."""
+def list_creatures(session: Session, q: str = "") -> list[tuple[Creature, int]]:
+    """Creatures by name with their encounter count, optionally filtered by a
+    name substring."""
     stats = (
         select(
             CreatureEncounter.creature_id.label("cid"),
             func.count().label("n"),
-            func.max(CreatureEncounter.date).label("last"),
         )
         .group_by(CreatureEncounter.creature_id)
         .subquery()
     )
     stmt = (
-        select(Creature, stats.c.n, stats.c.last)
+        select(Creature, stats.c.n)
         .outerjoin(stats, stats.c.cid == Creature.id)
         .order_by(func.lower(Creature.name), Creature.id)
     )
     if q.strip():
         needle = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         stmt = stmt.where(Creature.name.ilike(f"%{needle}%", escape="\\"))
-    return [(c, n or 0, last) for c, n, last in session.execute(stmt).all()]
+    return [(c, n or 0) for c, n in session.execute(stmt).all()]
+
+
+def tag_suggestions(session: Session) -> list[str]:
+    """The default tags in order, then every other tag in use, alphabetical."""
+    used: set[str] = set()
+    for (raw,) in session.execute(select(Creature.tags).where(Creature.tags.is_not(None))):
+        used.update(json.loads(raw))
+    return [*DEFAULT_TAGS, *sorted(used - set(DEFAULT_TAGS))]
+
+
+def inherited(session: Session, creature: Creature) -> dict:
+    """Values a Named creature shows from its Type: each inheritable field
+    that is blank on the creature and set on the Type."""
+    if creature.kind != "named" or creature.type_id is None:
+        return {}
+    parent = session.get(Creature, creature.type_id)
+    if parent is None:
+        return {}
+    return {
+        field: getattr(parent, field)
+        for field in INHERITED_FIELDS
+        if getattr(creature, field) is None and getattr(parent, field) is not None
+    }
 
 
 # ---------- encounters ----------
 
 
-def _clean_date(value) -> date:
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    if isinstance(value, str):
-        try:
-            return date.fromisoformat(value.strip())
-        except ValueError:
-            pass
-    raise CreatureError("Date must look like 2026-07-04.")
-
-
 def _clean_encounter(data: dict) -> dict:
     out: dict = {}
     for key, value in data.items():
-        if key == "date":
-            out[key] = date.today() if _blank(value) else _clean_date(value)
-        elif key in ENCOUNTER_TEXT:
+        if key in ENCOUNTER_TEXT:
             label, limit = ENCOUNTER_TEXT[key]
             out[key] = _clean_text(label, limit, value)
         else:
@@ -225,11 +318,11 @@ def _get_encounter(session: Session, creature_id: int, encounter_id: int):
 def add_encounter(
     session: Session, user_id: str, creature_id: int, data: dict | None = None
 ) -> CreatureEncounter:
-    """Record a meeting; `data` holds date/session/place/outcome (the date
-    defaults to today). A dict because "session" is also the DB session."""
+    """Record a meeting; `data` holds `details`, the note (required)."""
     creature = get_creature(session, creature_id)
     fields = _clean_encounter(data or {})
-    fields.setdefault("date", date.today())
+    if not fields.get("details"):
+        raise CreatureError("Write what happened.")
     enc = CreatureEncounter(creature_id=creature.id, created_by=user_id, **fields)
     session.add(enc)
     session.flush()
@@ -240,7 +333,10 @@ def update_encounter(
     session: Session, creature_id: int, encounter_id: int, changes: dict
 ) -> CreatureEncounter:
     enc = _get_encounter(session, creature_id, encounter_id)
-    for key, value in _clean_encounter(changes).items():
+    fields = _clean_encounter(changes)
+    if "details" in fields and not fields["details"]:
+        raise CreatureError("Write what happened.")
+    for key, value in fields.items():
         setattr(enc, key, value)
     session.flush()
     return enc

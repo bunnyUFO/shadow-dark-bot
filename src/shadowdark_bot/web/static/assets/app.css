@@ -557,6 +557,30 @@ dialog.sheet-form select[size] option { padding: 8px 6px; }
 .creature-stats { font-size: 0.9rem; font-variant-numeric: tabular-nums; }
 .creature-seen { font-size: 0.8rem; color: var(--muted); }
 .creature-sub { margin: -4px 0 10px; color: var(--muted); font-size: 0.9rem; }
+.creature-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.creature-title { font-size: 0.9rem; }
+.creature-row .creature-tags { margin: 4px 0; }
+.creature-row .chips li { font-size: 0.8rem; padding: 0 8px; }
+.creature-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0 0 8px; font-size: 0.9rem; }
+.creature-tags { margin: 0 0 10px; }
+.kind-badge {
+  flex: 0 0 auto;
+  font-family: var(--sans, inherit);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 8px;
+  border-radius: 99px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.kind-named { color: var(--torch); }
+.kind-type { color: var(--muted); }
+.inherited { color: var(--muted); text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+.nothing-known { margin: 4px 0 0; }
+.tag-picker { display: flex; flex-direction: column; gap: 8px; }
+.tag-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-picks .chip { cursor: pointer; }
 .card[data-section="stats"] .card-head h2 {
   font-family: var(--serif); font-size: 1.3rem; text-transform: none; letter-spacing: 0; color: var(--text);
   overflow-wrap: anywhere;
@@ -570,7 +594,7 @@ dialog.sheet-form select[size] option { padding: 8px 6px; }
 .encounters > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 8px 0; }
 .encounters > li + li { border-top: 1px solid var(--line); }
 .enc-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
-.enc-main p { margin: 2px 0 0; }
+.enc-main p { margin: 2px 0 0; white-space: pre-wrap; }
 .encounters .row-actions { flex-direction: column; padding-top: 0; }
 
 /* ---------- effects, temporary stat changes, lost spells ---------- */
