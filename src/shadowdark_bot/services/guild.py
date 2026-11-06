@@ -124,19 +124,19 @@ def _check_store_fits(
             continue
         qty = entry.quantity if quantity is None else min(quantity, entry.quantity)
         key = (
-            ("item", entry.item_id)
+            ("item", entry.item_id, entry.bonus)
             if entry.item_id is not None
-            else ("free", entry.display_name)
+            else ("free", entry.display_name, 0)
         )
         if key in wanted:
             wanted[key][1] += qty
         else:
             wanted[key] = [entry, qty]
     needed = 0.0
-    for (kind, ident), (entry, qty) in wanted.items():
+    for (kind, ident, bonus), (entry, qty) in wanted.items():
         gear_slots, bundle = entry.effective_gear_slots, entry.effective_bundle_size
         existing = storage.find_catalog_stack(
-            session, target.id, ident
+            session, target.id, ident, bonus
         ) if kind == "item" else storage.find_freeform_stack(session, target.id, ident)
         have = existing.quantity if existing else 0
         needed += stack_slots(have + qty, gear_slots, bundle) - stack_slots(

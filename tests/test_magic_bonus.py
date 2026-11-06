@@ -153,13 +153,13 @@ def test_armor_counts_toward_ac_from_held_only(dbsession):
         _buy(s, "Chainmail", 3, dest=_locs(s)[1].id)  # stash: ignored
         ac = _ac(s)
         assert ac.total == base + 2
-        assert sorted(x["effect"] for x in ac.sources) == ["Leather Armor +1", "Shield +1"]
+        assert sorted(x["effect"] for x in ac.sources) == ["Leather Armor +1 (carried)", "Shield +1 (carried)"]
         leather = next(
             e for e in storage.location_entries(s, _locs(s)[0].id) if "Leather" in e.display_name)
         characters.move_stack(s, leather, _locs(s)[1], 1)
         ac = _ac(s)
         assert ac.total == base + 1
-        assert [x["effect"] for x in ac.sources] == ["Shield +1"]
+        assert [x["effect"] for x in ac.sources] == ["Shield +1 (carried)"]
 
 
 def test_armor_bonus_picks_best_body_and_best_shield(dbsession):
@@ -232,6 +232,6 @@ def test_api_carry_bonus_and_ac(api):
     assert r.status_code == 200, r.text
     sheet = api.get("/api/character", headers=h).json()
     assert sheet["effective"]["ac"]["total"] == 12
-    assert sheet["effective"]["ac"]["sources"] == [{"effect": "Leather Armor +1", "change": "+1"}]
+    assert sheet["effective"]["ac"]["sources"] == [{"effect": "Leather Armor +1 (carried)", "change": "+1"}]
     neg = api.post("/api/character/items", json={"name": "Dagger", "bonus": -1}, headers=h)
     assert neg.status_code == 422

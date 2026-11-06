@@ -236,7 +236,11 @@ function catalogRow(i, buy, edit, effects) {
         i.description ? h("p", { class: "prose" }, plain(i.description)) : null,
         linkedEffects(effects),
         magic ? bonusFact : null,
-        magic && buy ? chipGroup("Magic bonus", BONUS_OPTIONS, 0, (v) => { bonus = Number(v); showBonus(); }) : null,
+        magic && buy
+          ? h("div", { class: "bonus-pick" },
+              h("span", { class: "muted bonus-pick-label" }, "Magic bonus"),
+              chipGroup("Magic bonus", BONUS_OPTIONS, 0, (v) => { bonus = Number(v); showBonus(); }))
+          : null,
         h("div", { class: "row-actions" },
           buy && i.value_cp > 0
             ? h("button", { type: "button", class: "tool", onclick: () => buy(i, bonus) }, "Buy")

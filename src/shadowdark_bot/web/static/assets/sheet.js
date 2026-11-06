@@ -323,7 +323,9 @@ function inventoryTab(c, opts) {
         h("strong", {}, c.gold),
       ),
     ),
-    storeCard("Carrying", c.held, "Carrying nothing.", { key: "held", c, opts }),
+    storeCard("Carrying", c.held, "Carrying nothing.", {
+      key: "held", c, opts, note: "Magic armor and shields count toward AC only while carried, not in the Personal Stash.",
+    }),
     c.stash ? storeCard("Personal Stash", c.stash, "Empty.", {
       key: "stash", c, opts, note: "Private. Only its owner and Dungeon Masters can see it.",
     }) : null,

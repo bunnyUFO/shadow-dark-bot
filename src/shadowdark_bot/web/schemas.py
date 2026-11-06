@@ -451,7 +451,7 @@ def character_sheet(
 
     # Held armor and shield bonuses count toward AC (never the stash).
     ac_extra = [
-        (name, f"+{b}")
+        (f"{name or 'Armor'} (carried)", f"+{b}")
         for name, b in characters.armor_bonus(storage.location_entries(session, held.id))
     ]
 

@@ -440,6 +440,8 @@ body.signed-in main { padding-bottom: calc(60px + var(--safe-bottom) + 16px); }
   scrollbar-width: none;
 }
 .chip-group::-webkit-scrollbar { display: none; }
+.bonus-pick { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.bonus-pick-label { flex: 0 0 auto; font-size: 0.9rem; }
 .chip-group.fade-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
 .chip-group.fade-l { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
 .chip-group.fade-l.fade-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
