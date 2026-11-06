@@ -8,7 +8,7 @@ so the web sheet and the bot always agree.
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -255,6 +255,31 @@ class GiveIn(BaseModel):
 class TakeIn(BaseModel):
     quantity: int | None = None  # None = the whole stack
     to: Literal["held", "stash"] = "held"
+
+
+class LocationIn(BaseModel):
+    name: str = Field(max_length=100)
+    max_gear_slots: float | None = None  # None = 0
+    description: str | None = Field(default=None, max_length=500)
+
+
+class StoreItemIn(BaseModel):
+    role: Literal["held", "stash"]  # where the stack is now
+    entry_id: int
+    quantity: int | None = None  # None = the whole stack
+
+
+class StoreIn(BaseModel):
+    items: list[StoreItemIn] = Field(max_length=100)
+
+
+class CatalogItemIn(BaseModel):
+    name: str = Field(max_length=100)
+    item_type: str
+    description: str | None = Field(default=None, max_length=2000)
+    gear_slots: float | None = None  # None = 1
+    bundle_size: int | None = None  # None = 1
+    value: str | None = Field(default=None, max_length=40)  # "5gp 2sp 3cp"
 
 
 class LearnSpellIn(BaseModel):

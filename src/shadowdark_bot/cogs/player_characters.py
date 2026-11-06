@@ -458,7 +458,7 @@ def _give_targets(
             label = (
                 "🧍 Your held items"
                 if loc.role == LOCATION_ROLE_HELD
-                else "🎒 Your stash"
+                else "🎒 Your personal stash"
             )
         else:
             label = f"🧑 {loc.name} (held)"
@@ -1198,7 +1198,7 @@ class CharacterSheetView(_OwnerView):
         elif tab == "inventory":
             self.add_item(_ManageLocationButton("Manage Held", LOCATION_ROLE_HELD, 1))
             self.add_item(
-                _ManageLocationButton("Manage Stash", LOCATION_ROLE_STASH, 1)
+                _ManageLocationButton("Manage Personal Stash", LOCATION_ROLE_STASH, 1)
             )
             self.add_item(_EditButton("Edit Gold", EditGoldModal.from_char, 1))
         else:  # roleplaying

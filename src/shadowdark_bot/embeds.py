@@ -437,7 +437,7 @@ def build_inventory_tab_embed(
         stash_entries = stash_entries or []
         stash_used = sum(e.slot_cost for e in stash_entries)
         embed.add_field(
-            name=f"Stash — {fmt_slots(stash_used)}/{fmt_slots(stash_cap)} gear slots",
+            name=f"Personal Stash — {fmt_slots(stash_used)}/{fmt_slots(stash_cap)} gear slots",
             value=_items_block(stash_entries, "_(empty)_"),
             inline=False,
         )

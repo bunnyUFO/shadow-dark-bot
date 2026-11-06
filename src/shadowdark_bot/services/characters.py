@@ -104,7 +104,7 @@ def touch(char: PlayerCharacter) -> None:
 
 
 def role_label(role: str) -> str:
-    return "held items" if role == LOCATION_ROLE_HELD else "stash"
+    return "held items" if role == LOCATION_ROLE_HELD else "personal stash"
 
 
 # ---------- Parsing (shared by the Discord modals and the web API) ----------

@@ -25,7 +25,7 @@ def _held_name(char: PlayerCharacter) -> str:
 
 
 def _stash_name(char: PlayerCharacter) -> str:
-    return f"{char.name} Guild Stash"
+    return f"{char.name} Personal Stash"
 
 
 def character_location(
