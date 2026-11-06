@@ -36,17 +36,14 @@ depends_on: Union[str, Sequence[str], None] = None
 # Frozen copy of core_gear.CORE_GEAR (deliberately duplicated, see docstring).
 _CORE_GEAR = frozenset(
     {
-        "bastard sword", "club", "crossbow", "dagger", "greataxe", "great axe",
-        "greatsword", "great sword", "javelin", "longbow", "long bow", "longsword",
-        "long sword", "mace", "shortbow", "short bow", "shortsword", "short sword",
-        "spear", "staff", "quarterstaff", "warhammer", "war hammer",
-        "leather armor", "leather", "chainmail", "chain mail", "chainmail armor",
-        "plate mail", "platemail", "plate", "plate armor", "shield",
-        "arrow", "arrows", "backpack", "caltrops", "crossbow bolt", "crossbow bolts",
-        "bolts", "crowbar", "flask", "bottle", "flask or bottle", "flint and steel",
-        "grappling hook", "iron spikes", "iron spike", "lantern", "mirror", "oil",
-        "oil flask", "flask of oil", "pole", "rations", "ration", "rope", "rope 60",
-        "torch", "torches", "crawling kit",
+        "bastard sword", "club", "crossbow", "dagger", "greataxe", "greatsword",
+        "javelin", "longbow", "longsword", "mace", "shortbow", "shortsword", "spear",
+        "staff", "warhammer",
+        "leather armor", "chainmail", "plate mail", "shield",
+        "arrows", "arrow", "backpack", "caltrops", "crossbow bolts", "crossbow bolt",
+        "crowbar", "flask or bottle", "flint and steel", "grappling hook",
+        "iron spikes", "iron spike", "lantern", "mirror", "oil flask", "flask of oil",
+        "pole", "rations", "ration", "rope 60", "rope", "torch", "crawling kit",
     }
 )
 _PARENS = re.compile(r"\([^)]*\)")

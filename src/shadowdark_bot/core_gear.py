@@ -1,16 +1,11 @@
 """Core rulebook gear: the catalog items that start out as purchasable.
 
-Sources and doubt. The core rulebook PDF was not reachable. Weapons and armor
-come from a community quick reference
-(https://github.com/Baldrico/Shadowdark/blob/main/Quick%20Reference.md); a second
-reference (https://rodsandholes.com/shadowdark_rules_reference.html) agrees,
-except that it does not show the javelin. Basic gear comes from Player
-Quickstart excerpts (torch, rope, rations, crowbar, grappling hook, iron spikes,
-flint and steel, mirror, arrows, lantern); backpack and caltrops from a
-third-party copy; pole from the 0-level starting gear. Doubtful: "crawling kit"
-(unconfirmed) and whether "flask or bottle" and "pole" are priced lines in the
-core table. Mithral armor is left out on purpose: it is a material modifier, not
-a line item. The owner can toggle any item with Purchasable.
+Source: the official Shadowdark Player Quickstart gear tables (basic gear p33,
+crawling kit p34, armor p34, weapons p35). No item there is marked unbuyable.
+Mithral is a cost multiplier, not an item, and coin and gems ("varies") are not
+catalog items, so they are left out. The Quickstart gives no price or
+availability rule for +1/+2/+3 items, so those are never marked. The owner can
+toggle any item with Purchasable.
 
 Matching happens in migration 0025 and in dev_seed, never at runtime: the
 Purchasable flag on the item is the only source of truth. The migration carries
@@ -25,20 +20,18 @@ from shadowdark_bot.storage import split_bonus_name
 
 CORE_GEAR: frozenset[str] = frozenset(
     {
-        # Weapons
-        "bastard sword", "club", "crossbow", "dagger", "greataxe", "great axe",
-        "greatsword", "great sword", "javelin", "longbow", "long bow", "longsword",
-        "long sword", "mace", "shortbow", "short bow", "shortsword", "short sword",
-        "spear", "staff", "quarterstaff", "warhammer", "war hammer",
-        # Armor
-        "leather armor", "leather", "chainmail", "chain mail", "chainmail armor",
-        "plate mail", "platemail", "plate", "plate armor", "shield",
-        # Basic gear
-        "arrow", "arrows", "backpack", "caltrops", "crossbow bolt", "crossbow bolts",
-        "bolts", "crowbar", "flask", "bottle", "flask or bottle", "flint and steel",
-        "grappling hook", "iron spikes", "iron spike", "lantern", "mirror", "oil",
-        "oil flask", "flask of oil", "pole", "rations", "ration", "rope", "rope 60",
-        "torch", "torches", "crawling kit",
+        # Weapons (Player Quickstart p35)
+        "bastard sword", "club", "crossbow", "dagger", "greataxe", "greatsword",
+        "javelin", "longbow", "longsword", "mace", "shortbow", "shortsword", "spear",
+        "staff", "warhammer",
+        # Armor (p34); mithral is a cost multiplier, not an item
+        "leather armor", "chainmail", "plate mail", "shield",
+        # Basic gear (p33) and the crawling kit (p34). Singular forms and
+        # "rope" / "flask of oil" are aliases for how the catalog spells them.
+        "arrows", "arrow", "backpack", "caltrops", "crossbow bolts", "crossbow bolt",
+        "crowbar", "flask or bottle", "flint and steel", "grappling hook",
+        "iron spikes", "iron spike", "lantern", "mirror", "oil flask", "flask of oil",
+        "pole", "rations", "ration", "rope 60", "rope", "torch", "crawling kit",
     }
 )
 

@@ -226,6 +226,12 @@ def test_core_gear_matching():
     assert core_gear.is_core_gear("Arrows (20)", "common")
     assert core_gear.is_core_gear("Rope, 60'", "common")
     assert core_gear.is_core_gear("Shield", "armor")
+    for name, kind in (("Plate mail", "armor"), ("Crawling kit", "common"),
+                       ("Flask or bottle", "common"), ("Caltrops (one bag)", "common"),
+                       ("Iron spikes (10)", "common"), ("Warhammer", "weapon")):
+        assert core_gear.is_core_gear(name, kind), name
+    for name in ("Mithral chainmail", "Coin", "Gem", "Holy symbol"):
+        assert not core_gear.is_core_gear(name, "common"), name
     assert not core_gear.is_core_gear("Arrows", "potion")
     assert not core_gear.is_core_gear("Longsword +1", "weapon")
     assert not core_gear.is_core_gear("Torch", "magical")
