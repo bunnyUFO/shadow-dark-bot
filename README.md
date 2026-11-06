@@ -225,7 +225,7 @@ The local sheet only answers private-network addresses and refuses anything that
 DM_ROLE_IDS=234567890123456789
 ```
 
-A DM is also the only one who can add, edit and delete creatures and effects in the web app; everyone else can read them (and apply an effect). With no `DM_ROLE_IDS` set, nobody can change them.
+A DM is also the only one who can add, edit and delete creatures and effects in the web app; everyone else can read them (and apply an effect). With no `DM_ROLE_IDS` set, nobody can change them. Creatures have optional tags and a title, are either Named or a Type (a Named creature can borrow its Type's stats), and keep their encounters as free-text notes.
 
 Giving or removing the role takes effect at that person's next login. See [the plan](docs/implementation/discord-activity.md#web-api) for details.
 

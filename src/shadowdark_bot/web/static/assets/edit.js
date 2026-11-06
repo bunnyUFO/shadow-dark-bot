@@ -32,13 +32,45 @@ function selectOptions(options = [], value = "") {
   return out;
 }
 
+// A `tags` field: toggle chips for the suggestions and the current tags, plus a
+// text box for others. `tagValue()` returns the chosen tags as an array.
+function tagsControl(f) {
+  const names = [...new Set([...(f.suggestions ?? []), ...(f.value ?? [])])];
+  const picked = new Set(f.value ?? []);
+  const chips = names.map((tag) => {
+    const chip = h("button", {
+      type: "button", class: picked.has(tag) ? "chip on" : "chip",
+      "aria-pressed": picked.has(tag) ? "true" : "false",
+      onclick: () => {
+        if (picked.has(tag)) picked.delete(tag);
+        else picked.add(tag);
+        chip.className = picked.has(tag) ? "chip on" : "chip";
+        chip.setAttribute("aria-pressed", picked.has(tag) ? "true" : "false");
+      },
+    }, tag);
+    return chip;
+  });
+  const other = h("input", {
+    type: "text", id: `f-${f.name}-other`, placeholder: "Other tags, comma separated",
+    "aria-label": "Other tags, comma separated", autocomplete: "off",
+  });
+  const box = h("div", { class: "tag-picker", id: `f-${f.name}` },
+    h("div", { class: "tag-picks" }, chips), other);
+  box.tagValue = () => [
+    ...picked,
+    ...other.value.split(",").map((t) => t.trim()).filter(Boolean),
+  ];
+  return box;
+}
+
 function control(f, listId) {
   const common = { name: f.name, id: `f-${f.name}`, required: f.required || null };
+  if (f.type === "tags") return tagsControl(f);
   if (f.type === "select") {
     return h("select", { ...common, size: f.size ?? null }, selectOptions(f.options, f.value));
   }
   if (f.type === "textarea") {
-    const t = h("textarea", { ...common, rows: 4 });
+    const t = h("textarea", { ...common, rows: 4, placeholder: f.placeholder ?? null });
     t.value = f.value ?? "";
     return t;
   }
@@ -46,6 +78,7 @@ function control(f, listId) {
     ...common,
     type: f.type === "number" || f.type === "date" ? f.type : "text",
     min: f.min ?? null, max: f.max ?? null, step: f.step ?? null,
+    placeholder: f.placeholder ?? null,
     list: listId,
     autocomplete: "off",
   });
@@ -61,7 +94,7 @@ export function openForm({ title, message, fields = [], submitLabel = "Save", da
   const rows = fields.map((f, i) => {
     let listId = null;
     let list = null;
-    if (f.suggestions?.length) {
+    if (f.suggestions?.length && f.type !== "tags") {
       listId = `dl-${f.name}`;
       list = h("datalist", { id: listId }, f.suggestions.map((s) => h("option", { value: s })));
     }
@@ -115,7 +148,8 @@ export function openForm({ title, message, fields = [], submitLabel = "Save", da
     const values = {};
     for (const [f, el] of controls) {
       if (el.disabled) continue;
-      values[f.name] = f.type === "number" ? (el.value === "" ? null : Number(el.value)) : el.value;
+      if (f.type === "tags") values[f.name] = el.tagValue();
+      else values[f.name] = f.type === "number" ? (el.value === "" ? null : Number(el.value)) : el.value;
     }
     submit.disabled = true;
     error.textContent = "";

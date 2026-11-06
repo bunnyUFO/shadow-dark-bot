@@ -137,6 +137,11 @@ apply an effect to a sheet), but only a DM can add, edit or delete creatures, en
 effects, or link effects to items, spells and creatures. Anyone else gets a 403, and the web app
 hides those buttons. With no `DM_ROLE_IDS` set, nobody can change them.
 
+In the **bestiary** a stat nobody knows is simply not shown. A creature has an optional class or
+title, any number of tags (lowercase words, filterable on the list), and a kind: Named or Type. A
+Named creature may point at its Type and then shows the Type's stats and abilities wherever its own
+are blank (display only; nothing is copied). An encounter is one free-text note, newest first.
+
 Who is a DM is decided by Discord role: `DM_ROLE_IDS` lists role IDs (Developer Mode → Server
 Settings → Roles → right-click the role → Copy Role ID), and anyone holding one is a DM. At login
 the bot looks the user up in the server each role belongs to (cache, then REST, like the
