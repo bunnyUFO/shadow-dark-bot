@@ -7,6 +7,8 @@ These helpers are shared by the character and treasury cogs so the two systems
 stay consistent.
 """
 
+import re
+
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, joinedload
 
@@ -113,13 +115,25 @@ def used_slots(entries: list[InventoryEntry]) -> float:
     return float(sum(e.slot_cost for e in entries))
 
 
+_BONUS_SUFFIX = re.compile(r"^(.*\S)\s+\+([1-3])$")
+
+
+def split_bonus_name(text: str) -> tuple[str, int]:
+    """"Dagger +2" -> ("Dagger", 2). No " +N" suffix (N 1..3) -> (text, 0)."""
+    m = _BONUS_SUFFIX.match(text.strip())
+    if m is None:
+        return text, 0
+    return m.group(1), int(m.group(2))
+
+
 def find_catalog_stack(
-    session: Session, location_id: int, item_id: int
+    session: Session, location_id: int, item_id: int, bonus: int = 0
 ) -> InventoryEntry | None:
     return session.scalar(
         select(InventoryEntry).where(
             InventoryEntry.location_id == location_id,
             InventoryEntry.item_id == item_id,
+            InventoryEntry.bonus == bonus,
         )
     )
 
@@ -143,20 +157,23 @@ def add_stack(
     slots_each: float = 1.0,
     bundle_size: int = 1,
     notes: str | None = None,
+    bonus: int = 0,
 ) -> InventoryEntry:
-    """Add `quantity` of a catalog `item` or a freeform stack to `location`,
-    merging into an existing stack when present. Capacity is the caller's job."""
+    """Add `quantity` of a catalog `item` (at magic `bonus`) or a freeform stack
+    to `location`, merging into an existing stack when present. Capacity and
+    bonus validation are the caller's job."""
     if item is not None:
-        stack = find_catalog_stack(session, location.id, item.id)
+        stack = find_catalog_stack(session, location.id, item.id, bonus)
         if stack is None:
             stack = InventoryEntry(
-                location_id=location.id, item_id=item.id, quantity=quantity
+                location_id=location.id, item_id=item.id, quantity=quantity, bonus=bonus
             )
             session.add(stack)
         else:
             stack.quantity += quantity
     else:
         assert freeform_name is not None
+        assert bonus == 0, "freeform stacks cannot carry a magic bonus"
         stack = find_freeform_stack(session, location.id, freeform_name)
         if stack is None:
             stack = InventoryEntry(

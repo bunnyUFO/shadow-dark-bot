@@ -91,6 +91,52 @@ def test_upgrade_to_head_with_existing_rows(alembic_cfg):
         ]
         assert conn.execute("SELECT count(*) FROM player_characters").fetchone()[0] == 1
         assert conn.execute("SELECT count(*) FROM inventory_entries").fetchone()[0] == 1
+        assert conn.execute("SELECT bonus FROM inventory_entries").fetchall() == [(0,)]
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+        # The stack key now includes the bonus: +0 and +1 may share a location.
+        conn.execute("PRAGMA foreign_keys=ON")
+        held, item = conn.execute(
+            "SELECT location_id, item_id FROM inventory_entries"
+        ).fetchone()
+        _insert(conn, "inventory_entries", location_id=held, item_id=item, quantity=1, bonus=1)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert(conn, "inventory_entries", location_id=held, item_id=item, quantity=1, bonus=1)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert(conn, "inventory_entries", location_id=held, item_id=item, quantity=1, bonus=4)
+        conn.rollback()
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        conn.close()
+
+
+def test_downgrade_stack_bonus(alembic_cfg):
+    cfg, db_path = alembic_cfg
+    command.upgrade(cfg, "head")
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys=ON")
+    item = _insert(conn, "items", name="Dagger", item_type="weapon")
+    held = _insert(conn, "locations", name="Held", kind="inventory", max_gear_slots=10)
+    _insert(conn, "inventory_entries", location_id=held, item_id=item, quantity=1, bonus=1)
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="magic-bonus"):  # refuses to lose data
+        command.downgrade(cfg, "0023_creature_tags_kinds")
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM inventory_entries")
+    conn.commit()
+    conn.close()
+    command.downgrade(cfg, "0023_creature_tags_kinds")
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(inventory_entries)")]
+        assert "bonus" not in cols
+        sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name='inventory_entries'"
+        ).fetchone()[0]
+        assert "uq_inventory_location_item_bonus" not in sql
+        assert "uq_inventory_location_item UNIQUE" in sql
     finally:
         conn.close()

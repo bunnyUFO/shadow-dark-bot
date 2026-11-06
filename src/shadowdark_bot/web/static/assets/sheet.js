@@ -355,6 +355,12 @@ export function storeCard(label, store, empty, ctx = {}) {
   );
 }
 
+// "+1 to attack and damage rolls" / "+1 AC" for a magic weapon or armor stack.
+export function bonusEffect(itemType, bonus) {
+  if (!bonus) return null;
+  return itemType === "armor" ? `+${bonus} AC` : `+${bonus} to attack and damage rolls`;
+}
+
 function itemRow(i, actions) {
   const per = `${slots(i.gear_slots_each)} each` + (i.bundle_size > 1 ? `, ${i.bundle_size} per slot` : "");
   return h("li", {},
@@ -367,6 +373,7 @@ function itemRow(i, actions) {
       h("div", { class: "row-body" },
         h("dl", { class: "facts" },
           fact("Type", i.item_type ? cap(i.item_type) : "Freeform"),
+          fact("Magic bonus", bonusEffect(i.item_type, i.bonus)),
           fact("Slots", per),
           fact("Value", i.value_cp !== null ? coins(i.value_cp) : null),
         ),

@@ -6,7 +6,7 @@ import { api } from "./api.js";
 import { h, mount, plain, slots } from "./dom.js";
 import { buyDialog, forgetCatalog, guildEditOpts, openForm } from "./edit.js";
 import { effectsBySource, libraryLink, linkedEffects } from "./effects.js";
-import { card, coins, pageHead, storeCard } from "./sheet.js";
+import { bonusEffect, card, coins, pageHead, storeCard } from "./sheet.js";
 
 // Filters survive navigating away and back within a visit.
 const spellFilters = { q: "", cls: "", tier: "", alignment: "" };
@@ -159,7 +159,7 @@ export async function renderItems(app, { canBuy = false } = {}, saved = null) {
     notice.hidden = false;
     notice.scrollIntoView({ block: "nearest" });
   };
-  const buy = canBuy ? (item) => buyDialog(item, say) : null;
+  const buy = canBuy ? (item, bonus) => buyDialog(item, say, bonus) : null;
   // After a save: forget edit.js's cached catalog (the sheet's Add item picker),
   // then draw the page again; filters live in itemFilters so they stay.
   const edit = (item) => itemFormDialog(item, items, async (name) => {
@@ -204,7 +204,19 @@ function slotText(gearSlots, bundle) {
   return bundle > 1 ? `${slots(gearSlots)} sl / ${bundle}` : `${slots(gearSlots)} sl`;
 }
 
+const BONUS_OPTIONS = [[0, "+0"], [1, "+1"], [2, "+2"], [3, "+3"]];
+
 function catalogRow(i, buy, edit, effects) {
+  // Weapons and armor can be bought with a magic bonus; picking one retitles
+  // the body and the Buy dialog, not the collapsed list name.
+  const magic = i.item_type === "weapon" || i.item_type === "armor";
+  let bonus = 0;
+  const title = h("p", { class: "prose" }, h("strong", {}, i.name));
+  const bonusFact = h("dl", { class: "facts" });
+  const showBonus = () => {
+    title.firstChild.textContent = bonus ? `${i.name} +${bonus}` : i.name;
+    bonusFact.replaceChildren(...(fact("Magic bonus", bonusEffect(i.item_type, bonus)) ?? []));
+  };
   return h("li", {},
     h("details", { class: "row" },
       h("summary", {},
@@ -213,6 +225,7 @@ function catalogRow(i, buy, edit, effects) {
         h("span", { class: "row-meta" }, slotText(i.gear_slots, i.bundle_size)),
       ),
       h("div", { class: "row-body" },
+        magic ? title : null,
         h("dl", { class: "facts" },
           fact("Type", TYPE_LABEL[i.item_type] ?? i.item_type),
           fact("Slots", i.bundle_size > 1
@@ -222,9 +235,11 @@ function catalogRow(i, buy, edit, effects) {
         ),
         i.description ? h("p", { class: "prose" }, plain(i.description)) : null,
         linkedEffects(effects),
+        magic ? bonusFact : null,
+        magic && buy ? chipGroup("Magic bonus", BONUS_OPTIONS, 0, (v) => { bonus = Number(v); showBonus(); }) : null,
         h("div", { class: "row-actions" },
           buy && i.value_cp > 0
-            ? h("button", { type: "button", class: "tool", onclick: () => buy(i) }, "Buy")
+            ? h("button", { type: "button", class: "tool", onclick: () => buy(i, bonus) }, "Buy")
             : null,
           h("button", { type: "button", class: "tool", onclick: () => edit(i) }, "Edit")),
       ),

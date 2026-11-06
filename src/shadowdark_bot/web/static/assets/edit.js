@@ -633,12 +633,14 @@ async function addItemDialog(role, write) {
       { name: "slots_each", label: "Gear slots each", type: "number", value: 1, min: 0, step: "any",
         showWhen: ["mode", "custom"] },
       { name: "notes", label: "Notes", type: "textarea", showWhen: ["mode", "custom"] },
+      { name: "bonus", label: "Magic bonus", type: "select", value: "0", showWhen: ["mode", "catalog"],
+        options: [["0", "+0"], ["1", "+1"], ["2", "+2"], ["3", "+3"]], hint: "Weapons and armor only" },
       { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1, required: true },
       { name: "to", label: "Put in", type: "select", value: role, options: [["held", "Carrying"], ["stash", "Personal Stash"]] },
     ],
     submitLabel: "Add",
     onSubmit: (v) => write("/character/items", "POST", v.mode === "catalog"
-      ? { name: v.catalog_name, quantity: v.quantity ?? 1, to: v.to }
+      ? { name: v.catalog_name, quantity: v.quantity ?? 1, to: v.to, bonus: Number(v.bonus) }
       : { name: v.name, quantity: v.quantity ?? 1, to: v.to, slots_each: v.slots_each ?? 1, notes: v.notes || null }),
   });
 }
@@ -670,7 +672,8 @@ const price = (cp) => coins(cp);
 
 // Opens the buy dialog for a catalog item; `onBought(message)` gets a short
 // confirmation once the purchase went through.
-export async function buyDialog(item, onBought) {
+export async function buyDialog(item, onBought, bonus = 0) {
+  const label = bonus ? `${item.name} +${bonus}` : item.name;
   let guild;
   try {
     guild = await api("/guild");
@@ -685,7 +688,7 @@ export async function buyDialog(item, onBought) {
   ];
   const total = h("strong", {});
   const dialog = openForm({
-    title: `Buy ${item.name}`,
+    title: `Buy ${label}`,
     message: `${price(item.value_cp)} each. You have ${me.gold || "0cp"}; the coffers hold ${guild.coffers.balance || "0cp"}.`,
     fields: [
       { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1, required: true },
@@ -698,9 +701,9 @@ export async function buyDialog(item, onBought) {
       const qty = v.quantity ?? 1;
       const [, locId] = v.dest.split(":");
       await api(`/items/${item.id}/buy`, { method: "POST", body: {
-        quantity: qty, pay_from: v.pay_from, destination_location_id: Number(locId) } });
+        quantity: qty, pay_from: v.pay_from, destination_location_id: Number(locId), bonus } });
       const where = places.find(([val]) => val === v.dest)[1];
-      onBought(`Bought ${qty > 1 ? `${qty}× ` : ""}${item.name} for ${price(item.value_cp * qty)}`
+      onBought(`Bought ${qty > 1 ? `${qty}× ` : ""}${label} for ${price(item.value_cp * qty)}`
         + ` — paid from ${v.pay_from === "guild" ? "guild coffers" : "your gold"}, put in ${where}.`);
     },
   });

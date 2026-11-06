@@ -27,6 +27,8 @@ ITEM_TYPE_POTION = "potion"
 ITEM_TYPE_WEAPON = "weapon"
 ITEM_TYPE_ARMOR = "armor"
 ITEM_TYPE_LOOT = "loot"
+# Magic bonus (+1..+3) on a stack: only weapons and armor can carry one.
+MAX_ITEM_BONUS = 3
 ITEM_TYPES: tuple[str, ...] = (
     ITEM_TYPE_COMMON,
     ITEM_TYPE_MAGICAL,
@@ -37,6 +39,7 @@ ITEM_TYPES: tuple[str, ...] = (
     ITEM_TYPE_ARMOR,
     ITEM_TYPE_LOOT,
 )
+BONUS_ITEM_TYPES: tuple[str, ...] = (ITEM_TYPE_WEAPON, ITEM_TYPE_ARMOR)
 
 
 class Base(DeclarativeBase):
@@ -128,7 +131,10 @@ class InventoryEntry(Base):
     __tablename__ = "inventory_entries"
     __table_args__ = (
         CheckConstraint("quantity > 0", name="ck_inventory_quantity_positive"),
-        UniqueConstraint("location_id", "item_id", name="uq_inventory_location_item"),
+        CheckConstraint("bonus BETWEEN 0 AND 3", name="ck_inventory_bonus_range"),
+        UniqueConstraint(
+            "location_id", "item_id", "bonus", name="uq_inventory_location_item_bonus"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -136,6 +142,8 @@ class InventoryEntry(Base):
     item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id"))
     name: Mapped[str | None] = mapped_column(String)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Magic bonus 0..3 (weapons/armor only); part of the catalog stack key.
+    bonus: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     slots_each: Mapped[float | None] = mapped_column(Float)
     bundle_size: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
@@ -154,6 +162,8 @@ class InventoryEntry(Base):
     @property
     def display_name(self) -> str:
         if self.item_id is not None and self.item is not None:
+            if self.bonus > 0:
+                return f"{self.item.name} +{self.bonus}"
             return self.item.name
         return self.name or "(unnamed)"
 

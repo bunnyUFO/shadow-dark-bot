@@ -86,6 +86,7 @@ class ItemStackOut(BaseModel):
     value_cp: int | None
     description: str | None
     notes: str | None
+    bonus: int = 0  # magic bonus +0..+3 (weapons and armor)
 
 
 class EffectOut(BaseModel):
@@ -231,6 +232,7 @@ class CarryIn(BaseModel):
     to: Literal["held", "stash"] = "held"
     slots_each: float = 1.0
     notes: str | None = None
+    bonus: int = Field(0, ge=0, le=3)
 
 
 class EditStackIn(BaseModel):
@@ -246,6 +248,7 @@ class BuyIn(BaseModel):
     quantity: int = 1
     pay_from: Literal["character", "guild"]
     destination_location_id: int
+    bonus: int = Field(0, ge=0, le=3)
 
 
 class GiveIn(BaseModel):
@@ -406,6 +409,7 @@ def _stack_out(e: InventoryEntry) -> ItemStackOut:
         # Freeform stacks keep their typed description in `notes`.
         description=clean_description(item.description) if item else e.notes,
         notes=e.notes if item else None,
+        bonus=e.bonus,
     )
 
 
@@ -445,8 +449,16 @@ def character_sheet(
     effects = list(char.effects)
     effective: dict[str, StatOut] = {}
 
+    # Held armor and shield bonuses count toward AC (never the stash).
+    ac_extra = [
+        (name, f"+{b}")
+        for name, b in characters.armor_bonus(storage.location_entries(session, held.id))
+    ]
+
     def apply(key: str, base: int) -> StatOut:
-        res = characters.resolve_stat(effects, key, base)
+        res = characters.resolve_stat(
+            effects, key, base, extra=ac_extra if key == "ac" else ()
+        )
         out = StatOut(
             base=res.base,
             total=res.total,

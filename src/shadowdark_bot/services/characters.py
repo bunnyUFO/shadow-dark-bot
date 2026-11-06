@@ -22,10 +22,13 @@ from sqlalchemy.orm import Session, selectinload
 from shadowdark_bot import storage
 from shadowdark_bot.currency import format_cp
 from shadowdark_bot.models import (
+    BONUS_ITEM_TYPES,
     EFFECT_BONUS_KEYS,
+    ITEM_TYPE_ARMOR,
     ITEM_TYPE_MAGICAL,
     LOCATION_ROLE_HELD,
     LOCATION_ROLE_STASH,
+    MAX_ITEM_BONUS,
     Borrow,
     CharacterEffect,
     CharacterSpell,
@@ -52,6 +55,15 @@ class CharacterNotFound(CharacterError):
 
     def __init__(self, message: str = "Character not found.") -> None:
         super().__init__(message)
+
+
+def check_bonus(item: Item | None, bonus: int) -> None:
+    """Refuse a magic bonus outside +0..+3, or on anything but a catalog weapon
+    or armor (freeform stacks pass item=None)."""
+    if not 0 <= bonus <= MAX_ITEM_BONUS:
+        raise CharacterError(f"Magic bonus must be +0 to +{MAX_ITEM_BONUS}.")
+    if bonus and (item is None or item.item_type not in BONUS_ITEM_TYPES):
+        raise CharacterError("Only weapons and armor can have a magic bonus.")
 
 
 # ---------- Loading ----------
@@ -429,6 +441,7 @@ def carry(
     role: str = LOCATION_ROLE_HELD,
     freeform_slots: float = 1.0,
     notes: str | None = None,
+    bonus: int = 0,
 ) -> CarryResult:
     """Add items to the character's held items or stash. A name matching the
     catalog links to it; anything else is a freeform stack costing
@@ -446,8 +459,16 @@ def carry(
     loc = held if role == LOCATION_ROLE_HELD else stash
 
     cat_item = session.scalar(select(Item).where(Item.name == clean_item))
+    if cat_item is None:
+        # "Dagger +2": match the base name and take the suffix as the bonus.
+        base_name, parsed = storage.split_bonus_name(clean_item)
+        if parsed:
+            cat_item = session.scalar(select(Item).where(Item.name == base_name))
+            if cat_item is not None:
+                bonus = parsed
+    check_bonus(cat_item, bonus)
     if cat_item is not None:
-        existing = storage.find_catalog_stack(session, loc.id, cat_item.id)
+        existing = storage.find_catalog_stack(session, loc.id, cat_item.id, bonus)
         gear_slots, bundle = cat_item.gear_slots, cat_item.bundle_size
     else:
         existing = storage.find_freeform_stack(session, loc.id, clean_item)
@@ -478,6 +499,7 @@ def carry(
         slots_each=freeform_slots,
         bundle_size=1,
         notes=None if cat_item is not None else notes,
+        bonus=bonus,
     )
     touch(char)
     session.flush()
@@ -679,7 +701,9 @@ def move_stack(
     # Capacity check on the target.
     gear_slots, bundle = entry.effective_gear_slots, entry.effective_bundle_size
     if entry.item_id is not None:
-        tstack = storage.find_catalog_stack(session, target.id, entry.item_id)
+        tstack = storage.find_catalog_stack(
+            session, target.id, entry.item_id, entry.bonus
+        )
     else:
         tstack = storage.find_freeform_stack(session, target.id, entry.display_name)
     texisting = tstack.quantity if tstack else 0
@@ -696,6 +720,7 @@ def move_stack(
 
     # Snapshot the source stack before mutating it.
     src_item = entry.item
+    src_bonus = entry.bonus
     src_name = entry.name
     src_slots = entry.slots_each if entry.slots_each is not None else 1.0
     src_bundle = entry.bundle_size if entry.bundle_size is not None else 1
@@ -712,6 +737,7 @@ def move_stack(
         slots_each=src_slots,
         bundle_size=src_bundle,
         notes=None if src_item is not None else src_notes,
+        bonus=src_bonus,
     )
 
 
@@ -864,6 +890,7 @@ def buy(
     quantity: int,
     pay_from: str,
     destination_location_id: int,
+    bonus: int = 0,
 ) -> BuyResult:
     """Buy catalog items with the character's gold or the guild coffers and put
     them in the character's own held items/stash or a shared guild storage
@@ -876,6 +903,7 @@ def buy(
     item = session.get(Item, item_id)
     if item is None:
         raise CharacterError("That item is no longer in the catalog.")
+    check_bonus(item, bonus)
     if item.value_cp is None or item.value_cp <= 0:
         raise CharacterError(f"**{item.name}** has no price set, so it can't be bought.")
 
@@ -889,6 +917,8 @@ def buy(
             "Magical items can't go into guild inventory — they belong in the treasury."
         )
 
+    # Open owner question: should a +N item cost more than the base item? No
+    # Shadowdark rule prices magic weapons/armor, so the bonus is free for now.
     price = item.value_cp
     total = price * quantity
     if pay_from == "guild":
@@ -903,7 +933,7 @@ def buy(
             f"({quantity} × {_fmt_cp(price)}). Short by {_fmt_cp(total - balance)}."
         )
 
-    existing = storage.find_catalog_stack(session, dest.id, item.id)
+    existing = storage.find_catalog_stack(session, dest.id, item.id, bonus)
     where = (
         f"Your {role_label(dest.role)}" if dest.owner_user_id is not None else dest.name
     )
@@ -923,11 +953,11 @@ def buy(
     else:
         char.gold_cp -= total
         left = char.gold_cp
-    storage.add_stack(session, dest, quantity=quantity, item=item)
+    stack = storage.add_stack(session, dest, quantity=quantity, item=item, bonus=bonus)
     touch(char)
     session.flush()
     return BuyResult(
-        display_name=item.name,
+        display_name=stack.display_name,
         quantity=quantity,
         total_cp=total,
         pay_from=pay_from,
@@ -1183,12 +1213,35 @@ class StatResult:
     sources: list[tuple[str, str]] = field(default_factory=list)
 
 
-def resolve_stat(effects: Sequence[CharacterEffect], key: str, base: int) -> StatResult:
+def armor_bonus(entries: Sequence[InventoryEntry]) -> list[tuple[str, int]]:
+    """The held armor stacks that raise AC, as (display name, bonus) pairs: the
+    best body armor plus the best shield (a catalog name containing "shield").
+    Pass only held stacks; spare armor in the stash must not count."""
+    best: dict[bool, InventoryEntry] = {}
+    for e in entries:
+        if e.bonus <= 0 or e.item is None or e.item.item_type != ITEM_TYPE_ARMOR:
+            continue
+        is_shield = "shield" in e.item.name.lower()
+        if is_shield not in best or e.bonus > best[is_shield].bonus:
+            best[is_shield] = e
+    return [(e.display_name, e.bonus) for e in best.values()]
+
+
+def resolve_stat(
+    effects: Sequence[CharacterEffect],
+    key: str,
+    base: int,
+    extra: Sequence[tuple[str, str]] = (),
+) -> StatResult:
     """Apply active effects to one stat: the highest "=N" replaces the base,
-    then every "+N"/"-N" is added. Ended effects are ignored."""
+    then every "+N"/"-N" is added. Ended effects are ignored. `extra` is a list
+    of (name, "+N") pairs treated like additional effects (e.g. armor bonuses)."""
     sets: list[int] = []
     adds = 0
     sources: list[tuple[str, str]] = []
+    for name, text in extra:
+        sources.append((name, text))
+        adds += int(text)
     for e in effects:
         if e.ended:
             continue

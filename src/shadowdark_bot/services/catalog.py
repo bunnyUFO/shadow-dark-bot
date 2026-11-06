@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from shadowdark_bot.currency import parse_value_string
 from shadowdark_bot.models import (
+    BONUS_ITEM_TYPES,
     ITEM_TYPE_MAGICAL,
     ITEM_TYPES,
     InventoryEntry,
@@ -45,6 +46,18 @@ def type_change_error(session: Session, item: Item, new_type: str | None) -> str
     by existing inventory/treasury references, else None."""
     if new_type is None or new_type == item.item_type:
         return None
+    if item.item_type in BONUS_ITEM_TYPES and new_type not in BONUS_ITEM_TYPES:
+        bonus_stacks = session.scalar(
+            select(func.count())
+            .select_from(InventoryEntry)
+            .where(InventoryEntry.item_id == item.id, InventoryEntry.bonus > 0)
+        ) or 0
+        if bonus_stacks:
+            return (
+                f"Cannot change **{item.name}** to {new_type} — it has "
+                f"{bonus_stacks} magic-bonus stack(s); only weapons and armor "
+                "can have a bonus. Remove them first."
+            )
     going_magical = new_type == ITEM_TYPE_MAGICAL
     leaving_magical = item.item_type == ITEM_TYPE_MAGICAL
     if going_magical:

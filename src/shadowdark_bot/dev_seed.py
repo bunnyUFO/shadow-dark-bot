@@ -106,7 +106,7 @@ PARTY = [
         YSOLDE_ID, "Ysolde Vane", "Wizard", "Apprentice", "Elf", "Neutral",
         "Scholar", 2, (9, 14, 12, 17, 11, 10), 6, 11, "int", 850,
         held=[
-            ("Dagger", 1), ("Torch", 2), ("Rations", 3), ("Flask of Oil", 2),
+            ("Dagger +1", 1), ("Torch", 2), ("Rations", 3), ("Flask of Oil", 2),
             ("Scroll of Light", 1),
         ],
         freeform=[("Spellbook", 1, 1.0, "Bound in grey leather")],
@@ -184,12 +184,13 @@ def _seed_guild(session: Session) -> None:
         session.add(loc)
         session.flush()
         for item_name, qty in stacks:
-            storage.add_stack(session, loc, quantity=qty, item=items[item_name])
+            base, bonus = storage.split_bonus_name(item_name)
+            storage.add_stack(session, loc, quantity=qty, item=items[base], bonus=bonus)
 
     storeroom(
         "Guild Hall Storeroom", 40, "Behind the bar at the Ragged Hound",
         [("Torch", 10), ("Rations", 6), ("Rope", 2), ("Arrow", 40),
-         ("Potion of Healing", 2)],
+         ("Potion of Healing", 2), ("Longsword +1", 1)],
     )
     storeroom(
         "Pack Mule", 8, "Bessie. Mostly reliable.",

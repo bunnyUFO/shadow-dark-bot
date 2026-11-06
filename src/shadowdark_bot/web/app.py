@@ -440,6 +440,7 @@ def create_app(
                 role=body.to,
                 freeform_slots=body.slots_each,
                 notes=body.notes,
+                bonus=body.bonus,
             )
         return _full_sheet(target)
 
@@ -707,6 +708,7 @@ def create_app(
                 quantity=body.quantity,
                 pay_from=body.pay_from,
                 destination_location_id=body.destination_location_id,
+                bonus=body.bonus,
             )
         return _full_sheet(user.user_id)
 
