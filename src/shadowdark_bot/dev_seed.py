@@ -7,7 +7,6 @@ turns ids into JS numbers. Later milestones reuse this data; keep it stable.
 """
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -237,8 +236,8 @@ def _seed_guild(session: Session) -> None:
 
 
 def _seed_creatures(session: Session) -> None:
-    """A bestiary with one fully known, one partly known and one unknown creature."""
-    today = date.today()
+    """A bestiary with one fully known, one partly known, one unknown creature
+    and a Named creature that borrows the Goblin's stats."""
     goblin = creatures.create_creature(
         session, BRANNOC_ID, name="Goblin", level=1, ac=11, hp=5,
         attacks="1 club +1 (1d4)", movement="near", str_mod=-1, dex_mod=1,
@@ -246,19 +245,23 @@ def _seed_creatures(session: Session) -> None:
         special_abilities="Keen Senses. Can't be surprised.",
         description="Small, wiry and loud. They swarm.",
         notes="Ambushed us on the road to Highcliff.",
+        tags=["enemy", "creature"],
     )
     creatures.add_encounter(session, BRANNOC_ID, goblin.id, {
-        "date": (today - timedelta(days=21)).isoformat(), "session": "Session 4",
-        "place": "Highcliff road", "outcome": "Drove them off; one fled.",
+        "details": "Session 4 · Highcliff road\nDrove them off; one fled.",
     })
     creatures.add_encounter(session, YSOLDE_ID, goblin.id, {
-        "date": (today - timedelta(days=7)).isoformat(), "session": "Session 6",
-        "place": "The old mine", "outcome": "Killed three, took a crude map.",
+        "details": "Session 6 · The old mine\nKilled three, took a crude map.",
     })
+    creatures.create_creature(
+        session, BRANNOC_ID, name="Grik, goblin boss", title="Boss of the old mine",
+        kind="named", type_id=goblin.id, hp=9, tags=["enemy"],
+        description="Wears a dented helmet two sizes too big.",
+    )
     creatures.create_creature(
         session, YSOLDE_ID, name="Cave crawler", level=3, ac=13,
         attacks="2 claw +3 (1d6)", movement="near (climb)", dex_mod=2, alignment="N",
-        description="Pale and many-legged. Hunts by sound.",
+        description="Pale and many-legged. Hunts by sound.", tags=["creature"],
     )
     creatures.create_creature(
         session, ALDRIC_ID, name="Pale thing in the well",

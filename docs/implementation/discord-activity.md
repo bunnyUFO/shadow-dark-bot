@@ -116,7 +116,7 @@ tokens), `schemas.py` (JSON shapes), `server.py` (uvicorn in the bot's loop + me
 
 Every write returns 200 with the full updated sheet (same body as `GET /api/character`).
 Errors are `{"detail": "..."}`: 401 not logged in, 403 not in an allowed guild (or editing someone
-else's character without being a DM), 404 no character
+else's character, or changing the bestiary or effects library, without being a DM), 404 no character
 or an item/spell id that isn't yours, 422 a body of the wrong type,
 400 a rule failed (the same reason text the bot shows, which may contain `**bold**`). Interactive docs (`/docs`) are disabled.
 
@@ -131,6 +131,16 @@ cookies are frequently blocked.
 **Dungeon Masters.** A DM can edit every character's sheet: in the web app, opening someone from
 **Party** shows their full sheet (stash included) with every edit tool, under an "Editing … as
 Dungeon Master" banner. Everyone else edits only their own character.
+
+The same role guards the **bestiary** and the **effects library**. Everyone can read both (and
+apply an effect to a sheet), but only a DM can add, edit or delete creatures, encounters and
+effects, or link effects to items, spells and creatures. Anyone else gets a 403, and the web app
+hides those buttons. With no `DM_ROLE_IDS` set, nobody can change them.
+
+In the **bestiary** a stat nobody knows is simply not shown. A creature has an optional class or
+title, any number of tags (lowercase words, filterable on the list), and a kind: Named or Type. A
+Named creature may point at its Type and then shows the Type's stats and abilities wherever its own
+are blank (display only; nothing is copied). An encounter is one free-text note, newest first.
 
 Who is a DM is decided by Discord role: `DM_ROLE_IDS` lists role IDs (Developer Mode → Server
 Settings → Roles → right-click the role → Copy Role ID), and anyone holding one is a DM. At login

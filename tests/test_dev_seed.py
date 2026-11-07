@@ -97,16 +97,21 @@ def test_seed_content(seeded):
 
 def test_seed_creatures(seeded):
     with session_scope() as s:
-        rows = {c.name: (c, n, last) for c, n, last in creatures.list_creatures(s)}
-        assert list(rows) == ["Cave crawler", "Goblin", "Pale thing in the well"]
-        goblin, n, last = rows["Goblin"]
-        assert n == 2 and last is not None
+        rows = {c.name: (c, n) for c, n in creatures.list_creatures(s)}
+        assert list(rows) == [
+            "Cave crawler", "Goblin", "Grik, goblin boss", "Pale thing in the well",
+        ]
+        goblin, n = rows["Goblin"]
+        assert n == 2 and goblin.tag_list() == ["enemy", "creature"]
         assert all(
             getattr(goblin, f) is not None
             for f in (*creatures_service.INT_FIELDS, "attacks", "movement", "alignment")
         )
         crawler = rows["Cave crawler"][0]
         assert crawler.ac == 13 and crawler.hp is None and crawler.str_mod is None
+        grik = rows["Grik, goblin boss"][0]
+        assert (grik.kind, grik.type_id, grik.hp, grik.ac) == ("named", goblin.id, 9, None)
+        assert creatures_service.inherited(s, grik)["ac"] == 11
         unknown = rows["Pale thing in the well"][0]
         assert unknown.level is None and unknown.ac is None and unknown.hp is None
 

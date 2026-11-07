@@ -1,6 +1,7 @@
 // The effects library (#/effects, #/effects/<id>): reusable effects with a
 // duration and stat changes, each linked to the items, spells and creatures
-// that cause it. Anyone may add, edit, delete and link. Also the small chip
+// that cause it. Everyone can read and apply them; only a Dungeon Master can add,
+// edit, delete and link. Also the small chip
 // list other pages use to show the effects linked to one item/spell/creature.
 
 import { api, getToken } from "./api.js";
@@ -118,7 +119,9 @@ export async function renderEffects(app, id, me = null) {
         shown.length === all.length ? `${all.length} effects` : `${shown.length} of ${all.length} effects`),
       shown.length === 0
         ? h("p", { class: "card muted" },
-            all.length === 0 ? "No effects yet. Add the first one." : "No effects match that search.")
+            all.length === 0
+              ? (me?.is_dm ? "No effects yet. Add the first one." : "No effects yet.")
+              : "No effects match that search.")
         : h("ul", { class: "creature-list" }, shown.map(effectRow)),
     );
   };
@@ -130,7 +133,9 @@ export async function renderEffects(app, id, me = null) {
         "aria-label": "Search effects", autocomplete: "off",
         oninput: (e) => { filters.q = e.target.value; draw(); },
       }),
-      btn("Add effect", () => openEffectForm(null, (saved) => { location.hash = `#/effects/${saved.id}`; })),
+      me?.is_dm
+        ? btn("Add effect", () => openEffectForm(null, (saved) => { location.hash = `#/effects/${saved.id}`; }))
+        : null,
     ),
     list,
   );
@@ -158,7 +163,7 @@ async function renderEffect(app, id, me) {
     mount(app,
       h("p", { class: "banner" }, h("a", { href: "#/effects" }, "← Effects")),
       card("effect", e.name, {
-        tools: [
+        tools: !me?.is_dm ? null : [
           btn("Edit", () => openEffectForm(e, draw)),
           btn("Delete", () => openForm({
             title: "Delete effect",
@@ -179,17 +184,17 @@ async function renderEffect(app, id, me) {
         e.description ? h("p", { class: "prose" }, e.description) : null,
         h("div", { class: "apply-row" }, applyControl(e)),
       ),
-      linksCard(e, draw),
+      linksCard(e, draw, me?.is_dm === true),
     );
     window.scrollTo(0, y);
   };
   draw(await api(`/effects/${encodeURIComponent(id)}`));
 }
 
-function linksCard(e, redraw) {
+function linksCard(e, redraw, canEdit) {
   const unlink = async (l) => redraw(await api(`/effects/${e.id}/links/${l.kind}/${l.target_id}`, { method: "DELETE" }));
   return card("links", "Comes from", {
-    tools: btn("Link", () => linkDialog(e, redraw)),
+    tools: canEdit ? btn("Link", () => linkDialog(e, redraw)) : null,
   },
     e.links.length === 0
       ? h("p", { class: "muted" }, "Not linked to any item, spell or creature yet.")
@@ -197,8 +202,10 @@ function linksCard(e, redraw) {
           h("li", {},
             h("a", { class: "link-target", href: sourceHref(l) },
               h("span", { class: "badge" }, KIND_LABEL[l.kind]), " ", l.target_name),
-            h("span", { class: "row-actions" },
-              btn("Unlink", () => unlink(l).catch((err) => openForm({ title: "Unlink", message: err.message })))),
+            canEdit
+              ? h("span", { class: "row-actions" },
+                  btn("Unlink", () => unlink(l).catch((err) => openForm({ title: "Unlink", message: err.message }))))
+              : null,
           ))),
   );
 }

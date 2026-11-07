@@ -19,12 +19,17 @@ from shadowdark_bot.web.server import build_local_app
 ASSETS = Path(__file__).resolve().parents[1] / "src/shadowdark_bot/web/static/assets"
 
 
+async def _is_dm(user_id):
+    return True
+
+
 @pytest.fixture
 def client(dbsession):
+    """A Dungeon Master, who may also change library templates."""
     seed_spells()
     with session_scope() as s:
         assert seed_sample_data(s) is True
-    c = TestClient(build_local_app(), client=("127.0.0.1", 50000))
+    c = TestClient(build_local_app(_is_dm), client=("127.0.0.1", 50000))
     token = c.post("/api/auth/local", json={"user_id": YSOLDE_ID}).json()["token"]
     c.headers["Authorization"] = f"Bearer {token}"
     return c

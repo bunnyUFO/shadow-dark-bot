@@ -16,7 +16,7 @@ from alembic.config import Config
 from shadowdark_bot.config import settings
 
 ROOT = Path(__file__).resolve().parents[1]
-PREVIOUS_HEAD = "0021_character_effect_template"
+PREVIOUS_HEAD = "0022_borrow_name"
 
 
 def _insert(conn: sqlite3.Connection, table: str, **values) -> int:
@@ -58,6 +58,10 @@ def test_upgrade_to_head_with_existing_rows(alembic_cfg):
     _insert(conn, "borrows", treasury_entry_id=entry, borrower_id="u1")
     _insert(conn, "borrows", treasury_entry_id=entry, borrower_id="ghost",
             returned_at="2026-01-01 00:00:00")
+    goblin = _insert(conn, "creatures", name="Goblin")
+    _insert(conn, "creature_encounters", creature_id=goblin, date="2026-07-04",
+            session="Session 4", place="Highcliff road", outcome="Drove them off.")
+    _insert(conn, "creature_encounters", creature_id=goblin, date="2026-07-10")
     conn.commit()
     conn.close()
 
@@ -71,6 +75,20 @@ def test_upgrade_to_head_with_existing_rows(alembic_cfg):
             "SELECT borrower_id, borrower_name FROM borrows ORDER BY id"
         ).fetchall()
         assert rows == [("u1", None), ("ghost", None)]
+
+        assert conn.execute(
+            "SELECT kind, tags, title, type_id FROM creatures"
+        ).fetchall() == [("type", None, None, None)]
+        enc_cols = [r[1] for r in conn.execute("PRAGMA table_info(creature_encounters)")]
+        for gone in ("date", "session", "place", "outcome"):
+            assert gone not in enc_cols
+        assert "details" in enc_cols
+        assert conn.execute(
+            "SELECT details, created_at FROM creature_encounters ORDER BY id"
+        ).fetchall() == [
+            ("2026-07-04 · Session 4 · Highcliff road\nDrove them off.", "2026-07-04 00:00:00"),
+            ("2026-07-10", "2026-07-10 00:00:00"),
+        ]
         assert conn.execute("SELECT count(*) FROM player_characters").fetchone()[0] == 1
         assert conn.execute("SELECT count(*) FROM inventory_entries").fetchone()[0] == 1
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []

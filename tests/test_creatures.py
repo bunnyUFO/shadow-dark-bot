@@ -1,7 +1,5 @@
 """The creature bestiary: service rules, then the web API on top."""
 
-from datetime import date
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -10,7 +8,7 @@ from shadowdark_bot.db import session_scope
 from shadowdark_bot.models import Creature, CreatureEncounter
 from shadowdark_bot.services import creatures
 from shadowdark_bot.services.creatures import CreatureError, CreatureNotFound
-from shadowdark_bot.web.app import create_app
+from shadowdark_bot.web.app import DM_ONLY_LIBRARY, create_app
 from shadowdark_bot.web.auth import SessionSigner
 
 # ---------- services ----------
@@ -92,14 +90,14 @@ def test_missing_creature(dbsession):
         with pytest.raises(CreatureNotFound):
             creatures.update_creature(s, 99, ac=3)
         with pytest.raises(CreatureNotFound):
-            creatures.add_encounter(s, "u1", 99)
+            creatures.add_encounter(s, "u1", 99, {"details": "x"})
 
 
 def test_list_search_is_case_insensitive_and_literal(dbsession):
     with session_scope() as s:
         for name in ("Goblin", "Hobgoblin", "Giant 100% rat", "Wolf"):
             creatures.create_creature(s, "u1", name=name)
-        names = lambda q: [c.name for c, _, _ in creatures.list_creatures(s, q)]  # noqa: E731
+        names = lambda q: [c.name for c, _ in creatures.list_creatures(s, q)]  # noqa: E731
         assert names("") == ["Giant 100% rat", "Goblin", "Hobgoblin", "Wolf"]
         assert names("GOB") == ["Goblin", "Hobgoblin"]
         assert names("100%") == ["Giant 100% rat"]
@@ -107,41 +105,126 @@ def test_list_search_is_case_insensitive_and_literal(dbsession):
         assert names("dragon") == []
 
 
-def test_encounters_default_date_and_ownership(dbsession):
+def test_encounters_are_free_text_with_ownership(dbsession):
     with session_scope() as s:
         c = creatures.create_creature(s, "u1", name="Goblin")
         other = creatures.create_creature(s, "u1", name="Wolf")
-        e = creatures.add_encounter(s, "u2", c.id, {"session": " Session 12 ", "date": ""})
-        assert e.date == date.today() and e.session == "Session 12"
-        assert e.place is None and e.created_by == "u2"
-        creatures.update_encounter(s, c.id, e.id, {"place": "Cave", "date": "2026-01-02"})
-        assert (e.place, e.date) == ("Cave", date(2026, 1, 2))
-        creatures.update_encounter(s, c.id, e.id, {"place": ""})
-        assert e.place is None and e.session == "Session 12"
+        e = creatures.add_encounter(s, "u2", c.id, {"details": " Session 12, drove them off "})
+        assert e.details == "Session 12, drove them off" and e.created_by == "u2"
+        creatures.update_encounter(s, c.id, e.id, {"details": "Fled"})
+        assert e.details == "Fled"
         with pytest.raises(CreatureError):
-            creatures.update_encounter(s, c.id, e.id, {"date": "yesterday"})
+            creatures.update_encounter(s, c.id, e.id, {"details": " "})
+        with pytest.raises(CreatureError):
+            creatures.update_encounter(s, c.id, e.id, {"date": "2026-01-02"})
+        with pytest.raises(CreatureError, match="Write what happened"):
+            creatures.add_encounter(s, "u1", c.id, {"details": ""})
         with pytest.raises(CreatureNotFound):  # wrong creature
-            creatures.update_encounter(s, other.id, e.id, {"place": "x"})
+            creatures.update_encounter(s, other.id, e.id, {"details": "x"})
         with pytest.raises(CreatureNotFound):
             creatures.delete_encounter(s, other.id, e.id)
         creatures.delete_encounter(s, c.id, e.id)
         assert s.scalar(select(func.count()).select_from(CreatureEncounter)) == 0
 
 
-def test_list_has_encounter_count_and_last_seen(dbsession):
+def test_list_has_encounter_count(dbsession):
     with session_scope() as s:
         c = creatures.create_creature(s, "u1", name="Goblin")
         creatures.create_creature(s, "u1", name="Wolf")
-        creatures.add_encounter(s, "u1", c.id, {"date": "2026-03-01"})
-        creatures.add_encounter(s, "u1", c.id, {"date": "2026-05-09"})
-        rows = {x.name: (n, last) for x, n, last in creatures.list_creatures(s)}
-        assert rows == {"Goblin": (2, date(2026, 5, 9)), "Wolf": (0, None)}
+        creatures.add_encounter(s, "u1", c.id, {"details": "one"})
+        creatures.add_encounter(s, "u1", c.id, {"details": "two"})
+        rows = {x.name: n for x, n in creatures.list_creatures(s)}
+        assert rows == {"Goblin": 2, "Wolf": 0}
+
+
+def test_tags_are_normalised(dbsession):
+    with session_scope() as s:
+        c = creatures.create_creature(s, "u1", name="Goblin", tags=" Enemy, enemy ,Ally")
+        assert c.tag_list() == ["enemy", "ally"]
+        creatures.update_creature(s, c.id, tags=["  Big   Boss ", "", "big boss", "Cave"])
+        assert c.tag_list() == ["big boss", "cave"]
+        creatures.update_creature(s, c.id, tags=[])
+        assert c.tags is None and c.tag_list() == []
+        with pytest.raises(CreatureError):
+            creatures.update_creature(s, c.id, tags=["x" * 31])
+        with pytest.raises(CreatureError):
+            creatures.update_creature(s, c.id, tags=[f"t{i}" for i in range(13)])
+        creatures.update_creature(s, c.id, tags=[f"t{i}" for i in range(12)])
+        with pytest.raises(CreatureError):
+            creatures.update_creature(s, c.id, tags=["a,b"])
+
+
+def test_tag_suggestions_list_defaults_then_used(dbsession):
+    with session_scope() as s:
+        creatures.create_creature(s, "u1", name="A", tags=["zebra", "enemy", "apple"])
+        assert creatures.tag_suggestions(s) == [
+            "ally", "enemy", "neutral", "creature", "townfolk", "apple", "zebra",
+        ]
+
+
+def test_kind_and_title(dbsession):
+    with session_scope() as s:
+        c = creatures.create_creature(s, "u1", name="Goblin", title="  Boss ")
+        assert (c.kind, c.title) == ("type", "Boss")
+        creatures.update_creature(s, c.id, kind="NAMED")
+        assert c.kind == "named"
+        with pytest.raises(CreatureError, match="Kind must be Named or Type"):
+            creatures.update_creature(s, c.id, kind="beast")
+        with pytest.raises(CreatureError):
+            creatures.update_creature(s, c.id, title="x" * 101)
+
+
+def test_type_link_rules(dbsession):
+    with session_scope() as s:
+        goblin = creatures.create_creature(s, "u1", name="Goblin")
+        grik = creatures.create_creature(s, "u1", name="Grik", kind="named", type_id=goblin.id)
+        assert grik.type_id == goblin.id  # kind and type_id together
+        other = creatures.create_creature(s, "u1", name="Rex", kind="named")
+        with pytest.raises(CreatureError, match="Only a Type can be linked"):
+            creatures.update_creature(s, other.id, type_id=grik.id)
+        with pytest.raises(CreatureError, match="Only a Type can be linked"):
+            creatures.update_creature(s, other.id, type_id=other.id)
+        with pytest.raises(CreatureError, match="isn't in the bestiary"):
+            creatures.update_creature(s, other.id, type_id=999)
+        with pytest.raises(CreatureError, match="Only a Named creature"):
+            creatures.update_creature(s, goblin.id, type_id=goblin.id)
+        wolf = creatures.create_creature(s, "u1", name="Wolf")
+        with pytest.raises(CreatureError, match="Only a Named creature"):
+            creatures.update_creature(s, wolf.id, type_id=goblin.id)
+        with pytest.raises(CreatureError, match="1 named creature uses Goblin"):
+            creatures.update_creature(s, goblin.id, kind="named")
+        creatures.update_creature(s, grik.id, type_id="")
+        assert grik.type_id is None
+        creatures.update_creature(s, grik.id, type_id=goblin.id)
+        creatures.update_creature(s, grik.id, kind="type")  # clears its own link
+        assert grik.type_id is None
+
+
+def test_deleting_a_type_unlinks_its_named(dbsession):
+    with session_scope() as s:
+        goblin = creatures.create_creature(s, "u1", name="Goblin")
+        grik = creatures.create_creature(s, "u1", name="Grik", kind="named", type_id=goblin.id)
+        creatures.delete_creature(s, goblin.id)
+        s.expire_all()
+        assert creatures.get_creature(s, grik.id).type_id is None
+
+
+def test_inherited_only_fills_blank_fields(dbsession):
+    with session_scope() as s:
+        goblin = creatures.create_creature(
+            s, "u1", name="Goblin", ac=11, hp=5, attacks="Club", description="Small")
+        grik = creatures.create_creature(
+            s, "u1", name="Grik", kind="named", type_id=goblin.id, hp=9)
+        assert creatures.inherited(s, grik) == {"ac": 11, "attacks": "Club"}
+        assert creatures.inherited(s, goblin) == {}
+        loner = creatures.create_creature(s, "u1", name="Rex", kind="named")
+        assert creatures.inherited(s, loner) == {}
 
 
 def test_delete_cascades_to_encounters(dbsession):
     with session_scope() as s:
         c = creatures.create_creature(s, "u1", name="Goblin")
-        creatures.add_encounter(s, "u1", c.id)
+        creatures.add_encounter(s, "u1", c.id, {"details": "met"})
         assert creatures.delete_creature(s, c.id) == "Goblin"
         s.expire_all()
         assert s.scalar(select(func.count()).select_from(CreatureEncounter)) == 0
@@ -152,13 +235,23 @@ def test_delete_cascades_to_encounters(dbsession):
 # ---------- web API ----------
 
 
-@pytest.fixture
-def client(dbsession):
+def _web(user_id, name, *, is_dm):
     signer = SessionSigner("x" * 40, 3600, purpose="local")
     app = create_app(mode="local", signer=signer, static_dir=None)
     tc = TestClient(app, client=("127.0.0.1", 50000))
-    tc.headers["Authorization"] = f"Bearer {signer.issue('u1', 'Tester')}"
+    tc.headers["Authorization"] = f"Bearer {signer.issue(user_id, name, is_dm=is_dm)}"
     return tc
+
+
+@pytest.fixture
+def client(dbsession):
+    """A Dungeon Master: the only kind of user who may change the bestiary."""
+    return _web("u1", "Tester", is_dm=True)
+
+
+@pytest.fixture
+def player(dbsession):
+    return _web("u2", "Player", is_dm=False)
 
 
 def test_requires_login(client):
@@ -176,9 +269,12 @@ def test_create_get_and_list_unknowns(client):
     assert all(body[k] is None for k in ("level", "ac", "hp", "str_mod", "alignment", "notes"))
     assert client.get(f"/api/creatures/{body['id']}").json() == body
     rows = client.get("/api/creatures").json()
+    assert body["kind"] == "type" and body["tags"] == [] and body["type"] is None
+    assert body["title"] is None and body["inherited"] == {}
     assert rows == [{
-        "id": body["id"], "name": "Pale thing in the well", "level": None, "ac": None,
-        "hp": None, "alignment": None, "encounter_count": 0, "last_seen": None,
+        "id": body["id"], "name": "Pale thing in the well", "title": None, "kind": "type",
+        "tags": [], "type_id": None, "level": None, "ac": None, "hp": None,
+        "alignment": None, "encounter_count": 0,
     }]
 
 
@@ -218,31 +314,90 @@ def test_list_search_and_delete(client):
     assert [c["name"] for c in client.get("/api/creatures").json()] == ["Hobgoblin", "Wolf"]
 
 
+def test_kind_tags_title_and_type_round_trip(client):
+    goblin = client.post("/api/creatures", json={"name": "Goblin", "ac": 11, "hp": 5}).json()
+    r = client.post("/api/creatures", json={
+        "name": "Grik", "title": "Boss", "tags": ["Enemy", "boss"], "kind": "named",
+        "type_id": goblin["id"], "hp": 9,
+    })
+    assert r.status_code == 200, r.text
+    grik = r.json()
+    assert (grik["title"], grik["kind"], grik["tags"]) == ("Boss", "named", ["enemy", "boss"])
+    assert grik["type"] == {"id": goblin["id"], "name": "Goblin"}
+    assert grik["ac"] is None and grik["inherited"] == {"ac": 11}
+    assert client.get(f"/api/creatures/{grik['id']}").json() == grik
+
+    rows = {c["name"]: c for c in client.get("/api/creatures").json()}
+    assert rows["Grik"]["ac"] == 11 and rows["Grik"]["hp"] == 9  # effective values
+    assert rows["Grik"]["kind"] == "named" and rows["Grik"]["tags"] == ["enemy", "boss"]
+    assert rows["Grik"]["title"] == "Boss" and rows["Grik"]["type_id"] == goblin["id"]
+
+    r = client.patch(f"/api/creatures/{grik['id']}", json={"tags": []})
+    assert r.json()["tags"] == []
+    r = client.patch(f"/api/creatures/{grik['id']}", json={"kind": "type"})
+    assert r.json()["type"] is None
+    r = client.patch(f"/api/creatures/{goblin['id']}", json={"kind": "bogus"})
+    assert r.status_code == 400 and "Kind" in r.json()["detail"]
+    r = client.patch(f"/api/creatures/{goblin['id']}", json={"type_id": grik["id"]})
+    assert r.status_code == 400
+
+
+def test_tags_route_is_not_swallowed_by_the_id_route(client):
+    client.post("/api/creatures", json={"name": "A", "tags": ["zebra", "enemy"]})
+    r = client.get("/api/creatures/tags")
+    assert r.status_code == 200
+    assert r.json() == ["ally", "enemy", "neutral", "creature", "townfolk", "zebra"]
+
+
 def test_encounters_api(client):
     cid = client.post("/api/creatures", json={"name": "Goblin"}).json()["id"]
     base = f"/api/creatures/{cid}/encounters"
-    r = client.post(base, json={"date": "2026-03-01", "session": "Session 3", "place": "Cave"})
+    r = client.post(base, json={"details": "Session 3 · Cave\nFled"})
     assert r.status_code == 200, r.text
-    r = client.post(base, json={"date": "2026-05-09", "outcome": "Fled"})
-    r = client.post(base, json={})  # today
+    r = client.post(base, json={"details": "Back again"})
     encs = r.json()["encounters"]
-    assert [e["date"] for e in encs] == [date.today().isoformat(), "2026-05-09", "2026-03-01"]
-    first = encs[2]
-    assert first["session"] == "Session 3" and first["created_by"] == "u1"
+    assert [e["details"] for e in encs] == ["Back again", "Session 3 · Cave\nFled"]  # newest first
+    first = encs[1]
+    assert first["created_by"] == "u1" and "created_at" in first
 
-    r = client.patch(f"{base}/{first['id']}", json={"outcome": "Won", "place": ""})
+    r = client.patch(f"{base}/{first['id']}", json={"details": "Won"})
     upd = [e for e in r.json()["encounters"] if e["id"] == first["id"]][0]
-    assert (upd["outcome"], upd["place"], upd["session"]) == ("Won", None, "Session 3")
+    assert upd["details"] == "Won"
 
     listing = client.get("/api/creatures").json()[0]
-    assert listing["encounter_count"] == 3 and listing["last_seen"] == date.today().isoformat()
+    assert listing["encounter_count"] == 2 and "last_seen" not in listing
 
-    assert client.post(base, json={"date": "soon"}).status_code == 400
-    assert client.post("/api/creatures/999/encounters", json={}).status_code == 404
-    assert client.patch(f"{base}/999", json={"place": "x"}).status_code == 404
+    assert client.post(base, json={"details": "  "}).status_code == 400
+    assert client.post(base, json={}).status_code == 400
+    assert client.post("/api/creatures/999/encounters", json={"details": "x"}).status_code == 404
+    assert client.patch(f"{base}/999", json={"details": "x"}).status_code == 404
     r = client.delete(f"{base}/{first['id']}")
-    assert len(r.json()["encounters"]) == 2
+    assert len(r.json()["encounters"]) == 1
     assert client.delete(f"{base}/{first['id']}").status_code == 404
 
     client.delete(f"/api/creatures/{cid}")
     assert client.get(f"/api/creatures/{cid}").status_code == 404
+
+
+def test_only_a_dm_changes_the_bestiary(client, player):
+    cid = client.post("/api/creatures", json={"name": "Goblin"}).json()["id"]
+    base = f"/api/creatures/{cid}"
+    eid = client.post(f"{base}/encounters", json={"details": "met"}).json()["encounters"][0]["id"]
+    attempts = [
+        player.post("/api/creatures", json={"name": "Wolf"}),
+        player.patch(base, json={"ac": 3}),
+        player.patch(base, json={"tags": ["enemy"], "kind": "named", "type_id": cid}),
+        player.delete(base),
+        player.post(f"{base}/encounters", json={"details": "x"}),
+        player.patch(f"{base}/encounters/{eid}", json={"details": "x"}),
+        player.delete(f"{base}/encounters/{eid}"),
+    ]
+    for r in attempts:
+        assert r.status_code == 403, r.text
+        assert r.json()["detail"] == DM_ONLY_LIBRARY
+
+    # reading stays open to everyone, and nothing was changed
+    assert [c["name"] for c in player.get("/api/creatures").json()] == ["Goblin"]
+    assert player.get("/api/creatures/tags").status_code == 200
+    got = player.get(base).json()
+    assert got["ac"] is None and len(got["encounters"]) == 1
