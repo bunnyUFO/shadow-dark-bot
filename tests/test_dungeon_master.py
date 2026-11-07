@@ -286,3 +286,34 @@ def test_dm_alone_changes_the_bestiary_and_library(dm_api):
     # players still read both
     assert [c["name"] for c in dm_api.get("/api/creatures", headers=amy).json()] == ["Goblin"]
     assert [e["name"] for e in dm_api.get("/api/effects", headers=amy).json()] == ["Bless"]
+
+
+def test_role_changes_apply_to_an_existing_session(dbsession, monkeypatch):
+    """The role is asked again on later requests, so a token issued before the
+    role was given (or taken away) follows the role, not the login."""
+    from shadowdark_bot.web import app as web_app
+
+    holders = set()
+
+    async def is_member(user_id):
+        return True
+
+    async def has_dm_role(user_id):
+        return user_id in holders
+
+    clock = [0.0]
+    monkeypatch.setattr(web_app.time, "monotonic", lambda: clock[0])
+    c = TestClient(create_app(
+        mode="discord", oauth=FakeOAuth(), signer=SessionSigner(SECRET, ttl_seconds=3600),
+        is_allowed_member=is_member, public_base_url=BASE + "/", static_dir=None,
+        has_dm_role=has_dm_role,
+    ))
+    me = _as(c, "u2")
+    assert c.get("/api/me", headers=me).json()["is_dm"] is False
+    holders.add("u2")
+    assert c.get("/api/me", headers=me).json()["is_dm"] is False  # cached for a minute
+    clock[0] += web_app.DM_CACHE_SECONDS + 1
+    assert c.get("/api/me", headers=me).json()["is_dm"] is True
+    holders.discard("u2")
+    clock[0] += web_app.DM_CACHE_SECONDS + 1
+    assert c.get("/api/me", headers=me).json()["is_dm"] is False
