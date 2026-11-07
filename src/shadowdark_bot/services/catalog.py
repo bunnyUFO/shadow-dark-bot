@@ -5,11 +5,13 @@ Same conventions as `services.characters`: the caller owns the transaction, and
 rule failures raise `CharacterError` with a user-facing reason.
 """
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from shadowdark_bot.currency import parse_value_string
 from shadowdark_bot.models import (
+    BONUS_ITEM_TYPES,
+    ITEM_TYPE_ARMOR,
     ITEM_TYPE_MAGICAL,
     ITEM_TYPES,
     InventoryEntry,
@@ -45,6 +47,18 @@ def type_change_error(session: Session, item: Item, new_type: str | None) -> str
     by existing inventory/treasury references, else None."""
     if new_type is None or new_type == item.item_type:
         return None
+    if item.item_type in BONUS_ITEM_TYPES and new_type not in BONUS_ITEM_TYPES:
+        bonus_stacks = session.scalar(
+            select(func.count())
+            .select_from(InventoryEntry)
+            .where(InventoryEntry.item_id == item.id, InventoryEntry.bonus > 0)
+        ) or 0
+        if bonus_stacks:
+            return (
+                f"Cannot change **{item.name}** to {new_type} — it has "
+                f"{bonus_stacks} magic-bonus stack(s); only weapons and armor "
+                "can have a bonus. Remove them first."
+            )
     going_magical = new_type == ITEM_TYPE_MAGICAL
     leaving_magical = item.item_type == ITEM_TYPE_MAGICAL
     if going_magical:
@@ -117,9 +131,11 @@ def create_item(
     gear_slots: float | None = None,
     bundle_size: int | None = None,
     value: str | None = None,
+    purchasable: bool = False,
 ) -> Item:
     """Add a catalog item. Gear slots default to 1 and the bundle size to 1;
-    `value` is a string like "5gp 2sp 3cp" (blank = no value tracked)."""
+    `value` is a string like "5gp 2sp 3cp" (blank = no value tracked).
+    `purchasable` (default no) turns on Buy on the Items page."""
     slots = 1.0 if gear_slots is None else float(gear_slots)
     bundle = 1 if bundle_size is None else int(bundle_size)
     clean, value_cp = _validate(
@@ -137,6 +153,7 @@ def create_item(
         bundle_size=bundle,
         value_cp=value_cp,
         item_type=item_type,
+        purchasable=purchasable,
         created_by=user_id,
     )
     session.add(item)
@@ -154,6 +171,7 @@ def update_item(
     gear_slots: float | None = None,
     bundle_size: int | None = None,
     value: str | None = None,
+    purchasable: bool | None = None,
 ) -> Item:
     """Edit a catalog item. None leaves a field alone; `description=""` and
     `value=""` clear it."""
@@ -175,6 +193,13 @@ def update_item(
     err = type_change_error(session, item, new_type)
     if err:
         raise CharacterError(err)
+    if item.item_type == ITEM_TYPE_ARMOR and new_type != ITEM_TYPE_ARMOR:
+        # Only armor can be worn.
+        session.execute(
+            update(InventoryEntry)
+            .where(InventoryEntry.item_id == item.id)
+            .values(worn=False)
+        )
     item.name = clean
     item.item_type = new_type
     item.gear_slots = slots
@@ -183,5 +208,7 @@ def update_item(
         item.value_cp = value_cp
     if description is not None:
         item.description = description.strip() or None
+    if purchasable is not None:
+        item.purchasable = purchasable
     session.flush()
     return item

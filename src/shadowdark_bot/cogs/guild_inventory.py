@@ -22,6 +22,7 @@ from shadowdark_bot.models import (
     PlayerCharacter,
 )
 from shadowdark_bot.rules import stack_slots
+from shadowdark_bot.services.characters import CharacterError, check_bonus
 from shadowdark_bot.sharing import ShareableView, ShareButton
 
 log = logging.getLogger("shadowdark_bot.inventory")
@@ -411,8 +412,21 @@ def _build_detail_payload(
         )
         used = _used_slots(session, loc.id)
         embed = build_location_detail_embed(loc, stacks, used)
-        item_names = [stack.item.name for stack in stacks]
+        item_names = [stack.display_name for stack in stacks]
     return embed, LocationDetailView(location_name, item_names)
+
+
+def _lookup_item(session: Session, text: str) -> tuple[Item | None, int]:
+    """Find a catalog item by typed name; "Dagger +1" resolves to (Dagger, 1)."""
+    item = session.scalar(select(Item).where(Item.name == text))
+    if item is not None:
+        return item, 0
+    base, bonus = storage.split_bonus_name(text)
+    if bonus:
+        item = session.scalar(select(Item).where(Item.name == base))
+        if item is not None:
+            return item, bonus
+    return None, 0
 
 
 def _build_item_detail_payload(
@@ -431,15 +445,10 @@ def _build_item_detail_payload(
         )
         if loc is None:
             return None
-        item = session.scalar(select(Item).where(Item.name == item_name))
+        item, bonus = _lookup_item(session, item_name)
         if item is None:
             return None
-        stack = session.scalar(
-            select(InventoryEntry).where(
-                InventoryEntry.location_id == loc.id,
-                InventoryEntry.item_id == item.id,
-            )
-        )
+        stack = storage.find_catalog_stack(session, loc.id, item.id, bonus)
         stack_qty = stack.quantity if stack else 0
         embed = build_item_embed(item)
         if stack is not None:
@@ -747,12 +756,17 @@ async def _do_add(
             )
             return
 
-        cat_item = session.scalar(select(Item).where(Item.name == clean_item))
+        cat_item, bonus = _lookup_item(session, clean_item)
         if cat_item is None:
             await interaction.response.send_message(
                 f"{failure}\nNo catalog entry named **{clean_item}**.",
                 ephemeral=True,
             )
+            return
+        try:
+            check_bonus(cat_item, bonus)
+        except CharacterError as err:
+            await interaction.response.send_message(f"{failure}\n{err}", ephemeral=True)
             return
         if cat_item.item_type == ITEM_TYPE_MAGICAL:
             await interaction.response.send_message(
@@ -762,12 +776,7 @@ async def _do_add(
             )
             return
 
-        stack = session.scalar(
-            select(InventoryEntry).where(
-                InventoryEntry.location_id == loc.id,
-                InventoryEntry.item_id == cat_item.id,
-            )
-        )
+        stack = storage.find_catalog_stack(session, loc.id, cat_item.id, bonus)
         current_qty = stack.quantity if stack else 0
         new_qty = current_qty + quantity
         current_stack_slots = stack_slots(
@@ -797,6 +806,7 @@ async def _do_add(
             stack = InventoryEntry(
                 location_id=loc.id,
                 item_id=cat_item.id,
+                bonus=bonus,
                 quantity=quantity,
                 notes=(notes.strip() if notes else None) or None,
                 added_by=str(interaction.user.id),
@@ -851,19 +861,14 @@ async def _do_take(
                 ephemeral=True,
             )
             return
-        cat_item = session.scalar(select(Item).where(Item.name == clean_item))
+        cat_item, bonus = _lookup_item(session, clean_item)
         if cat_item is None:
             await interaction.response.send_message(
                 f"{failure}\nNo catalog entry named **{clean_item}**.",
                 ephemeral=True,
             )
             return
-        stack = session.scalar(
-            select(InventoryEntry).where(
-                InventoryEntry.location_id == loc.id,
-                InventoryEntry.item_id == cat_item.id,
-            )
-        )
+        stack = storage.find_catalog_stack(session, loc.id, cat_item.id, bonus)
         if stack is None:
             await interaction.response.send_message(
                 f"{failure}\nNo **{clean_item}** at **{clean_location}**.",
@@ -886,7 +891,9 @@ async def _do_take(
         added_to_char = False
         if char is not None:
             held, _stash = storage.ensure_character_locations(session, char)
-            existing = storage.find_catalog_stack(session, held.id, cat_item.id)
+            existing = storage.find_catalog_stack(
+                session, held.id, cat_item.id, bonus
+            )
             current = existing.quantity if existing else 0
             delta = stack_slots(
                 current + quantity, cat_item.gear_slots, cat_item.bundle_size
@@ -901,7 +908,9 @@ async def _do_take(
                     ephemeral=True,
                 )
                 return
-            storage.add_stack(session, held, quantity=quantity, item=cat_item)
+            storage.add_stack(
+                session, held, quantity=quantity, item=cat_item, bonus=bonus
+            )
             added_to_char = True
 
         stack.quantity -= quantity

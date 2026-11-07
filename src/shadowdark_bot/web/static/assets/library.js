@@ -6,7 +6,7 @@ import { api } from "./api.js";
 import { h, mount, plain, slots } from "./dom.js";
 import { buyDialog, forgetCatalog, guildEditOpts, openForm } from "./edit.js";
 import { effectsBySource, libraryLink, linkedEffects } from "./effects.js";
-import { card, coins, pageHead, storeCard } from "./sheet.js";
+import { bonusEffect, card, coins, pageHead, storeCard } from "./sheet.js";
 
 // Filters survive navigating away and back within a visit.
 const spellFilters = { q: "", cls: "", tier: "", alignment: "" };
@@ -204,7 +204,31 @@ function slotText(gearSlots, bundle) {
   return bundle > 1 ? `${slots(gearSlots)} sl / ${bundle}` : `${slots(gearSlots)} sl`;
 }
 
+const BONUS_OPTIONS = [[0, "+0"], [1, "+1"], [2, "+2"], [3, "+3"]];
+
 function catalogRow(i, buy, edit, effects) {
+  // Weapons and armor show a +0..+3 preview; picking one retitles the body, not
+  // the collapsed list name. Magic items are found, never bought, so Buy shows
+  // only at +0 and only on items that are for sale.
+  const magic = i.item_type === "weapon" || i.item_type === "armor";
+  let bonus = 0;
+  const title = h("p", { class: "prose" }, h("strong", {}, i.name));
+  const bonusFact = h("dl", { class: "facts" });
+  const buyArea = h("div", { class: "row-actions" });
+  const showBuy = () => {
+    const canBuyNow = buy && i.purchasable && i.value_cp > 0;
+    buyArea.replaceChildren(
+      ...(bonus > 0
+        ? [h("span", { class: "muted" }, "+N items are found, not bought.")]
+        : canBuyNow ? [h("button", { type: "button", class: "tool", onclick: () => buy(i) }, "Buy")] : []),
+      h("button", { type: "button", class: "tool", onclick: () => edit(i) }, "Edit"));
+  };
+  const showBonus = () => {
+    title.firstChild.textContent = bonus ? `${i.name} +${bonus}` : i.name;
+    bonusFact.replaceChildren(...(fact("Magic bonus", bonusEffect(i.item_type, bonus)) ?? []));
+    showBuy();
+  };
+  showBuy();
   return h("li", {},
     h("details", { class: "row" },
       h("summary", {},
@@ -213,20 +237,24 @@ function catalogRow(i, buy, edit, effects) {
         h("span", { class: "row-meta" }, slotText(i.gear_slots, i.bundle_size)),
       ),
       h("div", { class: "row-body" },
+        magic ? title : null,
         h("dl", { class: "facts" },
           fact("Type", TYPE_LABEL[i.item_type] ?? i.item_type),
           fact("Slots", i.bundle_size > 1
             ? `${slots(i.gear_slots)} per ${i.bundle_size}`
             : `${slots(i.gear_slots)} each`),
           fact("Value", i.value_cp !== null ? coins(i.value_cp) : null),
+          fact("For sale", i.purchasable ? "Yes" : "No"),
         ),
         i.description ? h("p", { class: "prose" }, plain(i.description)) : null,
         linkedEffects(effects),
-        h("div", { class: "row-actions" },
-          buy && i.value_cp > 0
-            ? h("button", { type: "button", class: "tool", onclick: () => buy(i) }, "Buy")
-            : null,
-          h("button", { type: "button", class: "tool", onclick: () => edit(i) }, "Edit")),
+        magic ? bonusFact : null,
+        magic
+          ? h("div", { class: "bonus-pick" },
+              h("span", { class: "muted bonus-pick-label" }, "Magic bonus"),
+              chipGroup("Magic bonus", BONUS_OPTIONS, 0, (v) => { bonus = Number(v); showBonus(); }))
+          : null,
+        buyArea,
       ),
     ),
   );
@@ -249,6 +277,8 @@ function itemFormDialog(item, catalog, onSaved) {
       required: true, hint: "How many fit in one gear slot, like 20 arrows" },
     { name: "value", label: "Value", type: "text", value: valueText(item), hint: "Like 5gp 2sp; blank = no value" },
     { name: "description", label: "Description", type: "textarea", value: item?.description ?? "" },
+    { name: "purchasable", label: "Purchasable", type: "checkbox", value: item?.purchasable ?? false,
+      hint: "Shows Buy on the Items page" },
   ];
   const dialog = openForm({
     title: item ? `Edit ${item.name}` : "Add item",
@@ -258,6 +288,7 @@ function itemFormDialog(item, catalog, onSaved) {
       const body = {
         name: v.name, item_type: v.item_type, gear_slots: v.gear_slots ?? 1, bundle_size: v.bundle_size ?? 1,
         value: v.value.trim(), description: v.description.trim(),
+        purchasable: v.purchasable,
       };
       await api(item ? `/items/${item.id}` : "/items", { method: item ? "PATCH" : "POST", body });
       onSaved(body.name.trim());
@@ -272,6 +303,7 @@ function itemFormDialog(item, catalog, onSaved) {
     set("bundle_size", src.bundle_size);
     set("value", valueText(src));
     set("description", src.description ?? "");
+    dialog.querySelector("#f-purchasable").checked = !!src.purchasable;
   });
 }
 

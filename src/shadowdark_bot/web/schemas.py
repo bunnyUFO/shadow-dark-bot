@@ -86,6 +86,8 @@ class ItemStackOut(BaseModel):
     value_cp: int | None
     description: str | None
     notes: str | None
+    bonus: int = 0  # magic bonus +0..+3 (weapons and armor)
+    worn: bool = False  # armor in Carrying that counts toward AC
 
 
 class EffectOut(BaseModel):
@@ -168,6 +170,7 @@ class CatalogItemOut(BaseModel):
     bundle_size: int
     value_cp: int | None
     description: str | None
+    purchasable: bool
 
 
 class BorrowerOut(BaseModel):
@@ -231,6 +234,7 @@ class CarryIn(BaseModel):
     to: Literal["held", "stash"] = "held"
     slots_each: float = 1.0
     notes: str | None = None
+    bonus: int = Field(0, ge=0, le=3)
 
 
 class EditStackIn(BaseModel):
@@ -246,6 +250,11 @@ class BuyIn(BaseModel):
     quantity: int = 1
     pay_from: Literal["character", "guild"]
     destination_location_id: int
+    bonus: int = Field(0, ge=0, le=3)
+
+
+class WearIn(BaseModel):
+    worn: bool
 
 
 class GiveIn(BaseModel):
@@ -281,6 +290,7 @@ class CatalogItemIn(BaseModel):
     gear_slots: float | None = None  # None = 1
     bundle_size: int | None = None  # None = 1
     value: str | None = Field(default=None, max_length=40)  # "5gp 2sp 3cp"
+    purchasable: bool = False
 
 
 class CatalogItemPatch(BaseModel):
@@ -292,6 +302,7 @@ class CatalogItemPatch(BaseModel):
     gear_slots: float | None = None
     bundle_size: int | None = None
     value: str | None = Field(default=None, max_length=40)
+    purchasable: bool | None = None
 
 
 class LearnSpellIn(BaseModel):
@@ -387,6 +398,7 @@ def catalog_item_out(item: Item) -> CatalogItemOut:
         bundle_size=item.bundle_size,
         value_cp=item.value_cp,
         description=clean_description(item.description),
+        purchasable=item.purchasable,
     )
 
 
@@ -406,6 +418,8 @@ def _stack_out(e: InventoryEntry) -> ItemStackOut:
         # Freeform stacks keep their typed description in `notes`.
         description=clean_description(item.description) if item else e.notes,
         notes=e.notes if item else None,
+        bonus=e.bonus,
+        worn=e.worn,
     )
 
 
@@ -445,8 +459,16 @@ def character_sheet(
     effects = list(char.effects)
     effective: dict[str, StatOut] = {}
 
+    # Worn armor and shield bonuses count toward AC (never the stash).
+    ac_extra = [
+        (f"{name or 'Armor'} (worn)", f"+{b}")
+        for name, b in characters.armor_bonus(storage.location_entries(session, held.id))
+    ]
+
     def apply(key: str, base: int) -> StatOut:
-        res = characters.resolve_stat(effects, key, base)
+        res = characters.resolve_stat(
+            effects, key, base, extra=ac_extra if key == "ac" else ()
+        )
         out = StatOut(
             base=res.base,
             total=res.total,

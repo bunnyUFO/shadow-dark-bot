@@ -66,6 +66,10 @@ function tagsControl(f) {
 function control(f, listId) {
   const common = { name: f.name, id: `f-${f.name}`, required: f.required || null };
   if (f.type === "tags") return tagsControl(f);
+  if (f.type === "checkbox") {
+    // No `required` or `showWhen` on a checkbox: both read `.value`.
+    return h("input", { name: f.name, id: `f-${f.name}`, type: "checkbox", checked: f.value || null });
+  }
   if (f.type === "select") {
     return h("select", { ...common, size: f.size ?? null }, selectOptions(f.options, f.value));
   }
@@ -149,6 +153,7 @@ export function openForm({ title, message, fields = [], submitLabel = "Save", da
     for (const [f, el] of controls) {
       if (el.disabled) continue;
       if (f.type === "tags") values[f.name] = el.tagValue();
+      else if (f.type === "checkbox") values[f.name] = el.checked;
       else values[f.name] = f.type === "number" ? (el.value === "" ? null : Number(el.value)) : el.value;
     }
     submit.disabled = true;
@@ -332,7 +337,13 @@ export function editOpts(c, redraw, base = "/character") {
     });
   };
 
-  const itemActions = (item) => [
+  const itemActions = (item, key) => [
+    // Only armor in Carrying can be worn; wearing swaps same-class armor.
+    key === "held" && item.item_type === "armor"
+      ? btn(item.worn ? "Take off" : "Wear", () =>
+          write(`/character/items/${item.id}/wear`, "POST", { worn: !item.worn })
+            .catch(showFailure("Wear")))
+      : null,
     moveAction(item),
     btn("Give", async () => {
       try {
@@ -633,12 +644,14 @@ async function addItemDialog(role, write) {
       { name: "slots_each", label: "Gear slots each", type: "number", value: 1, min: 0, step: "any",
         showWhen: ["mode", "custom"] },
       { name: "notes", label: "Notes", type: "textarea", showWhen: ["mode", "custom"] },
+      { name: "bonus", label: "Magic bonus", type: "select", value: "0", showWhen: ["mode", "catalog"],
+        options: [["0", "+0"], ["1", "+1"], ["2", "+2"], ["3", "+3"]], hint: "Weapons and armor only" },
       { name: "quantity", label: "Quantity", type: "number", value: 1, min: 1, required: true },
       { name: "to", label: "Put in", type: "select", value: role, options: [["held", "Carrying"], ["stash", "Personal Stash"]] },
     ],
     submitLabel: "Add",
     onSubmit: (v) => write("/character/items", "POST", v.mode === "catalog"
-      ? { name: v.catalog_name, quantity: v.quantity ?? 1, to: v.to }
+      ? { name: v.catalog_name, quantity: v.quantity ?? 1, to: v.to, bonus: Number(v.bonus) }
       : { name: v.name, quantity: v.quantity ?? 1, to: v.to, slots_each: v.slots_each ?? 1, notes: v.notes || null }),
   });
 }

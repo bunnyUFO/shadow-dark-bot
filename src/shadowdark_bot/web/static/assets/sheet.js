@@ -323,7 +323,9 @@ function inventoryTab(c, opts) {
         h("strong", {}, c.gold),
       ),
     ),
-    storeCard("Carrying", c.held, "Carrying nothing.", { key: "held", c, opts }),
+    storeCard("Carrying", c.held, "Carrying nothing.", {
+      key: "held", c, opts, note: "Worn armor and shields add their magic bonus to AC. Wear one armor and one shield; moving one out of Carrying takes it off.",
+    }),
     c.stash ? storeCard("Personal Stash", c.stash, "Empty.", {
       key: "stash", c, opts, note: "Private. Only its owner and Dungeon Masters can see it.",
     }) : null,
@@ -355,6 +357,12 @@ export function storeCard(label, store, empty, ctx = {}) {
   );
 }
 
+// "+1 to attack and damage rolls" / "+1 AC" for a magic weapon or armor stack.
+export function bonusEffect(itemType, bonus) {
+  if (!bonus) return null;
+  return itemType === "armor" ? `+${bonus} AC while worn` : `+${bonus} to attack and damage rolls`;
+}
+
 function itemRow(i, actions) {
   const per = `${slots(i.gear_slots_each)} each` + (i.bundle_size > 1 ? `, ${i.bundle_size} per slot` : "");
   return h("li", {},
@@ -362,11 +370,13 @@ function itemRow(i, actions) {
       h("summary", {},
         h("span", { class: "qty" }, `${i.quantity}×`),
         h("span", { class: "row-name" }, i.name),
+        i.worn ? h("span", { class: "badge in" }, "Worn") : null,
         h("span", { class: "row-meta" }, `${slots(i.slot_cost)} sl`),
       ),
       h("div", { class: "row-body" },
         h("dl", { class: "facts" },
           fact("Type", i.item_type ? cap(i.item_type) : "Freeform"),
+          fact("Magic bonus", bonusEffect(i.item_type, i.bonus)),
           fact("Slots", per),
           fact("Value", i.value_cp !== null ? coins(i.value_cp) : null),
         ),

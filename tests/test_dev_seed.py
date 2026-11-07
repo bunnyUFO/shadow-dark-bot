@@ -74,9 +74,18 @@ def test_seed_content(seeded):
             )
         ).all()
         assert {g.name: storage.used_slots(storage.location_entries(s, g.id)) for g in guild} == {
-            "Guild Hall Storeroom": 18.0,
+            "Guild Hall Storeroom": 19.0,
             "Pack Mule": 4.0,
         }
+        names = {
+            e.display_name
+            for g in guild
+            for e in storage.location_entries(s, g.id)
+        } | {
+            e.display_name
+            for e in storage.location_entries(s, storage.held_location(s, YSOLDE_ID).id)
+        }
+        assert {"Longsword +1", "Dagger +1"} <= names
         entries = s.scalars(select(TreasuryEntry)).all()
         assert len(entries) == 4
         borrowed = [e for e in entries if e.status == "borrowed"]

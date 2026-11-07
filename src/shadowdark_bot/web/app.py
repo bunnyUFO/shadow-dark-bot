@@ -53,6 +53,7 @@ from shadowdark_bot.web.schemas import (
     CatalogItemOut,
     CharacterSheetOut,
     BuyIn,
+    WearIn,
     CarryIn,
     EditStackIn,
     EffectIn,
@@ -386,6 +387,7 @@ def create_app(
                 gear_slots=body.gear_slots,
                 bundle_size=body.bundle_size,
                 value=body.value,
+                purchasable=body.purchasable,
             )
             return catalog_item_out(item)
 
@@ -402,6 +404,7 @@ def create_app(
                 gear_slots=body.gear_slots,
                 bundle_size=body.bundle_size,
                 value=body.value,
+                purchasable=body.purchasable,
             )
             return catalog_item_out(item)
 
@@ -440,6 +443,7 @@ def create_app(
                 role=body.to,
                 freeform_slots=body.slots_each,
                 notes=body.notes,
+                bonus=body.bonus,
             )
         return _full_sheet(target)
 
@@ -696,6 +700,14 @@ def create_app(
             )
         return _full_sheet(target)
 
+    @sheet_route("POST", "/items/{entry_id}/wear")
+    def wear_item(entry_id: int, body: WearIn, target: Target) -> CharacterSheetOut:
+        """Wear or take off an armor stack in Carrying (swaps same-class armor)."""
+        with session_scope() as session:
+            characters.require_character(session, target)
+            characters.set_worn(session, target, entry_id=entry_id, worn=body.worn)
+        return _full_sheet(target)
+
     @app.post("/api/items/{item_id}/buy")
     def buy_item(item_id: int, body: BuyIn, user: User) -> CharacterSheetOut:
         with session_scope() as session:
@@ -707,6 +719,7 @@ def create_app(
                 quantity=body.quantity,
                 pay_from=body.pay_from,
                 destination_location_id=body.destination_location_id,
+                bonus=body.bonus,
             )
         return _full_sheet(user.user_id)
 

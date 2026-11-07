@@ -806,7 +806,7 @@ def test_buy_endpoint(api):
     c, h = _bob_client(api)
     with session_scope() as s:
         torch = Item(name="Torch", gear_slots=1, bundle_size=1,
-                     item_type=ITEM_TYPE_COMMON, value_cp=10)
+                     item_type=ITEM_TYPE_COMMON, value_cp=10, purchasable=True)
         cellar = Location(name="Cellar", kind="inventory", max_gear_slots=5.0)
         s.add_all([torch, cellar])
         s.flush()
