@@ -12,6 +12,7 @@ import { chipGroup, countLine } from "./library.js";
 import { card, pageHead } from "./sheet.js";
 
 const filters = { q: "", kind: "", tag: "" }; // survives navigating away and back within a visit
+let filtersFor = null; // whose visit the filters belong to
 
 const ALIGN_LABEL = { L: "Lawful", N: "Neutral", C: "Chaotic" };
 const KIND_LABEL = { named: "Named", type: "Type" };
@@ -32,6 +33,11 @@ const metCount = (n) => (n === 0 ? "Not met yet" : n === 1 ? "Met once" : `Met $
 // ---------- list ----------
 
 export async function renderCreatures(app, me = null) {
+  if (me && filtersFor !== me.user_id) {
+    // A different character signed in: start from a clean list.
+    Object.assign(filters, { q: "", kind: "", tag: "" });
+    filtersFor = me.user_id;
+  }
   const creatures = await api("/creatures");
   const tags = [...new Set(creatures.flatMap((c) => c.tags))].sort();
   if (filters.tag && !tags.includes(filters.tag)) filters.tag = "";
@@ -142,9 +148,8 @@ function statBlock(c, redraw, canEdit) {
   const mods = [["S", "str_mod"], ["D", "dex_mod"], ["C", "con_mod"],
     ["I", "int_mod"], ["W", "wis_mod"], ["Ch", "cha_mod"]]
     .map(([label, field]) => [label, pick(field)]).filter(([, stat]) => stat);
-  const level = pick("level");
   const align = pick("alignment");
-  const sub = [level && `Level ${level.value}`, align && ALIGN_LABEL[align.value]].filter(Boolean);
+  const sub = [align && ALIGN_LABEL[align.value]].filter(Boolean); // level is in the LV tile
   const known = tiles.length || facts.length || mods.length || sub.length;
   return card("stats", c.name, {
     tools: !canEdit ? null : [
@@ -218,7 +223,8 @@ async function openCreatureForm(c, redraw) {
         hint: "A Type is a kind of creature. Named is one particular creature." },
       { name: "type_id", label: "Type", type: "select", value: c?.type?.id ?? "",
         options: [["", "None"], ...types.map((t) => [String(t.id), t.name])],
-        showWhen: ["kind", "named"], hint: "Its blank stats show the Type's" },
+        showWhen: ["kind", "named"],
+        hint: "Pick the creature type this one belongs to; its stats and abilities show as defaults." },
       { name: "title", label: "Class / title", type: "text", value: c?.title, hint: "Like Boss of the old mine" },
       { name: "tags", label: "Tags", type: "tags", value: c?.tags ?? [], suggestions },
       level, ac, hp,

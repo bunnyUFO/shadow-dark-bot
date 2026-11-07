@@ -108,9 +108,8 @@ function renderNav(active) {
         "aria-current": key === active ? "page" : null,
       }, withIcons ? h("span", { class: "ico", "aria-hidden": "true" }, glyph) : null, label),
     );
-  const switchLabel = config.mode === "local" ? "Switch" : "Log out";
+  const switchLabel = config.mode === "local" ? "Switch character" : "Log out";
   mount(topnav,
-    h("span", { class: "sections" }, links()),
     // Inside Discord you're always yourself: logging out would just log you back in.
     inActivity ? null : h("button", { type: "button", class: "link", onclick: signOut }, switchLabel),
   );
