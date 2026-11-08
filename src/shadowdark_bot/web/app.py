@@ -15,7 +15,9 @@ keeping SQLite calls off the event loop the Discord gateway shares.
 """
 
 import ipaddress
+import time
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -96,6 +98,7 @@ NOT_A_MEMBER = (
 )
 LOCAL_ONLY = "The local sheet is only available on the home network."
 DM_ONLY = "Only a Dungeon Master can edit someone else's character."
+DM_CACHE_SECONDS = 60  # how long a role answer is reused
 DM_ONLY_LIBRARY = "Only a Dungeon Master can change the bestiary and the effects library."
 
 # Headers a reverse proxy adds. Seeing any of them in local mode means someone
@@ -193,7 +196,22 @@ def create_app(
     async def _rule_failed(_: Request, err: CharacterError) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(err)})
 
-    def current_user(request: Request) -> SessionUser:
+    dm_cache: dict[str, tuple[float, bool]] = {}
+
+    async def is_dm_now(user_id: str) -> bool:
+        """Does the user hold a DM role right now? Asked at login and again on
+        each request (cached briefly), so giving or removing the role takes
+        effect without logging in again."""
+        if has_dm_role is None:
+            return False
+        hit = dm_cache.get(user_id)
+        if hit is not None and time.monotonic() - hit[0] < DM_CACHE_SECONDS:
+            return hit[1]
+        answer = await has_dm_role(user_id)
+        dm_cache[user_id] = (time.monotonic(), answer)
+        return answer
+
+    async def current_user(request: Request) -> SessionUser:
         header = request.headers.get("authorization", "")
         scheme, _, token = header.partition(" ")
         user = signer.verify(token) if scheme.lower() == "bearer" and token else None
@@ -203,6 +221,8 @@ def create_app(
                 detail="Not logged in.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        if has_dm_role is not None:
+            user = replace(user, is_dm=await is_dm_now(user.user_id))
         return user
 
     User = Annotated[SessionUser, Depends(current_user)]
@@ -271,7 +291,7 @@ def create_app(
                 raise HTTPException(status_code=401, detail=str(err)) from err
             if not await is_allowed_member(discord_user.id):
                 raise HTTPException(status_code=403, detail=NOT_A_MEMBER)
-            is_dm = has_dm_role is not None and await has_dm_role(discord_user.id)
+            is_dm = await is_dm_now(discord_user.id)
             return SessionOut(
                 token=signer.issue(
                     discord_user.id, discord_user.display_name, is_dm=is_dm
@@ -299,7 +319,7 @@ def create_app(
             the home network is the trust boundary. Async for the DM role
             check (the bot's loop); the DB read goes to a worker thread."""
             name = await run_in_threadpool(_character_name, body.user_id)
-            is_dm = has_dm_role is not None and await has_dm_role(body.user_id)
+            is_dm = await is_dm_now(body.user_id)
             return SessionOut(
                 token=signer.issue(body.user_id, name, is_dm=is_dm),
                 expires_in=signer.ttl_seconds,
