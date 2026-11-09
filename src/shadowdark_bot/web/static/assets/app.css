@@ -406,18 +406,62 @@ button.primary:hover { filter: brightness(1.08); }
 body.signed-in .bottomnav { display: grid; }
 body.signed-in main { padding-bottom: calc(60px + var(--safe-bottom) + 16px); }
 
-/* The embedded drawing uses the available screen; its canvas owns pan and zoom. */
-body.map-view main { max-width: none; }
+/* The map owns the space left between the app chrome and the bottom tabs. */
+body.map-view {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+body.map-view .topbar { flex: none; }
+body.map-view main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: calc(60px + var(--safe-bottom) + 8px);
+}
 .map-head { display: flex; justify-content: space-between; align-items: end; gap: 12px; }
 .map-head h1 { margin-top: 4px; }
+.map-actions { display: flex; gap: 8px; flex: none; }
 .map-canvas {
   width: 100%;
-  height: min(70dvh, 780px);
-  min-height: 320px;
+  flex: 1 1 auto;
+  min-height: 0;
   background: #eceae4;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
+}
+body.map-expanded .map-canvas {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  width: 100dvw;
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+}
+body.map-expanded .map-head {
+  position: fixed;
+  z-index: 31;
+  top: max(8px, var(--safe-top));
+  right: 8px;
+  margin: 0;
+}
+body.map-expanded .map-head > :first-child { display: none; }
+body.map-expanded .map-actions { gap: 8px; }
+body.map-expanded .map-actions button {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+@media (max-height: 480px) {
+  body.map-view .page-meta { display: none; }
 }
 
 /* Desktop: the same tab bar, centered to the content column instead of stretched. */
