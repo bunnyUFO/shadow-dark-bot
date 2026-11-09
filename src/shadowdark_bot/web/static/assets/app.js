@@ -23,7 +23,7 @@ import { renderCreature, renderCreatures } from "./creatures.js";
 import { editOpts } from "./edit.js";
 import { renderEffects } from "./effects.js";
 import { renderGuild, renderItems, renderSpells } from "./library.js";
-import { renderMap, renderMapsList } from "./maps.js?v=20261109-map-fit";
+import { renderMap, renderMapsList } from "./maps.js?v=20261109-map-overlay";
 import { pageHead, sheetBody, sheetHeader, subtitle, TABS } from "./sheet.js";
 
 const app = document.getElementById("app");
