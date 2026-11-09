@@ -21,12 +21,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import select
+from starlette.concurrency import run_in_threadpool
 
 from shadowdark_bot import storage
 from shadowdark_bot.currency import parse_value_string
@@ -39,7 +39,8 @@ from shadowdark_bot.models import (
     PlayerCharacter,
     Spell,
 )
-from shadowdark_bot.services import catalog, characters, guild as guild_service
+from shadowdark_bot.services import catalog, characters
+from shadowdark_bot.services import guild as guild_service
 from shadowdark_bot.services.characters import CharacterError, CharacterNotFound
 from shadowdark_bot.web import creature_routes, effect_routes
 from shadowdark_bot.web.auth import (
@@ -49,19 +50,19 @@ from shadowdark_bot.web.auth import (
     SessionSigner,
     SessionUser,
 )
+from shadowdark_bot.web.drawcraft import DrawcraftView
 from shadowdark_bot.web.schemas import (
-    CatalogItemIn,
-    CatalogItemPatch,
-    CatalogItemOut,
-    CharacterSheetOut,
+    BorrowIn,
     BuyIn,
-    WearIn,
     CarryIn,
+    CatalogItemIn,
+    CatalogItemOut,
+    CatalogItemPatch,
+    CharacterSheetOut,
+    CharacterSummaryOut,
     EditStackIn,
     EffectIn,
     EffectPatchIn,
-    SpellLostIn,
-    CharacterSummaryOut,
     GiveIn,
     GiveTargetOut,
     GoldIn,
@@ -71,17 +72,18 @@ from shadowdark_bot.web.schemas import (
     LocationIn,
     ProficienciesIn,
     SkillsIn,
+    SpellLostIn,
     SpellOut,
     StatsIn,
     StoreIn,
-    XpIn,
     TakeIn,
     UserOut,
+    WearIn,
+    XpIn,
     catalog_item_out,
     character_sheet,
     character_summary,
     guild_overview,
-    BorrowIn,
     spell_out,
 )
 
@@ -129,6 +131,7 @@ class AuthConfigOut(BaseModel):
     client_id: str | None = None
     redirect_uri: str | None = None
     scopes: list[str] = []
+    maps_enabled: bool = False
 
 
 class MeOut(BaseModel):
@@ -158,6 +161,7 @@ def create_app(
     static_dir: Path | None = STATIC_DIR,
     resolve_name: guild_service.NameResolver | None = None,
     has_dm_role: MembershipCheck | None = None,
+    drawcraft_views: tuple[DrawcraftView, ...] = (),
 ) -> FastAPI:
     if mode == "discord" and (oauth is None or is_allowed_member is None):
         raise ValueError("discord mode needs oauth and is_allowed_member")
@@ -185,6 +189,15 @@ def create_app(
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        if response.headers.get("Content-Type", "").startswith("text/html"):
+            # Discord maps /drawcraft onto this page's own origin. A standalone
+            # browser imports the same viewer from DrawCraft's exact origin.
+            drawcraft = "" if "frame_id" in request.query_params else " https://draw.bunnyufo.net"
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                f"script-src 'self'{drawcraft}; connect-src 'self'{drawcraft}; "
+                "object-src 'none'; base-uri 'self'",
+            )
         # Deliberately no X-Frame-Options: Discord must be able to iframe the app.
         return response
 
@@ -276,6 +289,7 @@ def create_app(
             client_id=oauth.client_id,
             redirect_uri=redirect_uri,
             scopes=list(SCOPES),
+            maps_enabled=bool(drawcraft_views),
         )
 
     if mode == "discord":
@@ -338,6 +352,24 @@ def create_app(
             has_character=has_character,
             is_dm=user.is_dm,
         )
+
+    if mode == "discord":
+        shared_views = {view.id: view for view in drawcraft_views}
+
+        @app.get("/api/maps")
+        def maps(_: User, response: Response) -> list[dict[str, str]]:
+            """Only the explicitly shared drawings, with no view tokens."""
+            response.headers["Cache-Control"] = "no-store"
+            return [{"id": view.id, "title": view.title} for view in drawcraft_views]
+
+        @app.get("/api/maps/{drawing_id}/access")
+        def map_access(drawing_id: str, _: User, response: Response) -> dict[str, str]:
+            """Release one read-only token to a signed-in guild member."""
+            view = shared_views.get(drawing_id)
+            if view is None:
+                raise HTTPException(status_code=404, detail="Map not found.")
+            response.headers["Cache-Control"] = "no-store"
+            return {"id": view.id, "title": view.title, "token": view.token}
 
     @app.get("/api/character")
     def my_character(user: User) -> CharacterSheetOut:

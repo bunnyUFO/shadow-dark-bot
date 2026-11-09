@@ -23,6 +23,7 @@ from shadowdark_bot.dungeon_master import holds_dm_role
 from shadowdark_bot.services.guild import NameResolver
 from shadowdark_bot.web.app import MembershipCheck, create_app
 from shadowdark_bot.web.auth import DiscordOAuth, SessionSigner
+from shadowdark_bot.web.drawcraft import load_drawcraft_views
 
 log = logging.getLogger("shadowdark_bot.web")
 
@@ -132,6 +133,7 @@ def build_public_app(bot: discord.Client, settings: Settings) -> FastAPI:
         public_base_url=settings.PUBLIC_BASE_URL,
         resolve_name=bot_name_resolver(bot, settings.allowed_guild_ids),
         has_dm_role=_dm_role_check(bot, settings),
+        drawcraft_views=load_drawcraft_views(settings.DRAWCRAFT_VIEWS_FILE),
     )
 
 
