@@ -113,6 +113,7 @@ def test_auth_config_exposes_no_secret(api):
         "client_id": "app123",
         "redirect_uri": BASE + "/auth/callback",
         "scopes": ["identify"],
+        "maps_enabled": False,
     }
 
 

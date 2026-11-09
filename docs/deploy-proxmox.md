@@ -92,6 +92,11 @@ pct reboot 200
 
 **6. Discord portal:** follow [Discord Developer Portal](implementation/discord-activity.md#discord-developer-portal).
 
+**7. Optional read-only DrawCraft maps:** follow
+[Shared DrawCraft maps](implementation/discord-activity.md#shared-drawcraft-maps).
+The bot needs a private per-drawing view token file under `data/`, and Discord
+needs the `/drawcraft` URL mapping. The local no-login sheet does not expose maps.
+
 **Memory:** the runtime fits in 512 MB; raise to 1 GB if an in-image frontend build runs out of memory.
 
 **Check:**

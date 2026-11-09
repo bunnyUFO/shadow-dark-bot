@@ -12,6 +12,7 @@
 //   #/creatures[/<id>]      -> the bestiary and a creature's stat block
 //   #/effects[/<id>]        -> the effects library (reached from Spells, Items,
 //                              Creatures and the sheet's Effects card)
+//   #/maps[/<id>]           -> shared, read-only DrawCraft drawings
 //   /auth/callback?code=…   -> Discord redirect login lands here
 //   ?frame_id=…             -> launched as a Discord Activity: log in via the SDK
 
@@ -22,6 +23,7 @@ import { renderCreature, renderCreatures } from "./creatures.js";
 import { editOpts } from "./edit.js";
 import { renderEffects } from "./effects.js";
 import { renderGuild, renderItems, renderSpells } from "./library.js";
+import { renderMap, renderMapsList } from "./maps.js";
 import { pageHead, sheetBody, sheetHeader, subtitle, TABS } from "./sheet.js";
 
 const app = document.getElementById("app");
@@ -37,11 +39,14 @@ const SECTIONS = [
   ["items", "Items", "\u2699"],
   ["spells", "Spells", "\u2726"],
   ["creatures", "Creatures", "\u2620"],
+  ["maps", "Maps", "\u25a7"],
 ];
 const STATE_KEY = "sd.oauth_state";
 
 let config = null; // /api/auth/config
 let me = null; // /api/me
+let mapViewer = null;
+let routeVersion = 0;
 
 // ---------- boot ----------
 
@@ -61,6 +66,10 @@ async function boot() {
 window.addEventListener("hashchange", () => route().catch(showError));
 
 async function route() {
+  const version = ++routeVersion;
+  mapViewer?.destroy();
+  mapViewer = null;
+  document.body.classList.remove("map-view");
   if (!getToken()) {
     renderNav();
     if (config.mode === "local") return renderPicker();
@@ -86,6 +95,21 @@ async function route() {
   if (section === "effects") return renderEffects(app, a ? decodeURIComponent(a) : null, me);
   if (section === "creatures" && a) return renderCreature(app, decodeURIComponent(a), me);
   if (section === "creatures") return renderCreatures(app, me);
+  if (section === "maps" && config.maps_enabled) {
+    document.body.classList.add("map-view");
+    const isCurrent = () => routeVersion === version;
+    try {
+      if (a) {
+        const viewer = await renderMap(app, decodeURIComponent(a), isCurrent);
+        if (isCurrent()) mapViewer = viewer;
+        return;
+      }
+      return await renderMapsList(app, isCurrent);
+    } catch (err) {
+      if (isCurrent()) throw err;
+      return;
+    }
+  }
   return renderMySheet(tabOr(a));
 }
 
@@ -101,7 +125,7 @@ function renderNav(active) {
     return;
   }
   const links = (withIcons) =>
-    SECTIONS.map(([key, label, glyph]) =>
+    SECTIONS.filter(([key]) => key !== "maps" || config.maps_enabled).map(([key, label, glyph]) =>
       h("a", {
         href: key === "sheet" ? "#/sheet/combat" : `#/${key}`,
         class: key === active ? "active" : null,

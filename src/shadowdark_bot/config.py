@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     ALLOWED_GUILD_IDS: str = ""
     # Reverse proxies trusted for X-Forwarded-For / -Proto (comma-separated IPs).
     FORWARDED_ALLOW_IPS: str = "127.0.0.1"
+    # Private JSON list of explicitly shared DrawCraft drawings and their
+    # per-drawing read-only view tokens. Use /app/data/... in Docker.
+    DRAWCRAFT_VIEWS_FILE: str = ""
 
     # --- Dungeon Masters: may edit every character's sheet in the web apps. ---
     # Comma-separated Discord role IDs; whoever holds one is a DM (local and

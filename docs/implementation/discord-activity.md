@@ -197,6 +197,7 @@ Follows the existing homelab pattern (see `proxmox-bunnylink/reverse-proxy.md`):
   then save. Only Web (desktop and browser) is on by default; without this, phones show
   *"Failed to Launch Activity — This Activity is not currently available on this OS"*.
 - URL Mappings → `/` → `shadowdark.bunnyufo.net`.
+- To show DrawCraft maps, add a second URL mapping: `/drawcraft` → `draw.bunnyufo.net`.
 - OAuth2 → add redirect `https://shadowdark.bunnyufo.net/auth/callback` (standalone login);
   copy the client secret into `.env` as `DISCORD_CLIENT_SECRET`.
 - App Testers → invite each player.
@@ -204,8 +205,49 @@ Follows the existing homelab pattern (see `proxmox-bunnylink/reverse-proxy.md`):
 
 New `.env` keys (see `.env.example`): `WEB_ENABLED`, `WEB_PORT`, `PUBLIC_BASE_URL`,
 `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `SESSION_SECRET` (≥ 32 chars), `SESSION_TTL_HOURS`,
-`ALLOWED_GUILD_IDS`, `FORWARDED_ALLOW_IPS`, and optionally `DM_ROLE_IDS`. The web app is off by default; with
-`WEB_ENABLED=true` the bot refuses to start until the required ones are set.
+`ALLOWED_GUILD_IDS`, `FORWARDED_ALLOW_IPS`, and optionally `DM_ROLE_IDS` and
+`DRAWCRAFT_VIEWS_FILE`. The web app is off by default; with `WEB_ENABLED=true`
+the bot refuses to start until the required ones are set.
+
+### Shared DrawCraft maps
+
+The Maps tab is optional. It appears in the public web app and Activity when
+`DRAWCRAFT_VIEWS_FILE` points to a private JSON file. The local, no-login web
+app never serves DrawCraft view tokens. Each token is a **read-only view link**
+for one drawing, created in DrawCraft's library; never use its main app token.
+
+On the bot host, create `data/drawcraft-views.json` with mode `0600`. Its shape is:
+
+```json
+[
+  {"id": "00000000-0000-0000-0000-000000000000", "title": "Illmyre", "token": "paste-the-drawing-view-token-here"}
+]
+```
+
+The example ID and token are placeholders. Use the drawing's actual UUID and
+the token from **View link for Discord** in DrawCraft. Set
+`DRAWCRAFT_VIEWS_FILE=/app/data/drawcraft-views.json` in the bot's `.env`, then
+restart the bot container. The existing `./data:/app/data` volume carries the
+file. Keep it out of Git, Beads, Workspace cards, screenshots and logs. Remove
+an entry to withdraw it from the bot; revoke its token in DrawCraft to stop
+anyone who already received it from using it.
+
+The signed-in `/api/maps` endpoint lists titles and IDs only. The separate
+`/api/maps/<id>/access` endpoint returns one token with `Cache-Control:
+no-store` to a Discord-authenticated guild member. The viewer keeps it in
+memory and sends it as `Authorization: Bearer` to DrawCraft's view and image
+read routes. No map token appears in a URL or browser storage. A member who
+receives a view token can use it directly until it is revoked, so only share
+maps intended for every member allowed into this app.
+
+For the standalone web page at `https://shadowdark.bunnyufo.net/#/maps`, set
+DrawCraft's `DRAWCRAFT_VIEW_ORIGINS=https://shadowdark.bunnyufo.net` and confirm
+the viewer modules and read routes return `Access-Control-Allow-Origin` for
+that exact origin. No wildcard or cookies are needed. The Activity loads the
+same modules through its `/drawcraft` mapping; keep the host's content security
+policy narrow: web `script-src` and `connect-src` include
+`https://draw.bunnyufo.net`, while Activity resources remain same-origin.
+Neither origin should allow unsafe eval.
 
 ## Phases
 
