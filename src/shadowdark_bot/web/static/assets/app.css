@@ -412,6 +412,7 @@ body.map-detail {
   display: flex;
   flex-direction: column;
   height: 100dvh;
+  min-height: 100dvh;
   overflow: hidden;
 }
 body.map-detail .topbar { flex: none; }
