@@ -105,3 +105,10 @@ def test_web_and_activity_html_have_scoped_viewer_csp():
     assert "script-src 'self'; connect-src 'self'" in activity
     assert "draw.bunnyufo.net" not in activity
     assert "unsafe-inline" not in web + activity
+
+
+def test_static_assets_revalidate_after_deploy():
+    client, _ = _client(static_dir=STATIC_DIR)
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    assert client.get("/assets/app.css").headers["cache-control"] == "no-cache"
+    assert client.get("/assets/maps.js").headers["cache-control"] == "no-cache"

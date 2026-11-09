@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
+from starlette.types import Scope
 
 from shadowdark_bot import storage
 from shadowdark_bot.currency import parse_value_string
@@ -93,6 +94,15 @@ AuthMode = Literal["discord", "local"]
 MembershipCheck = Callable[[str], Awaitable[bool]]
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+class RevalidatingStaticFiles(StaticFiles):
+    """Avoid stale scripts in Discord's embedded browser after a deploy."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 NOT_A_MEMBER = (
     "This sheet is only for members of our Discord servers. "
@@ -787,7 +797,7 @@ def create_app(
 
     if static_dir is not None and (static_dir / "index.html").is_file():
         index = static_dir / "index.html"
-        app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+        app.mount("/assets", RevalidatingStaticFiles(directory=static_dir / "assets"), name="assets")
 
         @app.get("/{path:path}", include_in_schema=False)
         def spa(path: str) -> FileResponse:
