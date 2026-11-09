@@ -33,14 +33,15 @@ export async function renderMap(app, id, isCurrent) {
   const host = h("div", { class: "map-canvas", "aria-label": access.title });
   const fit = h("button", { type: "button", disabled: true }, "Fit map");
   const expand = h("button", { type: "button", disabled: true, "aria-pressed": "false" }, "Full screen");
+  const head = h("header", { class: "page-head map-head" },
+    h("div", {}, h("a", { href: "#/maps" }, "← All maps"), h("h1", {}, access.title)),
+    h("div", { class: "map-actions" }, fit, expand));
   mount(app,
-    h("header", { class: "page-head map-head" },
-      h("div", {}, h("a", { href: "#/maps" }, "← All maps"), h("h1", {}, access.title)),
-      h("div", { class: "map-actions" }, fit, expand)),
+    head,
     host,
     h("p", { class: "page-meta" }, "Drag to pan. Scroll or pinch to zoom."),
   );
-  const { mountViewer } = await import(`${base}/web/viewer.js`);
+  const { mountViewer } = await import(`${base}/web/viewer.js?v=20261109-image-fit`);
   if (!isCurrent()) return null;
   const viewer = await mountViewer(host, {
     url: `${base}/api/drawings/${id}/view`,
@@ -52,12 +53,21 @@ export async function renderMap(app, id, isCurrent) {
   }
   fit.disabled = false;
   expand.disabled = false;
-  fit.addEventListener("click", () => viewer.fit());
+  const fitMap = () => {
+    if (!isCurrent()) return;
+    if (document.body.classList.contains("map-expanded")) {
+      return viewer.fit({ top: head.getBoundingClientRect().bottom + 8 });
+    }
+    const nav = document.getElementById("bottomnav");
+    viewer.fit({ top: head.getBoundingClientRect().height + 8,
+      bottom: (nav?.getBoundingClientRect().height ?? 0) + 8 });
+  };
+  fit.addEventListener("click", fitMap);
   const setExpanded = (expanded) => {
     document.body.classList.toggle("map-expanded", expanded);
     expand.textContent = expanded ? "Exit full screen" : "Full screen";
     expand.setAttribute("aria-pressed", String(expanded));
-    requestAnimationFrame(() => { if (isCurrent()) viewer.fit(); });
+    requestAnimationFrame(fitMap);
   };
   expand.addEventListener("click", () => setExpanded(!document.body.classList.contains("map-expanded")));
   const onKeyDown = (event) => {
@@ -70,6 +80,6 @@ export async function renderMap(app, id, isCurrent) {
     document.body.classList.remove("map-expanded");
     destroy();
   };
-  requestAnimationFrame(() => { if (isCurrent()) viewer.fit(); });
+  requestAnimationFrame(fitMap);
   return viewer;
 }

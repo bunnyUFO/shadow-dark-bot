@@ -406,7 +406,7 @@ button.primary:hover { filter: brightness(1.08); }
 body.signed-in .bottomnav { display: grid; }
 body.signed-in main { padding-bottom: calc(60px + var(--safe-bottom) + 16px); }
 
-/* The map owns the space left between the app chrome and the bottom tabs. */
+/* The map fills the space below the app chrome; its controls float over the canvas. */
 body.map-view main { max-width: none; }
 body.map-detail {
   display: flex;
@@ -417,27 +417,52 @@ body.map-detail {
 }
 body.map-detail .topbar { flex: none; }
 body.map-detail main {
-  display: flex;
+  position: relative;
+  display: block;
   flex: 1 1 auto;
-  flex-direction: column;
   width: 100%;
   max-width: none;
   min-height: 0;
   overflow: hidden;
-  padding-bottom: calc(60px + var(--safe-bottom) + 8px);
+  padding: 0;
 }
-.map-head { display: flex; justify-content: space-between; align-items: end; gap: 12px; }
-.map-head h1 { margin-top: 4px; }
+.map-head {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 8px 16px;
+  background: rgba(12, 12, 13, 0.78);
+  backdrop-filter: blur(8px);
+}
+.map-head > :first-child { min-width: 0; }
+.map-head h1 { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map-actions { display: flex; gap: 8px; flex: none; }
 .map-canvas {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  flex: 1 1 auto;
-  min-height: 0;
+  height: 100%;
   background: #eceae4;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
   overflow: hidden;
 }
+body.map-detail .page-meta {
+  position: absolute;
+  z-index: 2;
+  left: 12px;
+  bottom: calc(72px + var(--safe-bottom));
+  margin: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(12, 12, 13, 0.72);
+}
+body.map-detail .bottomnav { background: rgba(22, 22, 24, 0.86); backdrop-filter: blur(8px); }
 body.map-expanded .map-canvas {
   position: fixed;
   z-index: 30;
@@ -452,7 +477,10 @@ body.map-expanded .map-head {
   z-index: 31;
   top: max(8px, var(--safe-top));
   right: 8px;
+  left: auto;
   margin: 0;
+  padding: 0;
+  background: none;
 }
 body.map-expanded .map-head > :first-child { display: none; }
 body.map-expanded .map-actions { gap: 8px; }
@@ -463,6 +491,13 @@ body.map-expanded .map-actions button {
   padding: 4px 8px;
 }
 @media (max-height: 480px) {
+  body.map-detail .page-meta { display: none; }
+}
+@media (max-width: 540px) {
+  .map-head { padding: 6px 12px; }
+  .map-head h1 { font-size: 1.25rem; }
+  .map-actions { gap: 4px; }
+  .map-actions button { padding: 4px 6px; font-size: 0.8rem; }
   body.map-detail .page-meta { display: none; }
 }
 
