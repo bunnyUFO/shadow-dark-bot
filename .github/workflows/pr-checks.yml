@@ -1,0 +1,28 @@
+name: PR checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  map-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check shared map JavaScript
+        run: |
+          node --check src/shadowdark_bot/web/static/assets/app.js
+          node --check src/shadowdark_bot/web/static/assets/maps.js
+      - name: Install map test dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Test map access
+        run: python -m pytest tests/test_drawcraft_maps.py -q

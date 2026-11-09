@@ -32,9 +32,11 @@ export async function renderMap(app, id, isCurrent) {
   const base = inActivity ? "/drawcraft" : DRAWCRAFT;
   const host = h("div", { class: "map-canvas", "aria-label": access.title });
   const fit = h("button", { type: "button", disabled: true }, "Fit map");
+  const expand = h("button", { type: "button", disabled: true, "aria-pressed": "false" }, "Full screen");
   mount(app,
     h("header", { class: "page-head map-head" },
-      h("div", {}, h("a", { href: "#/maps" }, "← All maps"), h("h1", {}, access.title)), fit),
+      h("div", {}, h("a", { href: "#/maps" }, "← All maps"), h("h1", {}, access.title)),
+      h("div", { class: "map-actions" }, fit, expand)),
     host,
     h("p", { class: "page-meta" }, "Drag to pan. Scroll or pinch to zoom."),
   );
@@ -49,6 +51,25 @@ export async function renderMap(app, id, isCurrent) {
     return null;
   }
   fit.disabled = false;
+  expand.disabled = false;
   fit.addEventListener("click", () => viewer.fit());
+  const setExpanded = (expanded) => {
+    document.body.classList.toggle("map-expanded", expanded);
+    expand.textContent = expanded ? "Exit full screen" : "Full screen";
+    expand.setAttribute("aria-pressed", String(expanded));
+    requestAnimationFrame(() => { if (isCurrent()) viewer.fit(); });
+  };
+  expand.addEventListener("click", () => setExpanded(!document.body.classList.contains("map-expanded")));
+  const onKeyDown = (event) => {
+    if (event.key === "Escape" && document.body.classList.contains("map-expanded")) setExpanded(false);
+  };
+  document.addEventListener("keydown", onKeyDown);
+  const destroy = viewer.destroy.bind(viewer);
+  viewer.destroy = () => {
+    document.removeEventListener("keydown", onKeyDown);
+    document.body.classList.remove("map-expanded");
+    destroy();
+  };
+  requestAnimationFrame(() => { if (isCurrent()) viewer.fit(); });
   return viewer;
 }
