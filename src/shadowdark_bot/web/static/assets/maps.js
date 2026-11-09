@@ -41,7 +41,9 @@ export async function renderMap(app, id, isCurrent) {
     host,
     h("p", { class: "page-meta" }, "Drag to pan. Scroll or pinch to zoom."),
   );
-  const { mountViewer } = await import(`${base}/web/viewer.js?v=20261109-image-fit`);
+  // DrawCraft's public module bypass accepts the exact path, without a query.
+  // It sends Cache-Control: no-cache, so reloads revalidate the module.
+  const { mountViewer } = await import(`${base}/web/viewer.js`);
   if (!isCurrent()) return null;
   const viewer = await mountViewer(host, {
     url: `${base}/api/drawings/${id}/view`,
