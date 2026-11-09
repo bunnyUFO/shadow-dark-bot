@@ -407,14 +407,15 @@ body.signed-in .bottomnav { display: grid; }
 body.signed-in main { padding-bottom: calc(60px + var(--safe-bottom) + 16px); }
 
 /* The map owns the space left between the app chrome and the bottom tabs. */
-body.map-view {
+body.map-view main { max-width: none; }
+body.map-detail {
   display: flex;
   flex-direction: column;
   height: 100dvh;
   overflow: hidden;
 }
-body.map-view .topbar { flex: none; }
-body.map-view main {
+body.map-detail .topbar { flex: none; }
+body.map-detail main {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -461,7 +462,7 @@ body.map-expanded .map-actions button {
   padding: 4px 8px;
 }
 @media (max-height: 480px) {
-  body.map-view .page-meta { display: none; }
+  body.map-detail .page-meta { display: none; }
 }
 
 /* Desktop: the same tab bar, centered to the content column instead of stretched. */

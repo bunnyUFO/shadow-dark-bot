@@ -70,6 +70,7 @@ async function route() {
   mapViewer?.destroy();
   mapViewer = null;
   document.body.classList.remove("map-view");
+  document.body.classList.remove("map-detail");
   if (!getToken()) {
     renderNav();
     if (config.mode === "local") return renderPicker();
@@ -100,6 +101,7 @@ async function route() {
     const isCurrent = () => routeVersion === version;
     try {
       if (a) {
+        document.body.classList.add("map-detail");
         const viewer = await renderMap(app, decodeURIComponent(a), isCurrent);
         if (isCurrent()) mapViewer = viewer;
         return;
