@@ -55,7 +55,9 @@ export async function renderMap(app, id, isCurrent) {
   expand.disabled = false;
   const fitMap = () => {
     if (!isCurrent()) return;
-    if (document.body.classList.contains("map-expanded")) return viewer.fit();
+    if (document.body.classList.contains("map-expanded")) {
+      return viewer.fit({ top: head.getBoundingClientRect().bottom + 8 });
+    }
     const nav = document.getElementById("bottomnav");
     viewer.fit({ top: head.getBoundingClientRect().height + 8,
       bottom: (nav?.getBoundingClientRect().height ?? 0) + 8 });
