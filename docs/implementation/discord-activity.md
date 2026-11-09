@@ -229,8 +229,8 @@ the token from **View link for Discord** in DrawCraft. Set
 `DRAWCRAFT_VIEWS_FILE=/app/data/drawcraft-views.json` in the bot's `.env`, then
 restart the bot container. The existing `./data:/app/data` volume carries the
 file. Keep it out of Git, Beads, Workspace cards, screenshots and logs. Remove
-an entry to withdraw it from the bot; revoke its token in DrawCraft to stop
-anyone who already received it from using it.
+an entry and restart the bot to stop issuing it; revoke its token in DrawCraft
+to stop anyone who already received it from using it.
 
 The signed-in `/api/maps` endpoint lists titles and IDs only. The separate
 `/api/maps/<id>/access` endpoint returns one token with `Cache-Control:
