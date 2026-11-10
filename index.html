@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shadowdark Bot</title>
-  <meta name="description" content="A Discord bot for Shadowdark RPG guilds: character sheets, shared loot, magic items, coins, spells and creatures, in slash commands and a Discord Activity.">
+  <meta name="description" content="A Discord bot for Shadowdark RPG guilds: character sheets, shared loot, spells, creatures and read-only maps in a web app and Discord Activity.">
   <meta name="theme-color" content="#0c0c0d">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230c0c0d'/%3E%3Cpath d='M32 10c6 9 13 14 13 24a13 13 0 0 1-26 0c0-6 3-9 6-13 1 5 3 7 6 8-2-7-1-13 1-19z' fill='%23f0a541'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
@@ -71,7 +71,7 @@
         <div>
           <div class="eyebrow">A Discord bot for Shadowdark RPG guilds</div>
           <h1>Your table's <em>sheets, loot</em> and <em>lore</em>, inside Discord.</h1>
-          <p class="lead">Shadowdark Bot keeps every player's character sheet and the guild's shared stuff in one place: the stash, the coffers, the magic item treasury, the spell list and the creatures you've met. Use it with slash commands in any channel, or open the full sheet as a Discord Activity.</p>
+          <p class="lead">Shadowdark Bot keeps character sheets, guild storage, coffers, spells, creatures and selected maps in one place. Use its slash commands or open the web app and Discord Activity.</p>
           <div class="cta">
             <a class="btn primary" href="#setup">Set it up</a>
             <a class="btn" href="#commands">Commands</a>
@@ -85,7 +85,7 @@
       </div>
 
       <div class="features">
-        <a class="feature" href="#act-sheet"><h4><span class="ico">&#9876;</span>Character sheets</h4><p>Stats, abilities, spells, effects, gold and gear slots for every player, editable by the owner.</p></a>
+        <a class="feature" href="#act-sheet"><h4><span class="ico">&#9876;</span>Character sheets</h4><p>Stats, spells, gold, gear slots and worn armor for each player.</p></a>
         <a class="feature" href="#act-guild"><h4><span class="ico">&#8962;</span>Guild storage</h4><p>Shared stashes with gear-slot capacity. Anyone can donate, and anyone with a character can take.</p></a>
         <a class="feature" href="#cmd-treasury"><h4><span class="ico">&#10022;</span>Magic item treasury</h4><p>Magic items are borrowed and returned, never given away. Everyone can see who has what.</p></a>
         <a class="feature" href="#cmd-coffers"><h4><span class="ico">&#9673;</span>Coffers &amp; catalog</h4><p>One shared purse in gp/sp/cp and an item catalog to buy from, priced the way you set it.</p></a>
@@ -327,14 +327,14 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
     <section class="page" id="activity">
       <div class="eyebrow">Activity</div>
       <h2>Your game, inside Discord</h2>
-      <p class="lead">Start the Activity from Discord's App Launcher or open the same app as a website. Sign in with Discord to reach your character, the guild's shared information and its maps. On phones, the sections move to a tab bar at the bottom.</p>
+      <p class="lead">Start the Activity from Discord's App Launcher or open the same app as a website. Sign in with Discord to reach your character, the guild's shared information and its maps. The bottom bar keeps each section within reach on desktop and phone.</p>
       <div class="cards thumbs">
         <a class="card-link" href="#act-sheet"><img src="img/sheet-combat.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Character sheet</h4><p>Combat, Inventory and Roleplaying tabs.</p></a>
         <a class="card-link" href="#act-party"><img src="img/party.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Party</h4><p>Everyone's characters, read-only.</p></a>
         <a class="card-link" href="#act-guild"><img src="img/guild.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Guild</h4><p>Coffers, storage and the treasury.</p></a>
-        <a class="card-link" href="#act-items"><img src="img/items.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Items</h4><p>The catalog, and buying from it.</p></a>
+        <a class="card-link" href="#act-items"><img src="img/purchasable-item.png" width="1000" height="1436" loading="lazy" alt=""><h4>Items</h4><p>Find gear and buy items marked for sale.</p></a>
         <a class="card-link" href="#act-spells"><img src="img/spells.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Spells</h4><p>The full spell reference.</p></a>
-        <a class="card-link" href="#act-creatures"><img src="img/creature.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Creatures</h4><p>The bestiary and the effects library.</p></a>
+        <a class="card-link" href="#act-creatures"><img src="img/creature-kinds.png" width="1000" height="889" loading="lazy" alt=""><h4>Creatures</h4><p>Filter the bestiary by kind and tag.</p></a>
         <a class="card-link" href="#act-maps"><img src="img/map-example.svg" width="1200" height="720" loading="lazy" alt="Illustrated sample map with hexes, a river, hills and a village."><h4>Maps</h4><p>Pan and zoom through drawings shared with this game.</p></a>
         <a class="card-link" href="#act-dm"><img src="img/dm-sheet.webp" width="2048" height="1440" loading="lazy" alt=""><h4>DM mode <span class="dm-badge">DM</span></h4><p>Edit any player's sheet.</p></a>
       </div>
@@ -347,18 +347,18 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
       <ul class="plain">
         <li><strong>Combat:</strong>
           <ul class="plain">
-            <li>HP, AC (base + DEX), level and spellcasting, with an XP bar and a <strong>+XP</strong> button.</li>
+            <li>HP, AC (base + DEX + magic bonuses from worn armor and shields), level and spellcasting, with an XP bar and a <strong>+XP</strong> button.</li>
             <li>The six abilities and your proficiencies.</li>
             <li><strong>Spells:</strong> tick a spell off when it's lost, then <strong>Rest</strong> to get them back. <strong>Learn</strong> and <strong>Forget</strong> spells here too.</li>
             <li><strong>Effects:</strong> things like <em>Light</em> or <em>Bless</em>, with round boxes to tick down.</li>
           </ul>
         </li>
-        <li><strong>Inventory:</strong> gold, the items you carry (max(10, STR) gear slots) and your 10-slot stash. Open an item to <strong>Stash</strong>/<strong>Take</strong> it, <strong>Give</strong> it to someone, <strong>Drop</strong> it or <strong>Edit</strong> it.</li>
+        <li><strong>Inventory:</strong> gold, the items you carry (max(10, STR) gear slots) and your 10-slot stash. Open an item to move, give, drop or edit it. Wear carried armor or a shield to count its magic bonus toward AC; taking it off removes that bonus.</li>
         <li><strong>Roleplaying:</strong> background, languages, talents and anything else worth remembering.</li>
       </ul>
       <figure class="shot"><img src="img/sheet-spells.webp" width="2048" height="1440" loading="lazy" alt="Combat tab scrolled to Effects and Spells, with tick boxes and Rest and Learn buttons."><figcaption>Spells and effects on the Combat tab.</figcaption></figure>
       <div class="pair">
-        <figure class="shot"><img src="img/sheet-inventory.webp" width="2048" height="1440" loading="lazy" alt="Inventory tab with gold, carried items and a gear-slot bar."><figcaption>Inventory: gold, gear slots and the stash.</figcaption></figure>
+        <figure class="shot"><picture><source media="(max-width: 700px)" srcset="img/worn-armor-phone.png"><img src="img/worn-armor.png" width="1000" height="1253" loading="lazy" alt="Inventory with a worn shield, its magic bonus, carried items and a private stash."></picture><figcaption>Inventory: the worn shield adds its magic bonus to AC.</figcaption></figure>
         <figure class="shot"><img src="img/sheet-roleplaying.webp" width="2048" height="1440" loading="lazy" alt="Roleplaying tab with background, languages and talents."><figcaption>Roleplaying: who your character is.</figcaption></figure>
       </div>
     </section>
@@ -388,8 +388,8 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
     <section class="page" id="act-items">
       <div class="eyebrow">Activity</div>
       <h2>Items</h2>
-      <p class="lead">The guild's catalog, with a search box and a type filter. <strong>Buy</strong> an item with your own gold or the guild coffers, and put it in your gear, your stash or a guild location. An item that causes an effect, like a potion, links to it.</p>
-      <figure class="shot"><img src="img/items.webp" width="2048" height="1440" loading="lazy" alt="Item catalog with search, type filter and prices."><figcaption>The item catalog.</figcaption></figure>
+      <p class="lead">Search the guild's catalog or filter by item type. Items marked <strong>For sale</strong> can be bought with your own gold or the guild coffers and placed in a character's gear, stash or guild location. Magic +1 to +3 weapons and armor are found or added, not bought. An item that causes an effect, like a potion, links to it.</p>
+      <figure class="shot"><picture><source media="(max-width: 700px)" srcset="img/purchasable-item-phone.png"><img src="img/purchasable-item.png" width="1000" height="1436" loading="lazy" alt="Item catalog with a Dagger marked For sale, a Buy button and magic bonus choices."></picture><figcaption>The catalog shows which items are for sale.</figcaption></figure>
     </section>
 
     <section class="page" id="act-spells">
@@ -402,14 +402,14 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
     <section class="page" id="act-creatures">
       <div class="eyebrow">Activity</div>
       <h2>Creatures</h2>
-      <p class="lead">A bestiary of what the party has met. Each creature has a Shadowdark-style stat block: AC, HP, level, attacks, movement, alignment and ability modifiers. Anything you haven't found out yet shows as <strong>?</strong>.</p>
-      <p>Log each <strong>encounter</strong> with its date, session, place and what happened. Anyone can add, edit or delete.</p>
+      <p class="lead">The bestiary holds creatures the party knows about. Search by name, kind or tag. Each entry shows the stats the group knows; unset stats stay hidden. A named creature can link to a creature type and inherit its stats.</p>
+      <p>Everyone can read creature details and encounter notes. Dungeon Masters add or change creatures, effects and encounters.</p>
       <div class="pair">
-        <figure class="shot"><img src="img/creatures.webp" width="2048" height="1440" loading="lazy" alt="Searchable list of creatures."><figcaption>Every creature you've met.</figcaption></figure>
-        <figure class="shot"><img src="img/creature.webp" width="2048" height="1440" loading="lazy" alt="A creature's stat block with unknown stats shown as question marks."><figcaption>A stat block, with unknowns as ?.</figcaption></figure>
+        <figure class="shot"><picture><source media="(max-width: 700px)" srcset="img/creature-kinds-phone.png"><img src="img/creature-kinds.png" width="1000" height="889" loading="lazy" alt="Creature list with kind and tag filters, known stats and encounter counts."></picture><figcaption>Filter by kind or tag and see what the party knows.</figcaption></figure>
+        <figure class="shot"><picture><source media="(max-width: 700px)" srcset="img/creature-type-phone.png"><img src="img/creature-type.png" width="1000" height="883" loading="lazy" alt="Named goblin with stats and abilities inherited from its creature type."></picture><figcaption>A named creature can inherit stats from its type.</figcaption></figure>
       </div>
       <h3>The effects library</h3>
-      <p>It sits alongside the bestiary and holds reusable effects with a duration and stat changes, each linked to the items, spells and creatures that cause it. <strong>Apply</strong> one to yourself or a party member and it lands on their Combat tab.</p>
+      <p>It sits alongside the bestiary and holds reusable effects with a duration and stat changes, each linked to the items, spells and creatures that cause it. <strong>Apply</strong> one to yourself or a party member and it lands on their Combat tab. Dungeon Masters maintain the library.</p>
       <figure class="shot"><img src="img/effects.webp" width="2048" height="1440" loading="lazy" alt="Effects library with linked items, spells and creatures."><figcaption>The effects library.</figcaption></figure>
     </section>
 
@@ -430,7 +430,7 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
       <ul class="plain">
         <li><strong>In the Activity and on the website:</strong> open a player from <strong>Party</strong> to get their whole sheet, stash included, with every edit button. A banner says whose sheet you're editing. The home-network sheet works the same way once you've picked your own character.</li>
         <li><strong>In Discord:</strong> <code>/character sheet member:@player</code> opens that player's interactive sheet for you. Anyone else who tries is politely refused.</li>
-        <li>DMs can change anything on an existing character, including deleting it. They can't create a character for someone who hasn't made one.</li>
+        <li>DMs can change anything on an existing character, including deleting it. They can't create a character for someone who hasn't made one. They also maintain creatures and the effects library.</li>
       </ul>
       <div class="pair">
         <figure class="shot"><img src="img/dm-party.webp" width="2048" height="1440" loading="lazy" alt="Party page reminding a DM they can edit any character."><figcaption>Party, as a Dungeon Master.</figcaption></figure>
