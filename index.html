@@ -54,6 +54,7 @@
           <li><a href="#act-items">Items</a></li>
           <li><a href="#act-spells">Spells</a></li>
           <li><a href="#act-creatures">Creatures</a></li>
+          <li><a href="#act-maps">Maps</a></li>
           <li><a href="#act-dm">DM mode</a></li>
         </ol>
       </li>
@@ -89,6 +90,7 @@
         <a class="feature" href="#cmd-treasury"><h4><span class="ico">&#10022;</span>Magic item treasury</h4><p>Magic items are borrowed and returned, never given away. Everyone can see who has what.</p></a>
         <a class="feature" href="#cmd-coffers"><h4><span class="ico">&#9673;</span>Coffers &amp; catalog</h4><p>One shared purse in gp/sp/cp and an item catalog to buy from, priced the way you set it.</p></a>
         <a class="feature" href="#act-creatures"><h4><span class="ico">&#9760;</span>Spells &amp; creatures</h4><p>The full Shadowdark spell reference, plus a bestiary of what the party has met and when.</p></a>
+        <a class="feature" href="#act-maps"><h4><span class="ico">&#9706;</span>Maps</h4><p>Explore maps chosen for the game. Pan, zoom and fit a full drawing in the Activity or web app.</p></a>
         <a class="feature" href="#act-dm"><h4><span class="ico">&#9733;</span>Dungeon Master mode</h4><p>Whoever holds your DM role can open and edit any player's sheet.</p></a>
       </div>
     </section>
@@ -324,8 +326,8 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
     <!-- ================= ACTIVITY ================= -->
     <section class="page" id="activity">
       <div class="eyebrow">Activity</div>
-      <h2>The full sheet, inside Discord</h2>
-      <p class="lead">Start the Activity from Discord's App Launcher in any channel, or open the same sheet as a website in your browser. It signs you in with Discord, so you always land on your own character. On phones the sections move to a tab bar at the bottom.</p>
+      <h2>Your game, inside Discord</h2>
+      <p class="lead">Start the Activity from Discord's App Launcher or open the same app as a website. Sign in with Discord to reach your character, the guild's shared information and its maps. On phones, the sections move to a tab bar at the bottom.</p>
       <div class="cards thumbs">
         <a class="card-link" href="#act-sheet"><img src="img/sheet-combat.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Character sheet</h4><p>Combat, Inventory and Roleplaying tabs.</p></a>
         <a class="card-link" href="#act-party"><img src="img/party.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Party</h4><p>Everyone's characters, read-only.</p></a>
@@ -333,6 +335,7 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
         <a class="card-link" href="#act-items"><img src="img/items.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Items</h4><p>The catalog, and buying from it.</p></a>
         <a class="card-link" href="#act-spells"><img src="img/spells.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Spells</h4><p>The full spell reference.</p></a>
         <a class="card-link" href="#act-creatures"><img src="img/creature.webp" width="2048" height="1440" loading="lazy" alt=""><h4>Creatures</h4><p>The bestiary and the effects library.</p></a>
+        <a class="card-link" href="#act-maps"><img src="img/map-example.svg" width="1200" height="720" loading="lazy" alt="Illustrated sample map with hexes, a river, hills and a village."><h4>Maps</h4><p>Pan and zoom through drawings shared with this game.</p></a>
         <a class="card-link" href="#act-dm"><img src="img/dm-sheet.webp" width="2048" height="1440" loading="lazy" alt=""><h4>DM mode <span class="dm-badge">DM</span></h4><p>Edit any player's sheet.</p></a>
       </div>
     </section>
@@ -408,6 +411,16 @@ python -m shadowdark_bot.dev --reset --dm 900000000000000001</code></pre>
       <h3>The effects library</h3>
       <p>It sits alongside the bestiary and holds reusable effects with a duration and stat changes, each linked to the items, spells and creatures that cause it. <strong>Apply</strong> one to yourself or a party member and it lands on their Combat tab.</p>
       <figure class="shot"><img src="img/effects.webp" width="2048" height="1440" loading="lazy" alt="Effects library with linked items, spells and creatures."><figcaption>The effects library.</figcaption></figure>
+    </section>
+
+    <section class="page" id="act-maps">
+      <div class="eyebrow">Activity</div>
+      <h2>Maps</h2>
+      <p class="lead">Open a map selected for this game in the web app or Discord Activity. Drag to pan, scroll or pinch to zoom, and use <strong>Fit map</strong> to see the whole drawing, including its backing image.</p>
+      <p>The map fills the space beneath the app header. The map controls sit over it, and the bottom navigation stays within reach. On a phone, the viewer uses the same gestures.</p>
+      <figure class="shot"><img src="img/map-example.svg" width="1200" height="720" loading="lazy" alt="Illustrated sample map with hexes, a river, hills and a village."><figcaption>Example map layout. This illustration does not show a player's drawing.</figcaption></figure>
+      <p>Maps are read-only here. The game gets access to selected drawings through separate view links; it cannot open the rest of the DrawCraft library or edit a drawing. The owner makes changes in <a href="https://draw.bunnyufo.net">DrawCraft</a>.</p>
+      <div class="callout"><p><strong>For self-hosters:</strong> maps need a separate DrawCraft server and a view link for each drawing. In Discord's URL Mappings, map <code>/drawcraft</code> to that server. This mapping is an address for the Activity, not a <code>/drawcraft</code> slash command.</p></div>
     </section>
 
     <section class="page" id="act-dm">

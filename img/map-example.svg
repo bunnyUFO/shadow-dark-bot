@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Example game map</title>
+  <desc id="desc">An illustrated sample map with hexes, a river, hills and a village. This is sample art, not a player drawing.</desc>
+  <defs>
+    <pattern id="paper" width="48" height="48" patternUnits="userSpaceOnUse"><rect width="48" height="48" fill="#77775d"/><path d="M0 42h48M22 0v48" stroke="#6d6e54" stroke-width="1" opacity=".35"/></pattern>
+    <pattern id="hex" width="220" height="190" patternUnits="userSpaceOnUse"><path d="M55 2h110l54 93-54 93H55L1 95Z" fill="none" stroke="#393c35" stroke-width="5" stroke-dasharray="3 12" stroke-linecap="round"/></pattern>
+  </defs>
+  <rect width="1200" height="720" fill="#222322"/>
+  <rect x="28" y="28" width="1144" height="664" rx="24" fill="url(#paper)"/>
+  <rect x="28" y="28" width="1144" height="664" rx="24" fill="url(#hex)"/>
+  <path d="M110 90c130 60 180 110 205 168s42 120 120 152 135 20 191 70 122 113 205 95 177-65 260-31" fill="none" stroke="#a7b8ad" stroke-width="53" opacity=".7"/>
+  <path d="M110 90c130 60 180 110 205 168s42 120 120 152 135 20 191 70 122 113 205 95 177-65 260-31" fill="none" stroke="#505c56" stroke-width="5" stroke-dasharray="12 14"/>
+  <g fill="#515442" stroke="#30372d" stroke-width="6" stroke-linejoin="round">
+    <path d="m174 328 78-126 76 126Z"/><path d="m281 322 79-147 90 147Z"/><path d="m760 280 71-119 77 119Z"/><path d="m854 287 68-100 74 100Z"/>
+  </g>
+  <g stroke="#e2d0a5" stroke-width="8" fill="#7b463a" stroke-linejoin="round"><path d="M635 304v-57l39-25 39 25v57Z"/><path d="M725 316v-46l31-21 31 21v46Z"/><path d="m623 248 50-43 51 43" fill="none"/></g>
+  <g fill="#f5ecd5" font-family="Georgia,serif" text-anchor="middle"><text x="703" y="367" font-size="46">Village</text><text x="311" y="385" font-size="38">West hills</text><text x="922" y="350" font-size="38">Old road</text></g>
+  <rect x="43" y="44" width="365" height="55" rx="10" fill="#141716" opacity=".82"/>
+  <text x="64" y="81" fill="#f5ecd5" font-family="system-ui,sans-serif" font-size="25">Example map · sample art</text>
+</svg>
