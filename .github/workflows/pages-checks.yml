@@ -39,6 +39,8 @@ jobs:
                       self.links.append(values['href'][1:])
                   if tag == 'img':
                       self.images.append(values.get('src', ''))
+                  if tag == 'source' and values.get('srcset'):
+                      self.images.extend(item.strip().split(' ')[0] for item in values['srcset'].split(','))
 
           page = Page()
           page.feed(Path('index.html').read_text(encoding='utf-8'))
