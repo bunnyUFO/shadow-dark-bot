@@ -1,0 +1,51 @@
+name: Pages checks
+
+on:
+  pull_request:
+    branches: [gh-pages]
+    paths:
+      - index.html
+      - style.css
+      - img/**
+      - .github/workflows/pages-checks.yml
+
+permissions:
+  contents: read
+
+jobs:
+  links-and-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check page links and images
+        run: |
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          class Page(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.ids = set()
+                  self.links = []
+                  self.images = []
+
+              def handle_starttag(self, tag, attrs):
+                  values = dict(attrs)
+                  if values.get('id'):
+                      self.ids.add(values['id'])
+                  if tag == 'a' and values.get('href', '').startswith('#'):
+                      self.links.append(values['href'][1:])
+                  if tag == 'img':
+                      self.images.append(values.get('src', ''))
+
+          page = Page()
+          page.feed(Path('index.html').read_text(encoding='utf-8'))
+          missing_links = sorted(set(page.links) - page.ids)
+          missing_images = sorted(src for src in page.images if not Path(src).is_file())
+          assert not missing_links, f'Missing sections: {missing_links}'
+          assert not missing_images, f'Missing images: {missing_images}'
+          assert 'act-maps' in page.ids, 'Maps page missing'
+          print(f'Checked {len(page.links)} section links and {len(page.images)} images')
+          PY
